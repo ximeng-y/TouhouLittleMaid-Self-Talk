@@ -1,6 +1,7 @@
 package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.ai.agent.context.GameContextRegister;
+import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.HistoryMessagesCheck;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.UserPromptContexts;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
@@ -88,6 +89,18 @@ public final class MaidSelfTalkService {
         }
         if (messages.isEmpty()) {
             // 双保险：设定为空走 TLM 会自动生成人设，此处直接放弃本次触发
+            return false;
+        }
+
+        // 与玩家 chat 同构（TLM tryToChat 发送前调用 HistoryMessagesCheck.checkMessages）：
+        // 清洗历史中未配对的 tool 消息。自话路径不经 TLM 的 chat 流程，
+        // 若历史裁剪后残留孤立 tool 消息，直接发送会被 LLM 服务端以 HTTP 400 拒绝
+        // （Messages with role 'tool' must be a response to a preceding message with 'tool_calls'）
+        try {
+            HistoryMessagesCheck.checkMessages(messages);
+        } catch (Throwable t) {
+            // 清洗失败（如 TLM 版本不兼容）时放弃本次触发，绝不向上抛
+            MaidSelfTalkMod.LOGGER.warn("HistoryMessagesCheck failed, self-talk skipped", t);
             return false;
         }
 
