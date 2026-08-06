@@ -91,7 +91,7 @@ public final class SelfTalkHandler {
             if (loginTick != null && gameTime - loginTick <= Config.WELCOME_WINDOW_TICKS.get()) {
                 state.welcomedPlayers.add(ownerUuid);
                 boolean triggered = MaidSelfTalkService.triggerSelfTalk(maid, true,
-                        Config.STATE1_KEEP_SELF_TALK_COUNT.get());
+                        Config.STATE1_KEEP_SELF_TALK_COUNT.get(), Config.STATE1_PLAYER_RANGE.get());
                 if (triggered) {
                     applyCooldown(state, gameTime,
                             Config.STATE1_MIN_INTERVAL.get(), Config.STATE1_MAX_INTERVAL.get());
@@ -119,7 +119,7 @@ public final class SelfTalkHandler {
                 return;
             }
             boolean triggered = MaidSelfTalkService.triggerSelfTalk(maid, false,
-                    Config.STATE1_KEEP_SELF_TALK_COUNT.get());
+                    Config.STATE1_KEEP_SELF_TALK_COUNT.get(), Config.STATE1_PLAYER_RANGE.get());
             if (triggered) {
                 applyCooldown(state, gameTime,
                         Config.STATE1_MIN_INTERVAL.get(), Config.STATE1_MAX_INTERVAL.get());
@@ -133,7 +133,7 @@ public final class SelfTalkHandler {
                 return;
             }
             boolean triggered = MaidSelfTalkService.triggerSelfTalk(maid, false,
-                    Config.STATE2_KEEP_SELF_TALK_COUNT.get());
+                    Config.STATE2_KEEP_SELF_TALK_COUNT.get(), Config.STATE2_PLAYER_RANGE.get());
             if (triggered) {
                 applyCooldown(state, gameTime,
                         Config.STATE2_MIN_INTERVAL.get(), Config.STATE2_MAX_INTERVAL.get());

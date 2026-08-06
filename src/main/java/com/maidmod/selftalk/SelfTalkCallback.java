@@ -5,6 +5,10 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatMana
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.response.ResponseChat;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.common.NeoForge;
 
 import java.net.http.HttpRequest;
@@ -30,12 +34,15 @@ public class SelfTalkCallback extends LLMCallback {
     private final boolean welcome;
     /** 自话窗口保留条数上限（触发遗忘的阈值），由触发方按当前态传入 */
     private final int keepSelfTalkCount;
+    /** 聊天框广播半径（格）：范围内存活玩家可见自话内容 */
+    private final double broadcastRange;
 
     public SelfTalkCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
-                            boolean welcome, int keepSelfTalkCount) {
+                            boolean welcome, int keepSelfTalkCount, double broadcastRange) {
         super(chatManager, messages);
         this.welcome = welcome;
         this.keepSelfTalkCount = keepSelfTalkCount;
+        this.broadcastRange = broadcastRange;
         // 模型看不到工具定义，天然不会调用任何 tool
         this.needAddTools = false;
     }
@@ -48,6 +55,7 @@ public class SelfTalkCallback extends LLMCallback {
         Runnable finish = () -> {
             NeoForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, responseChat.getChatText(), welcome));
             MaidSelfTalkService.onSelfTalkFinished(maid, this);
+            broadcastToNearby(maid, responseChat.getChatText());
         };
         if (isOnServerThread()) {
             finish.run();
@@ -61,6 +69,25 @@ public class SelfTalkCallback extends LLMCallback {
     public void onFailure(HttpRequest request, Throwable throwable, int errorCode) {
         super.onFailure(request, throwable, errorCode);
         runOnServerThread(() -> SelfTalkState.get(getMaid().getId()).selfTalkPending = false);
+    }
+
+    /**
+     * 自话内容广播到附近玩家的聊天框，格式与原版聊天一致：{@code <女仆名> 内容}。
+     * 只在服务端主线程调用。
+     */
+    private void broadcastToNearby(EntityMaid maid, String chatText) {
+        if (!(maid.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        Component message = Component.literal("<")
+                .append(maid.getDisplayName())
+                .append("> ")
+                .append(chatText);
+        AABB box = maid.getBoundingBox().inflate(broadcastRange);
+        for (ServerPlayer player : serverLevel.getEntitiesOfClass(ServerPlayer.class, box,
+                p -> p.isAlive() && !p.isSpectator())) {
+            player.sendSystemMessage(message);
+        }
     }
 
     public boolean isWelcome() {

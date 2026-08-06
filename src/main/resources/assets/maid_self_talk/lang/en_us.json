@@ -45,5 +45,10 @@
   "config.maid_self_talk.screen.player_settings.title": "Self-Talk Settings",
   "config.maid_self_talk.screen.player_settings.maid": "Maid: %s",
   "config.maid_self_talk.screen.player_settings.value": "Enable Self-Talk: %s",
-  "config.maid_self_talk.screen.player_settings.admin_disabled": "Disabled by server admin"
+  "config.maid_self_talk.screen.player_settings.admin_disabled": "Disabled by server admin",
+
+  "commands.maid_self_talk.test_self_talk.no_maid": "No maid found (specify a maid, or run near one)",
+  "commands.maid_self_talk.test_self_talk.busy": "This maid is in an ongoing chat, try again later",
+  "commands.maid_self_talk.test_self_talk.triggered": "Triggered self-talk for %s",
+  "commands.maid_self_talk.test_self_talk.failed": "Failed to trigger: AI disabled, no LLM site, or maid has no persona"
 }

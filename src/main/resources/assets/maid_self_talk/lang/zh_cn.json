@@ -45,5 +45,10 @@
   "config.maid_self_talk.screen.player_settings.title": "自话设置",
   "config.maid_self_talk.screen.player_settings.maid": "女仆：%s",
   "config.maid_self_talk.screen.player_settings.value": "触发自言自语：%s",
-  "config.maid_self_talk.screen.player_settings.admin_disabled": "管理员已关闭玩家设置"
+  "config.maid_self_talk.screen.player_settings.admin_disabled": "管理员已关闭玩家设置",
+
+  "commands.maid_self_talk.test_self_talk.no_maid": "未找到可用的女仆（请指定女仆，或站在女仆附近执行）",
+  "commands.maid_self_talk.test_self_talk.busy": "该女仆正在进行对话，请稍后再试",
+  "commands.maid_self_talk.test_self_talk.triggered": "已触发 %s 的自言自语",
+  "commands.maid_self_talk.test_self_talk.failed": "触发失败：AI 未启用、未配置站点或女仆无人设"
 }

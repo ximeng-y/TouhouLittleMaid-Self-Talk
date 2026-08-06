@@ -43,12 +43,13 @@ public final class MaidSelfTalkService {
     /**
      * 触发一次自话/欢迎。
      *
-     * @param maid    女仆
-     * @param welcome 是否为欢迎语（欢迎语视为一次自话，同样受保留条数控制）
-     * @param keep    当前态的自言自语保留上下文条数
+     * @param maid          女仆
+     * @param welcome       是否为欢迎语（欢迎语视为一次自话，同样受保留条数控制）
+     * @param keep          当前态的自言自语保留上下文条数
+     * @param broadcastRange 聊天框广播半径（格）
      * @return 是否实际发起（前置检查未通过时为 false）
      */
-    public static boolean triggerSelfTalk(EntityMaid maid, boolean welcome, int keep) {
+    public static boolean triggerSelfTalk(EntityMaid maid, boolean welcome, int keep, double broadcastRange) {
         MaidAIChatManager chatManager = maid.getAiChatManager();
         if (chatManager == null) {
             return false;
@@ -85,7 +86,7 @@ public final class MaidSelfTalkService {
         SelfTalkState.get(maid.getId()).selfTalkPending = true;
 
         LLMClient client = site.client();
-        client.chat(new SelfTalkCallback(chatManager, messages, welcome, keep));
+        client.chat(new SelfTalkCallback(chatManager, messages, welcome, keep, broadcastRange));
         return true;
     }
 
