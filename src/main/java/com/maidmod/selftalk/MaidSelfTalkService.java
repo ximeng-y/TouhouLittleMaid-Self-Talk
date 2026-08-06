@@ -71,8 +71,16 @@ public final class MaidSelfTalkService {
         }
 
         // 组装与玩家 chat 同构的消息前缀
-        List<LLMMessage> messages = ((MaidAIChatManagerAccessor) (Object) chatManager)
-                .invokeGetMessages(chatManager, chatManager.getChatLanguage());
+        List<LLMMessage> messages;
+        try {
+            messages = ((MaidAIChatManagerAccessor) (Object) chatManager)
+                    .invokeGetMessages(chatManager, chatManager.getChatLanguage());
+        } catch (Throwable t) {
+            // accessor 未注册或 TLM 版本不兼容时的兜底：放弃本次触发，绝不向上抛
+            // （调用方可能处于实体 tick 路径，异常会导致女仆被崩溃恢复机制移除）
+            MaidSelfTalkMod.LOGGER.error("Failed to invoke MaidAIChatManager.getMessages, self-talk skipped", t);
+            return false;
+        }
         if (messages.isEmpty()) {
             // 双保险：设定为空走 TLM 会自动生成人设，此处直接放弃本次触发
             return false;

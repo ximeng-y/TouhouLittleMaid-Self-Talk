@@ -44,7 +44,17 @@ public final class SelfTalkHandler {
     @SubscribeEvent
     public static void onMaidTick(MaidTickEvent event) {
         EntityMaid maid = event.getMaid();
-        // 注意：绝不取消该事件（取消会中断女仆自身的 tick 逻辑）
+        // 注意：绝不取消该事件（取消会中断女仆自身的 tick 逻辑）。
+        // 同时本方法绝不能向外抛异常——MaidTickEvent 的异常会导致实体 tick 崩溃，
+        // 整合包/服务端的实体崩溃恢复机制会直接移除女仆实体。
+        try {
+            tick(maid);
+        } catch (Throwable t) {
+            MaidSelfTalkMod.LOGGER.error("SelfTalkHandler tick error for maid {}", maid.getId(), t);
+        }
+    }
+
+    private static void tick(EntityMaid maid) {
         if (!Config.ENABLED.get()) {
             return;
         }
