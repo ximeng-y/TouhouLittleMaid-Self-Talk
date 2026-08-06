@@ -7,7 +7,7 @@ group = 'com.maidmod'
 version = '1.0.0'
 
 base {
-    archivesName = 'maid_self_talk'
+    archivesName = 'tlm-self-talk'
 }
 
 java {
@@ -54,9 +54,9 @@ neoForge {
 tasks.named('jar') {
     manifest {
         attributes([
-                'Specification-Title'   : 'maid_self_talk',
+                'Specification-Title'   : 'tlm-self-talk',
                 'Specification-Version' : '1.0.0',
-                'Implementation-Title'  : 'Maid Self-Talk',
+                'Implementation-Title'  : 'TLM Self-Talk',
                 'Implementation-Version': '1.0.0',
         ])
     }
