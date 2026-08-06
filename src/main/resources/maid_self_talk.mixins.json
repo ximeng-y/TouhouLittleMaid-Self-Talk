@@ -5,8 +5,7 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "MaidAIChatManagerMixin",
-    "LLMCallbackMixin",
-    "AIChatCommandMixin"
+    "LLMCallbackMixin"
   ],
   "client": [
     "AIChatScreenMixin"
