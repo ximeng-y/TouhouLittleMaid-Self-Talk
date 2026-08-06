@@ -49,6 +49,8 @@ public class SelfTalkCallback extends LLMCallback {
 
     @Override
     public void onSuccess(ResponseChat responseChat) {
+        // 埋点日志：定位"聊天框消息重复"问题（一次响应应当只执行一次 onSuccess）
+        MaidSelfTalkMod.LOGGER.info("SELF-TALK response: maid={} welcome={}", getMaid().getId(), welcome);
         // TLM 默认行为：写 assistant 历史（供聊天记录 UI 显示）、显示气泡/TTS
         super.onSuccess(responseChat);
         EntityMaid maid = getMaid();
@@ -86,6 +88,8 @@ public class SelfTalkCallback extends LLMCallback {
         AABB box = maid.getBoundingBox().inflate(broadcastRange);
         for (ServerPlayer player : serverLevel.getEntitiesOfClass(ServerPlayer.class, box,
                 p -> p.isAlive() && !p.isSpectator())) {
+            // 埋点日志：定位"聊天框消息重复"问题（每个玩家应当只收到一条）
+            MaidSelfTalkMod.LOGGER.info("SELF-TALK broadcast: maid={} -> player={}", maid.getId(), player.getScoreboardName());
             player.sendSystemMessage(message);
         }
     }
