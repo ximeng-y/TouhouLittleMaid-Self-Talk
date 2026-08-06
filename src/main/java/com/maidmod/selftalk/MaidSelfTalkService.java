@@ -106,9 +106,6 @@ public final class MaidSelfTalkService {
         SelfTalkState.get(maid.getId()).selfTalkPending = true;
 
         LLMClient client = site.client();
-        // 埋点日志：定位"聊天框消息重复"问题（一次触发应当只有一次 chat 请求）
-        MaidSelfTalkMod.LOGGER.info("SELF-TALK trigger: maid={} welcome={} pending={}",
-                maid.getId(), welcome, SelfTalkState.get(maid.getId()).selfTalkPending);
         client.chat(new SelfTalkCallback(chatManager, messages, welcome, keep, broadcastRange));
         return true;
     }

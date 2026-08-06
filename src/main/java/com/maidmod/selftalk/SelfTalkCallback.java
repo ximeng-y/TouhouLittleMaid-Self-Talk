@@ -5,6 +5,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatMana
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.response.ResponseChat;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -13,6 +14,7 @@ import net.neoforged.neoforge.common.NeoForge;
 
 import java.net.http.HttpRequest;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 自言自语专用的 LLM 回调。
@@ -49,9 +51,7 @@ public class SelfTalkCallback extends LLMCallback {
 
     @Override
     public void onSuccess(ResponseChat responseChat) {
-        // 埋点日志：定位"聊天框消息重复"问题（一次响应应当只执行一次 onSuccess）
-        MaidSelfTalkMod.LOGGER.info("SELF-TALK response: maid={} welcome={}", getMaid().getId(), welcome);
-        // TLM 默认行为：写 assistant 历史（供聊天记录 UI 显示）、显示气泡/TTS
+        // TLM 默认行为：写 assistant 历史（供聊天记录 UI 显示）、显示气泡并给主人发送聊天栏消息
         super.onSuccess(responseChat);
         EntityMaid maid = getMaid();
         Runnable finish = () -> {
@@ -75,21 +75,25 @@ public class SelfTalkCallback extends LLMCallback {
 
     /**
      * 自话内容广播到附近玩家的聊天框，格式与原版聊天一致：{@code <女仆名> 内容}。
+     * <p>
+     * 注意：TLM 的 {@code ChatBubbleManager.addLLMChatText}（onSuccess 父类逻辑）已会给<b>主人</b>
+     * 发送同格式聊天栏消息，此处跳过主人，只广播给其他附近玩家，避免消息重复。
      * 只在服务端主线程调用。
      */
     private void broadcastToNearby(EntityMaid maid, String chatText) {
         if (!(maid.level() instanceof ServerLevel serverLevel)) {
             return;
         }
+        UUID ownerUuid = maid.getOwnerUUID();
+        // 与 TLM addLLMChatText 相同格式（灰色 <女仆名> 内容）
         Component message = Component.literal("<")
-                .append(maid.getDisplayName())
+                .append(maid.getName())
                 .append("> ")
-                .append(chatText);
+                .append(chatText)
+                .withStyle(ChatFormatting.GRAY);
         AABB box = maid.getBoundingBox().inflate(broadcastRange);
         for (ServerPlayer player : serverLevel.getEntitiesOfClass(ServerPlayer.class, box,
-                p -> p.isAlive() && !p.isSpectator())) {
-            // 埋点日志：定位"聊天框消息重复"问题（每个玩家应当只收到一条）
-            MaidSelfTalkMod.LOGGER.info("SELF-TALK broadcast: maid={} -> player={}", maid.getId(), player.getScoreboardName());
+                p -> p.isAlive() && !p.isSpectator() && !p.getUUID().equals(ownerUuid))) {
             player.sendSystemMessage(message);
         }
     }
