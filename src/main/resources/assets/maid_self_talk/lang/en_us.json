@@ -46,5 +46,7 @@
   "commands.maid_self_talk.test_self_talk.triggered": "Triggered self-talk for %s",
   "commands.maid_self_talk.test_self_talk.failed": "Failed to trigger: AI disabled, no LLM site, or maid has no persona",
   "config.maid_self_talk.prompt.self_talk_owner_nearby": "Self-Talk Prompt (owner nearby)",
-  "config.maid_self_talk.prompt.self_talk_owner_nearby.tooltip": "Self-talk prompt used when the owner is nearby (within 16 blocks). Same rules as the other one."
+  "config.maid_self_talk.prompt.self_talk_owner_nearby.tooltip": "Self-talk prompt used when the owner is nearby (within 16 blocks). Same rules as the other one.",
+  "config.maid_self_talk.prompt.language": "Self-Talk Language",
+  "config.maid_self_talk.prompt.language.tooltip": "Output language of self-talk (language tag, e.g. zh_cn / en_us). TLM official model personas are mostly English; without an explicit language instruction the maid may answer in English."
 }

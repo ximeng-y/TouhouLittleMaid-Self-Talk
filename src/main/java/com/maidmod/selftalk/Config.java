@@ -48,6 +48,8 @@ public final class Config {
     public static ModConfigSpec.ConfigValue<String> SELF_TALK_PROMPT_OWNER_NEARBY;
     /** 欢迎语提示词 */
     public static ModConfigSpec.ConfigValue<String> WELCOME_PROMPT;
+    /** 自话输出语言（TLM 官方模型设定多为英文，需要显式声明输出语言） */
+    public static ModConfigSpec.ConfigValue<String> SELF_TALK_LANGUAGE;
 
     public static final ModConfigSpec SPEC;
 
@@ -133,6 +135,11 @@ public final class Config {
                         2. 可以提到主人的名字，也可以不提，按你们的关系来。
                         3. 不要重复你之前说过的话。
                         4. 直接输出你要说的话本身，不要任何解释、标注、括号说明。""");
+        SELF_TALK_LANGUAGE = builder.comment("""
+                自话输出语言（语言标签，如 zh_cn / en_us）。
+                注意：TLM 官方模型的人设设定多为英文，若不显式声明语言，女仆自话可能输出英文。
+                此配置会：1) 作为设定占位符的替换语言；2) 向自话提示词注入对应语言的输出指令。""")
+                .define("selfTalkLanguage", "zh_cn");
         builder.pop();
 
         SPEC = builder.build();

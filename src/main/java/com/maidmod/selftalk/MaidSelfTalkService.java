@@ -70,11 +70,16 @@ public final class MaidSelfTalkService {
             return false;
         }
 
-        // 组装与玩家 chat 同构的消息前缀
+        // 自话语言：优先女仆已记录的聊天语言（玩家 chat 过则为客户端语言，保证上下文前缀缓存一致），
+        // 否则用配置默认（TLM 官方模型设定多为英文，配置默认 zh_cn 保证中文输出）
+        String selfTalkLanguage = StringUtils.isBlank(chatManager.chatLanguage)
+                ? Config.SELF_TALK_LANGUAGE.get() : chatManager.chatLanguage;
+
+        // 组装与玩家 chat 同构的消息前缀（语言影响设定占位符的替换）
         List<LLMMessage> messages;
         try {
             messages = ((MaidAIChatManagerAccessor) (Object) chatManager)
-                    .invokeGetMessages(chatManager, chatManager.getChatLanguage());
+                    .invokeGetMessages(chatManager, selfTalkLanguage);
         } catch (Throwable t) {
             // accessor 未注册或 TLM 版本不兼容时的兜底：放弃本次触发，绝不向上抛
             // （调用方可能处于实体 tick 路径，异常会导致女仆被崩溃恢复机制移除）
@@ -91,7 +96,7 @@ public final class MaidSelfTalkService {
         boolean ownerNearby = isOwnerNearby(maid);
         String prompt = welcome ? Config.WELCOME_PROMPT.get()
                 : (ownerNearby ? Config.SELF_TALK_PROMPT_OWNER_NEARBY.get() : Config.SELF_TALK_PROMPT.get());
-        prompt = prompt + buildRandomContext(maid, ownerNearby);
+        prompt = prompt + languageInstruction(selfTalkLanguage) + buildRandomContext(maid, ownerNearby);
 
         // 与玩家 chat 相同的 context 注入，保证消息结构与缓存前缀一致
         String message = UserPromptContexts.addContext(maid, prompt);
@@ -184,5 +189,17 @@ public final class MaidSelfTalkService {
     private static boolean isOwnerNearby(EntityMaid maid) {
         var owner = maid.getOwner();
         return owner != null && maid.distanceToSqr(owner) <= OWNER_NEARBY_RANGE * OWNER_NEARBY_RANGE;
+    }
+
+    /**
+     * 按配置语言生成输出语言指令，追加到提示词中。
+     * TLM 官方模型人设设定多为英文，若不显式声明语言，模型可能跟随英文设定输出英文。
+     */
+    private static String languageInstruction(String language) {
+        return switch (language) {
+            case "zh_cn", "zh" -> "\n\n请始终用简体中文说话。";
+            case "en_us", "en" -> "\n\nPlease always speak in English.";
+            default -> "\n\n请始终用%s说话。".formatted(language);
+        };
     }
 }

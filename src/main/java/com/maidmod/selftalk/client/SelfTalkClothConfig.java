@@ -101,6 +101,12 @@ public final class SelfTalkClothConfig {
                 .setTooltip(Component.translatable("config.maid_self_talk.prompt.welcome.tooltip"))
                 .setSaveConsumer(v -> Config.WELCOME_PROMPT.set(v))
                 .build());
+        prompt.add(entryBuilder.startStrField(
+                        Component.translatable("config.maid_self_talk.prompt.language"),
+                        Config.SELF_TALK_LANGUAGE.get())
+                .setTooltip(Component.translatable("config.maid_self_talk.prompt.language.tooltip"))
+                .setSaveConsumer(v -> Config.SELF_TALK_LANGUAGE.set(v))
+                .build());
         main.add(prompt.build());
 
         globalAi.addEntry(main.build());
@@ -120,14 +126,16 @@ public final class SelfTalkClothConfig {
                 .setTooltip(Component.translatable(key + ".enabled.tooltip"))
                 .setSaveConsumer(v -> saveBool(enabled, v))
                 .build());
-        builder.add(entryBuilder.startIntSlider(Component.translatable(key + ".min_interval"),
-                        minInterval.get(), 10, 86400)
+        builder.add(entryBuilder.startIntField(Component.translatable(key + ".min_interval"),
+                        minInterval.get())
+                .setMin(10).setMax(86400)
                 .setDefaultValue(60)
                 .setTooltip(Component.translatable(key + ".min_interval.tooltip"))
                 .setSaveConsumer(v -> saveInt(minInterval, v))
                 .build());
-        builder.add(entryBuilder.startIntSlider(Component.translatable(key + ".max_interval"),
-                        maxInterval.get(), 10, 86400)
+        builder.add(entryBuilder.startIntField(Component.translatable(key + ".max_interval"),
+                        maxInterval.get())
+                .setMin(10).setMax(86400)
                 .setDefaultValue(300)
                 .setTooltip(Component.translatable(key + ".max_interval.tooltip"))
                 .setSaveConsumer(v -> saveInt(maxInterval, v))

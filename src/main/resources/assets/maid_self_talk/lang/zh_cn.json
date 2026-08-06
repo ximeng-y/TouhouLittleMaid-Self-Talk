@@ -46,5 +46,7 @@
   "commands.maid_self_talk.test_self_talk.triggered": "已触发 %s 的自言自语",
   "commands.maid_self_talk.test_self_talk.failed": "触发失败：AI 未启用、未配置站点或女仆无人设",
   "config.maid_self_talk.prompt.self_talk_owner_nearby": "自言自语提示词（主人在身边）",
-  "config.maid_self_talk.prompt.self_talk_owner_nearby.tooltip": "主人在身边（16 格内）时使用的自言自语提示词，规则同另一条。"
+  "config.maid_self_talk.prompt.self_talk_owner_nearby.tooltip": "主人在身边（16 格内）时使用的自言自语提示词，规则同另一条。",
+  "config.maid_self_talk.prompt.language": "自话输出语言",
+  "config.maid_self_talk.prompt.language.tooltip": "自话输出语言（语言标签，如 zh_cn / en_us）。TLM 官方模型人设多为英文，若不显式声明语言，女仆自话可能输出英文。"
 }
