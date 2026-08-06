@@ -27,6 +27,9 @@ repositories {
 dependencies {
     // 东方小女仆（TLM）1.5.3 NeoForge 1.21.1，核心依赖
     implementation 'maven.modrinth:touhou-little-maid:1.5.3-neoforge+mc1.21.1'
+    // Cloth Config（仅编译期：客户端配置界面类引用其 API；
+    // 运行时通过反射注册，未安装 cloth-config 时配置界面自动禁用，不影响模组功能）
+    compileOnly 'maven.modrinth:cloth-config:15.0.140+neoforge'
 }
 
 neoForge {

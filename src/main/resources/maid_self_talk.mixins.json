@@ -7,6 +7,9 @@
     "MaidAIChatManagerMixin",
     "LLMCallbackMixin"
   ],
+  "client": [
+    "AIChatScreenMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   }

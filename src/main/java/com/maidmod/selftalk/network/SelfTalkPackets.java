@@ -3,18 +3,19 @@ package com.maidmod.selftalk.network;
 import com.maidmod.selftalk.Config;
 import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.SelfTalkAttachments;
+import com.maidmod.selftalk.client.SelfTalkPlayerSettingsClient;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 /**
  * 玩家自话设置网络包注册与处理。
+ * <p>
+ * 由主类通过 {@code modEventBus.addListener(SelfTalkPackets::register)} 手动注册。
  */
-@EventBusSubscriber(modid = MaidSelfTalkMod.MODID, bus = EventBusSubscriber.Bus.MOD)
 public final class SelfTalkPackets {
 
     private SelfTalkPackets() {

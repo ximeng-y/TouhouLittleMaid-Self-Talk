@@ -14,7 +14,6 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 
@@ -67,7 +66,7 @@ public final class MaidSelfTalkService {
         }
 
         // 组装与玩家 chat 同构的消息前缀
-        List<LLMMessage> messages = ((MaidAIChatManagerAccessor) chatManager)
+        List<LLMMessage> messages = ((MaidAIChatManagerAccessor) (Object) chatManager)
                 .invokeGetMessages(chatManager, chatManager.getChatLanguage());
         if (messages.isEmpty()) {
             // 双保险：设定为空走 TLM 会自动生成人设，此处直接放弃本次触发
@@ -135,14 +134,15 @@ public final class MaidSelfTalkService {
      * 随机纳入 1~3 类游戏情境信息，拼为提示词尾段。
      */
     private static String buildRandomContext(EntityMaid maid) {
-        List<String> categories = new ArrayList<>(CONTEXT_CATEGORIES);
-        Collections.shuffle(categories, maid.getRandom());
+        List<String> pool = new ArrayList<>(CONTEXT_CATEGORIES);
         int count = 1 + maid.getRandom().nextInt(3);
-        count = Math.min(count, categories.size());
+        count = Math.min(count, pool.size());
 
         List<String> parts = new ArrayList<>();
         for (int i = 0; i < count; i++) {
-            List<String> values = GameContextRegister.getContext(categories.get(i), maid);
+            // 从剩余分类中随机抽取一个（RandomSource 非 java.util.Random，手写抽取）
+            String category = pool.remove(maid.getRandom().nextInt(pool.size()));
+            List<String> values = GameContextRegister.getContext(category, maid);
             if (!values.isEmpty()) {
                 parts.add(String.join("；", values));
             }

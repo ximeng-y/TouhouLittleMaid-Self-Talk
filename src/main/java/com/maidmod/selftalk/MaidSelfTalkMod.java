@@ -6,10 +6,11 @@ import net.neoforged.fml.ModLoadingContext;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.loading.FMLEnvironment;
-import net.neoforged.fml.loading.mixin.DeferredMixinConfigRegistration;
 import net.neoforged.neoforge.common.NeoForge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.maidmod.selftalk.network.SelfTalkPackets;
 
 /**
  * 女仆 AI 自言自语与互相对话（重写版）入口。
@@ -22,7 +23,7 @@ public class MaidSelfTalkMod {
 
     public MaidSelfTalkMod(IEventBus modEventBus) {
         // COMMON 配置（服务端权威）
-        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, Config.SPEC);
+        ModLoadingContext.get().getActiveContainer().registerConfig(ModConfig.Type.COMMON, Config.SPEC);
         // 玩家独立设置附件
         SelfTalkAttachments.ATTACHMENT_TYPES.register(modEventBus);
         // 网络包
@@ -30,10 +31,9 @@ public class MaidSelfTalkMod {
         // 服务端状态机
         NeoForge.EVENT_BUS.register(SelfTalkHandler.class);
 
-        // 客户端专用 mixin 配置：目标类为客户端类（AIChatScreen），
-        // 必须仅客户端注册，否则服务端加载该 mixin 配置时会因目标类不存在而崩溃
+        // 客户端 Cloth Config 配置界面：通过反射注册（字节码不直接引用 cloth 类，
+        // 未安装 cloth-config 时自动跳过，不影响模组核心功能）
         if (FMLEnvironment.dist.isClient()) {
-            DeferredMixinConfigRegistration.addMixinConfig("maid_self_talk.client.mixins.json");
             registerClothConfigIfPresent();
         }
     }

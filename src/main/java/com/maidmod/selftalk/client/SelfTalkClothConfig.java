@@ -51,11 +51,11 @@ public final class SelfTalkClothConfig {
         globalAi.addEntry(stateCategory(entryBuilder,
                 "config.maid_self_talk.state_owner_online",
                 Config.STATE1_ENABLED, Config.STATE1_MIN_INTERVAL, Config.STATE1_MAX_INTERVAL,
-                Config.STATE1_PLAYER_RANGE, Config.STATE1_KEEP_SELF_TALK_COUNT));
+                Config.STATE1_PLAYER_RANGE, Config.STATE1_KEEP_SELF_TALK_COUNT).build());
         globalAi.addEntry(stateCategory(entryBuilder,
                 "config.maid_self_talk.state_owner_offline",
                 Config.STATE2_ENABLED, Config.STATE2_MIN_INTERVAL, Config.STATE2_MAX_INTERVAL,
-                Config.STATE2_PLAYER_RANGE, Config.STATE2_KEEP_SELF_TALK_COUNT));
+                Config.STATE2_PLAYER_RANGE, Config.STATE2_KEEP_SELF_TALK_COUNT).build());
 
         SubCategoryBuilder welcome = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.welcome"))
@@ -79,13 +79,13 @@ public final class SelfTalkClothConfig {
         SubCategoryBuilder prompt = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.prompt"))
                 .setExpanded(false);
-        prompt.add(entryBuilder.startTextArea(
+        prompt.add(entryBuilder.startTextField(
                         Component.translatable("config.maid_self_talk.prompt.self_talk"),
                         Config.SELF_TALK_PROMPT.get())
                 .setTooltip(Component.translatable("config.maid_self_talk.prompt.self_talk.tooltip"))
                 .setSaveConsumer(v -> Config.SELF_TALK_PROMPT.set(v))
                 .build());
-        prompt.add(entryBuilder.startTextArea(
+        prompt.add(entryBuilder.startTextField(
                         Component.translatable("config.maid_self_talk.prompt.welcome"),
                         Config.WELCOME_PROMPT.get())
                 .setTooltip(Component.translatable("config.maid_self_talk.prompt.welcome.tooltip"))
@@ -120,8 +120,9 @@ public final class SelfTalkClothConfig {
                 .setTooltip(Component.translatable(key + ".max_interval.tooltip"))
                 .setSaveConsumer(v -> saveInt(maxInterval, v))
                 .build());
-        builder.add(entryBuilder.startDoubleSlider(Component.translatable(key + ".player_range"),
-                        range.get(), 1.0, 512.0)
+        builder.add(entryBuilder.startDoubleField(Component.translatable(key + ".player_range"),
+                        range.get())
+                .setMin(1.0).setMax(512.0)
                 .setDefaultValue(16.0)
                 .setTooltip(Component.translatable(key + ".player_range.tooltip"))
                 .setSaveConsumer(v -> saveDouble(range, v))
