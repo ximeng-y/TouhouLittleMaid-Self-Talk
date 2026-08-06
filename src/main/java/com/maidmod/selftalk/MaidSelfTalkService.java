@@ -139,11 +139,33 @@ public final class MaidSelfTalkService {
         }
     }
 
-    /** 玩家发起 chat：窗口重置（计数重新开始，旧自话记录赦免保留在上下文中） */
+    /** 玩家发起 chat：窗口重置（计数重新开始，旧自话记录赦免保留在上下文中），并重新计时自话冷却 */
     public static void onPlayerChatStart(EntityMaid maid) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.playerChatPending = true;
         state.windowSelfTalkMsgs.clear();
+        resetSelfTalkCooldown(maid, state);
+    }
+
+    /**
+     * 自话冷却重新计时（区间随机，与正常触发后一致）。
+     * 玩家对女仆发起 chat 后调用，避免 chat 结束后立刻触发自话。
+     * 区间按当前态取：主人在线用态 1，否则用态 2。
+     */
+    private static void resetSelfTalkCooldown(EntityMaid maid, SelfTalkState.State state) {
+        int minSeconds;
+        int maxSeconds;
+        if (maid.getOwner() != null) {
+            minSeconds = Config.STATE1_MIN_INTERVAL.get();
+            maxSeconds = Config.STATE1_MAX_INTERVAL.get();
+        } else {
+            minSeconds = Config.STATE2_MIN_INTERVAL.get();
+            maxSeconds = Config.STATE2_MAX_INTERVAL.get();
+        }
+        int minTicks = minSeconds * 20;
+        int maxTicks = maxSeconds * 20;
+        long gameTime = maid.level().getGameTime();
+        state.nextTriggerTick = gameTime + minTicks + (int) (Math.random() * (maxTicks - minTicks + 1));
     }
 
     /** 玩家 chat 结束（成功或失败）：解除进行中标记 */
