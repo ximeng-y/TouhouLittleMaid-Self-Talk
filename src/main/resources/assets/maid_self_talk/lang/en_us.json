@@ -4,7 +4,6 @@
   "config.maid_self_talk.enabled.tooltip": "Master switch. Maids will only talk to themselves / greet when enabled.",
   "config.maid_self_talk.player_option_enabled": "Allow Player Settings",
   "config.maid_self_talk.player_option_enabled.tooltip": "Whether players can individually configure if their maids talk to themselves. When off, the player option is greyed out and treated as enabled.",
-
   "config.maid_self_talk.state_owner_online": "State 1: Owner Online",
   "config.maid_self_talk.state_owner_online.enabled": "Enabled",
   "config.maid_self_talk.state_owner_online.enabled.tooltip": "Whether maids talk to themselves while their owner is online.",
@@ -16,7 +15,6 @@
   "config.maid_self_talk.state_owner_online.player_range.tooltip": "Only trigger when there is a player within this radius (blocks).",
   "config.maid_self_talk.state_owner_online.keep_self_talk_count": "Keep Self-Talk Count",
   "config.maid_self_talk.state_owner_online.keep_self_talk_count.tooltip": "How many self-talk records are kept in context. When exceeded, a forget happens and only the latest self-talk remains.",
-
   "config.maid_self_talk.state_owner_offline": "State 2: Owner Offline",
   "config.maid_self_talk.state_owner_offline.enabled": "Enabled",
   "config.maid_self_talk.state_owner_offline.enabled.tooltip": "Whether maids talk to themselves when their owner is offline but players are nearby.",
@@ -28,27 +26,25 @@
   "config.maid_self_talk.state_owner_offline.player_range.tooltip": "Only trigger when there is a player within this radius (blocks).",
   "config.maid_self_talk.state_owner_offline.keep_self_talk_count": "Keep Self-Talk Count",
   "config.maid_self_talk.state_owner_offline.keep_self_talk_count.tooltip": "How many self-talk records are kept in context. When exceeded, a forget happens and only the latest self-talk remains.",
-
   "config.maid_self_talk.welcome": "Welcome Greeting",
   "config.maid_self_talk.welcome.enabled": "Enabled",
   "config.maid_self_talk.welcome.enabled.tooltip": "Whether maids greet their owner after the owner logs in. Greetings are not limited by range: any maid in a loaded chunk can greet.",
   "config.maid_self_talk.welcome.window_ticks": "Welcome Window (tick)",
   "config.maid_self_talk.welcome.window_ticks.tooltip": "Time window after the owner logs in during which maids may greet (20 ticks = 1 second).",
-
-  "config.maid_self_talk.prompt": "Prompts",
-  "config.maid_self_talk.prompt.self_talk": "Self-Talk Prompt",
+  "config.maid_self_talk.prompt": "Self-Talk Prompts",
+  "config.maid_self_talk.prompt.self_talk": "Self-Talk Prompt (owner away)",
   "config.maid_self_talk.prompt.self_talk.tooltip": "Prompt for self-talk. Some game context (position/nearby entities/equipment, etc.) is randomly appended. The prompt is sent as a user message like a player chat (same prefix for cache), but never written into chat history or shown in the chat record UI.",
   "config.maid_self_talk.prompt.welcome": "Welcome Prompt",
   "config.maid_self_talk.prompt.welcome.tooltip": "Prompt for the welcome greeting, same rules as the self-talk prompt.",
-
   "config.maid_self_talk.screen.self_talk_button.tip": "Self-Talk Settings",
   "config.maid_self_talk.screen.player_settings.title": "Self-Talk Settings",
   "config.maid_self_talk.screen.player_settings.maid": "Maid: %s",
   "config.maid_self_talk.screen.player_settings.value": "Enable Self-Talk: %s",
   "config.maid_self_talk.screen.player_settings.admin_disabled": "Disabled by server admin",
-
   "commands.maid_self_talk.test_self_talk.no_maid": "No maid found (specify a maid, or run near one)",
   "commands.maid_self_talk.test_self_talk.busy": "This maid is in an ongoing chat, try again later",
   "commands.maid_self_talk.test_self_talk.triggered": "Triggered self-talk for %s",
-  "commands.maid_self_talk.test_self_talk.failed": "Failed to trigger: AI disabled, no LLM site, or maid has no persona"
+  "commands.maid_self_talk.test_self_talk.failed": "Failed to trigger: AI disabled, no LLM site, or maid has no persona",
+  "config.maid_self_talk.prompt.self_talk_owner_nearby": "Self-Talk Prompt (owner nearby)",
+  "config.maid_self_talk.prompt.self_talk_owner_nearby.tooltip": "Self-talk prompt used when the owner is nearby (within 16 blocks). Same rules as the other one."
 }

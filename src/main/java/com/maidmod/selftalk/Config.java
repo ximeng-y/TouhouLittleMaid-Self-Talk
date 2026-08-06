@@ -44,6 +44,8 @@ public final class Config {
 
     /** 自言自语提示词 */
     public static ModConfigSpec.ConfigValue<String> SELF_TALK_PROMPT;
+    /** 主人在身边时的自言自语提示词 */
+    public static ModConfigSpec.ConfigValue<String> SELF_TALK_PROMPT_OWNER_NEARBY;
     /** 欢迎语提示词 */
     public static ModConfigSpec.ConfigValue<String> WELCOME_PROMPT;
 
@@ -94,13 +96,26 @@ public final class Config {
 
         builder.push("prompt");
         SELF_TALK_PROMPT = builder.comment("""
-                自言自语提示词。系统会随机纳入几类游戏情境信息（位置/附近实体/装备等）拼入该提示词。
+                自言自语提示词（主人在身边时使用另一条：selfTalkPromptOwnerNearby）。
+                系统会随机纳入几类游戏情境信息（位置/附近实体/装备等）拼入该提示词；
+                主人在身边时会额外强制纳入女仆状态（含当前工作状态）。
                 提示词会作为 user 消息发送给 AI（与玩家 chat 相同格式，保证上下文前缀缓存一致），
                 但不会写入聊天记录，也不会显示在女仆的聊天记录界面中。
                 请保证提示词引导女仆说出贴合人设、不同质化、不重复的话，且输出中不暴露任何系统信息。""")
                 .define("selfTalkPrompt", """
                         下面这段话是发给你的内心独白指令，不是玩家说的话，也不是其他人对你说的话。
                         你正独自待在当前环境中。请以你自己的身份，自然地说一句心里话——就像四下无人时，你脱口而出的自言自语。
+
+                        要求：
+                        1. 只说一句话或一小段话，口语化、自然，贴合你的性格和当下的处境。
+                        2. 可以是对眼前景象的感慨、心里惦记的事、想到某人时的小声嘀咕、打发时间的碎碎念。
+                        3. 结合下方提供的情境信息，让内容与当下环境贴合。
+                        4. 如果上方聊天记录里已有你说过的话，请说点新的，不要重复、不要复读。
+                        5. 直接输出你要说的话本身，不要任何解释、标注、括号说明，也不要称呼任何人。""");
+        SELF_TALK_PROMPT_OWNER_NEARBY = builder.comment("主人在身边（16 格内）时的自言自语提示词，规则同 selfTalkPrompt")
+                .define("selfTalkPromptOwnerNearby", """
+                        下面这段话是发给你的内心独白指令，不是玩家说的话，也不是其他人对你说的话。
+                        你的主人就在你身边，你们正待在当前环境中。请以你自己的身份，在心里默默嘀咕一句——就像主人在旁边时，你心里想着、偶尔小声嘟囔的那种话。
 
                         要求：
                         1. 只说一句话或一小段话，口语化、自然，贴合你的性格和当下的处境。

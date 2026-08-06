@@ -36,6 +36,10 @@ public final class MaidSelfTalkService {
     /** 可随机纳入的情境信息分类（TLM 内置 Context 分类 id） */
     private static final List<String> CONTEXT_CATEGORIES = List.of(
             "nearby_entities", "equipment", "position", "user", "effects", "status", "world");
+    /** 女仆状态分类（含当前工作状态 work_task 等） */
+    private static final String STATUS_CATEGORY = "status";
+    /** "主人在身边"判定半径（格） */
+    private static final double OWNER_NEARBY_RANGE = 16.0;
 
     private MaidSelfTalkService() {
     }
@@ -74,9 +78,12 @@ public final class MaidSelfTalkService {
             return false;
         }
 
-        // 随机纳入情境信息（1~3 类），让自话内容贴合当下、不同质化
-        String prompt = (welcome ? Config.WELCOME_PROMPT.get() : Config.SELF_TALK_PROMPT.get())
-                + buildRandomContext(maid);
+        // 随机纳入情境信息，让自话内容贴合当下、不同质化；
+        // 主人在身边时强制纳入女仆状态（含当前工作状态），并使用对应的提示词
+        boolean ownerNearby = isOwnerNearby(maid);
+        String prompt = welcome ? Config.WELCOME_PROMPT.get()
+                : (ownerNearby ? Config.SELF_TALK_PROMPT_OWNER_NEARBY.get() : Config.SELF_TALK_PROMPT.get());
+        prompt = prompt + buildRandomContext(maid, ownerNearby);
 
         // 与玩家 chat 相同的 context 注入，保证消息结构与缓存前缀一致
         String message = UserPromptContexts.addContext(maid, prompt);
@@ -133,16 +140,27 @@ public final class MaidSelfTalkService {
 
     /**
      * 随机纳入 1~3 类游戏情境信息，拼为提示词尾段。
+     * <p>
+     * 主人在身边（{@code ownerNearby}）时，女仆状态分类（含当前工作状态）必定纳入，
+     * 其余分类照常随机。
      */
-    private static String buildRandomContext(EntityMaid maid) {
+    private static String buildRandomContext(EntityMaid maid, boolean ownerNearby) {
         List<String> pool = new ArrayList<>(CONTEXT_CATEGORIES);
+        List<String> picked = new ArrayList<>();
+        if (ownerNearby) {
+            // 主人在身边：必须注入女仆状态（含当前工作状态）
+            picked.add(STATUS_CATEGORY);
+            pool.remove(STATUS_CATEGORY);
+        }
         int count = 1 + maid.getRandom().nextInt(3);
-        count = Math.min(count, pool.size());
+        int remaining = Math.min(count - picked.size(), pool.size());
+        for (int i = 0; i < remaining; i++) {
+            // 从剩余分类中随机抽取一个（RandomSource 非 java.util.Random，手写抽取）
+            picked.add(pool.remove(maid.getRandom().nextInt(pool.size())));
+        }
 
         List<String> parts = new ArrayList<>();
-        for (int i = 0; i < count; i++) {
-            // 从剩余分类中随机抽取一个（RandomSource 非 java.util.Random，手写抽取）
-            String category = pool.remove(maid.getRandom().nextInt(pool.size()));
+        for (String category : picked) {
             List<String> values = GameContextRegister.getContext(category, maid);
             if (!values.isEmpty()) {
                 parts.add(String.join("；", values));
@@ -152,5 +170,11 @@ public final class MaidSelfTalkService {
             return StringUtils.EMPTY;
         }
         return "\n\n当前情境：" + String.join("；", parts) + "。";
+    }
+
+    /** 主人是否在身边（在线且在判定半径内） */
+    private static boolean isOwnerNearby(EntityMaid maid) {
+        var owner = maid.getOwner();
+        return owner != null && maid.distanceToSqr(owner) <= OWNER_NEARBY_RANGE * OWNER_NEARBY_RANGE;
     }
 }

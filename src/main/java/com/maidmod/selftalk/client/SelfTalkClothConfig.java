@@ -10,11 +10,13 @@ import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 /**
  * 管理员全局配置界面（Cloth Config）。
  * <p>
- * 通过 TLM 的公开扩展点 {@link AddClothConfigEvent} 挂到「AI 全局设置」分类下。
+ * 通过 TLM 的公开扩展点 {@link AddClothConfigEvent} 挂到「AI 全局设置」分类下，
+ * 结构为「女仆自言自语」父分类，内含「态 1」「态 2」「欢迎语」「自话提示词」子页。
  * <b>注意：</b>本类引用了 cloth 客户端类，只能在安装了 cloth-config 时加载，
  * 因此不使用 @EventBusSubscriber 自动注册，改由主类在运行时判断后反射注册。
  */
@@ -32,7 +34,9 @@ public final class SelfTalkClothConfig {
         ConfigCategory globalAi = root.getOrCreateCategory(
                 Component.translatable("config.touhou_little_maid.global_ai"));
 
-        SubCategoryBuilder main = entryBuilder.startSubCategory(Component.translatable("config.maid_self_talk.title"))
+        // 父分类：女仆自言自语
+        SubCategoryBuilder main = entryBuilder.startSubCategory(
+                        Component.translatable("config.maid_self_talk.title"))
                 .setExpanded(true);
         main.add(entryBuilder.startBooleanToggle(Component.translatable("config.maid_self_talk.enabled"),
                         Config.ENABLED.get())
@@ -46,17 +50,16 @@ public final class SelfTalkClothConfig {
                 .setTooltip(Component.translatable("config.maid_self_talk.player_option_enabled.tooltip"))
                 .setSaveConsumer(v -> saveBool(Config.PLAYER_OPTION_ENABLED, v))
                 .build());
-        globalAi.addEntry(main.build());
 
-        globalAi.addEntry(stateCategory(entryBuilder,
-                "config.maid_self_talk.state_owner_online",
+        // 子页：态 1 / 态 2
+        main.add(stateCategory(entryBuilder, "config.maid_self_talk.state_owner_online",
                 Config.STATE1_ENABLED, Config.STATE1_MIN_INTERVAL, Config.STATE1_MAX_INTERVAL,
                 Config.STATE1_PLAYER_RANGE, Config.STATE1_KEEP_SELF_TALK_COUNT).build());
-        globalAi.addEntry(stateCategory(entryBuilder,
-                "config.maid_self_talk.state_owner_offline",
+        main.add(stateCategory(entryBuilder, "config.maid_self_talk.state_owner_offline",
                 Config.STATE2_ENABLED, Config.STATE2_MIN_INTERVAL, Config.STATE2_MAX_INTERVAL,
                 Config.STATE2_PLAYER_RANGE, Config.STATE2_KEEP_SELF_TALK_COUNT).build());
 
+        // 子页：欢迎语
         SubCategoryBuilder welcome = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.welcome"))
                 .setExpanded(false);
@@ -74,8 +77,9 @@ public final class SelfTalkClothConfig {
                 .setTooltip(Component.translatable("config.maid_self_talk.welcome.window_ticks.tooltip"))
                 .setSaveConsumer(v -> saveInt(Config.WELCOME_WINDOW_TICKS, v))
                 .build());
-        globalAi.addEntry(welcome.build());
+        main.add(welcome.build());
 
+        // 子页：自话提示词
         SubCategoryBuilder prompt = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.prompt"))
                 .setExpanded(false);
@@ -86,20 +90,28 @@ public final class SelfTalkClothConfig {
                 .setSaveConsumer(v -> Config.SELF_TALK_PROMPT.set(v))
                 .build());
         prompt.add(entryBuilder.startTextField(
+                        Component.translatable("config.maid_self_talk.prompt.self_talk_owner_nearby"),
+                        Config.SELF_TALK_PROMPT_OWNER_NEARBY.get())
+                .setTooltip(Component.translatable("config.maid_self_talk.prompt.self_talk_owner_nearby.tooltip"))
+                .setSaveConsumer(v -> Config.SELF_TALK_PROMPT_OWNER_NEARBY.set(v))
+                .build());
+        prompt.add(entryBuilder.startTextField(
                         Component.translatable("config.maid_self_talk.prompt.welcome"),
                         Config.WELCOME_PROMPT.get())
                 .setTooltip(Component.translatable("config.maid_self_talk.prompt.welcome.tooltip"))
                 .setSaveConsumer(v -> Config.WELCOME_PROMPT.set(v))
                 .build());
-        globalAi.addEntry(prompt.build());
+        main.add(prompt.build());
+
+        globalAi.addEntry(main.build());
     }
 
     private static SubCategoryBuilder stateCategory(ConfigEntryBuilder entryBuilder, String key,
-                                                    net.neoforged.neoforge.common.ModConfigSpec.BooleanValue enabled,
-                                                    net.neoforged.neoforge.common.ModConfigSpec.IntValue minInterval,
-                                                    net.neoforged.neoforge.common.ModConfigSpec.IntValue maxInterval,
-                                                    net.neoforged.neoforge.common.ModConfigSpec.DoubleValue range,
-                                                    net.neoforged.neoforge.common.ModConfigSpec.IntValue keepCount) {
+                                                    ModConfigSpec.BooleanValue enabled,
+                                                    ModConfigSpec.IntValue minInterval,
+                                                    ModConfigSpec.IntValue maxInterval,
+                                                    ModConfigSpec.DoubleValue range,
+                                                    ModConfigSpec.IntValue keepCount) {
         SubCategoryBuilder builder = entryBuilder.startSubCategory(Component.translatable(key))
                 .setExpanded(false);
         builder.add(entryBuilder.startBooleanToggle(Component.translatable(key + ".enabled"),
@@ -136,17 +148,17 @@ public final class SelfTalkClothConfig {
         return builder;
     }
 
-    private static void saveBool(net.neoforged.neoforge.common.ModConfigSpec.BooleanValue spec, boolean value) {
+    private static void saveBool(ModConfigSpec.BooleanValue spec, boolean value) {
         spec.set(value);
         spec.save();
     }
 
-    private static void saveInt(net.neoforged.neoforge.common.ModConfigSpec.IntValue spec, int value) {
+    private static void saveInt(ModConfigSpec.IntValue spec, int value) {
         spec.set(value);
         spec.save();
     }
 
-    private static void saveDouble(net.neoforged.neoforge.common.ModConfigSpec.DoubleValue spec, double value) {
+    private static void saveDouble(ModConfigSpec.DoubleValue spec, double value) {
         spec.set(value);
         spec.save();
     }
