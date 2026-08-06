@@ -1,0 +1,38 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT"
+
+[[mods]]
+modId = "maid_self_talk"
+version = "1.0.0"
+displayName = "Maid Self-Talk"
+description = '''
+女仆 AI 自言自语与互相对话（重写版）。
+女仆会在闲置时按随机间隔自言自语、在主人登录时打招呼，
+支持主人在线/离线双态触发与玩家独立设置。
+'''
+authors = "maidmod"
+
+[[dependencies.maid_self_talk]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.maid_self_talk]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1,1.22)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.maid_self_talk]]
+modId = "touhou_little_maid"
+type = "required"
+versionRange = "[1.5.3,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[mixins]]
+config = "maid_self_talk.mixins.json"

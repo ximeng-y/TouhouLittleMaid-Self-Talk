@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8.5",
+  "package": "com.maidmod.selftalk.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "MaidAIChatManagerMixin",
+    "LLMCallbackMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

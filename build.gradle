@@ -1,0 +1,60 @@
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version '2.0.95'
+}
+
+group = 'com.maidmod'
+version = '1.0.0'
+
+base {
+    archivesName = 'maid_self_talk'
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+repositories {
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+        content {
+            includeGroup 'maven.modrinth'
+        }
+    }
+}
+
+dependencies {
+    // 东方小女仆（TLM）1.5.3 NeoForge 1.21.1，核心依赖
+    implementation 'maven.modrinth:touhou-little-maid:1.5.3-neoforge+mc1.21.1'
+}
+
+neoForge {
+    version = '21.1.219'
+
+    runs {
+        client {
+            client()
+        }
+        server {
+            server()
+        }
+    }
+
+    mods {
+        maid_self_talk {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+tasks.named('jar') {
+    manifest {
+        attributes([
+                'Specification-Title'   : 'maid_self_talk',
+                'Specification-Version' : '1.0.0',
+                'Implementation-Title'  : 'Maid Self-Talk',
+                'Implementation-Version': '1.0.0',
+        ])
+    }
+}

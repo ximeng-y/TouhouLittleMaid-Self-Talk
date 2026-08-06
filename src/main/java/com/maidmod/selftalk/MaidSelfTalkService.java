@@ -1,0 +1,155 @@
+package com.maidmod.selftalk;
+
+import com.github.tartaricacid.touhoulittlemaid.ai.agent.context.GameContextRegister;
+import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
+import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.UserPromptContexts;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMSite;
+import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
+import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.mixin.MaidAIChatManagerAccessor;
+import com.mojang.datafixers.util.Pair;
+import org.apache.commons.lang3.StringUtils;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.List;
+
+/**
+ * 女仆自话服务：新公开入口（本 mod 定义，供状态机调用）。
+ * <p>
+ * 消息流与玩家 chat 完全同构，保证 LLM 提供商上下文前缀缓存一致：
+ * <ol>
+ *   <li>@Invoker 调 {@code MaidAIChatManager.getMessages} 拿到 [system 设定, 摘要, ...历史] 前缀；</li>
+ *   <li>随机纳入 1~3 类游戏情境信息（位置/附近实体/装备/效果/用户/状态/世界）拼入提示词，防同质化；</li>
+ *   <li>提示词经 {@link UserPromptContexts#addContext} 注入游戏状态后作为 user 消息追加；</li>
+ *   <li>user 消息<b>不写入</b> TLM 历史（系统内部消息，不出现在聊天记录 UI 中）；
+ *       assistant 回复由 {@link SelfTalkCallback} 的父类逻辑写入历史，自动纳入原生聊天记录界面；</li>
+ *   <li>发送 {@link SelfTalkCallback}，回复返回后执行遗忘检查。</li>
+ * </ol>
+ * 无人设（customSetting 为空且无模型设定文件）的女仆直接跳过，绝不自动生成人设。
+ */
+public final class MaidSelfTalkService {
+
+    /** 可随机纳入的情境信息分类（TLM 内置 Context 分类 id） */
+    private static final List<String> CONTEXT_CATEGORIES = List.of(
+            "nearby_entities", "equipment", "position", "user", "effects", "status", "world");
+
+    private MaidSelfTalkService() {
+    }
+
+    /**
+     * 触发一次自话/欢迎。
+     *
+     * @param maid    女仆
+     * @param welcome 是否为欢迎语（欢迎语视为一次自话，同样受保留条数控制）
+     * @param keep    当前态的自言自语保留上下文条数
+     * @return 是否实际发起（前置检查未通过时为 false）
+     */
+    public static boolean triggerSelfTalk(EntityMaid maid, boolean welcome, int keep) {
+        MaidAIChatManager chatManager = maid.getAiChatManager();
+        if (chatManager == null) {
+            return false;
+        }
+        if (!AIConfig.LLM_ENABLED.get()) {
+            return false;
+        }
+        LLMSite site = chatManager.getLLMSite();
+        if (site == null || !site.enabled()) {
+            return false;
+        }
+        // 无人设（无自定义设定且无模型默认设定）→ 跳过，不自动生成人设
+        if (chatManager.customSetting.isBlank() && chatManager.getSetting().isEmpty()) {
+            return false;
+        }
+
+        // 组装与玩家 chat 同构的消息前缀
+        List<LLMMessage> messages = ((MaidAIChatManagerAccessor) chatManager)
+                .invokeGetMessages(chatManager, chatManager.getChatLanguage());
+        if (messages.isEmpty()) {
+            // 双保险：设定为空走 TLM 会自动生成人设，此处直接放弃本次触发
+            return false;
+        }
+
+        // 随机纳入情境信息（1~3 类），让自话内容贴合当下、不同质化
+        String prompt = (welcome ? Config.WELCOME_PROMPT.get() : Config.SELF_TALK_PROMPT.get())
+                + buildRandomContext(maid);
+
+        // 与玩家 chat 相同的 context 注入，保证消息结构与缓存前缀一致
+        String message = UserPromptContexts.addContext(maid, prompt);
+        messages.add(LLMMessage.userChat(maid, message));
+
+        // 标记进行中（防重入）
+        SelfTalkState.get(maid.getId()).selfTalkPending = true;
+
+        LLMClient client = site.client();
+        client.chat(new SelfTalkCallback(chatManager, messages, welcome, keep));
+        return true;
+    }
+
+    /**
+     * 自话/欢迎回复返回后（服务端主线程）执行：记录本次回复并做遗忘检查。
+     * <p>
+     * 遗忘规则：当前自话窗口（从玩家上一次正常 chat 起）内保留条数触碰上限时，
+     * 删除窗口内除本次外的全部自话记录，仅保留本次——防止自话记录无限撑大上下文。
+     * 玩家发起 chat 时窗口重置（旧自话记录"赦免"保留在上下文中，计数重新开始）。
+     */
+    public static void onSelfTalkFinished(EntityMaid maid, SelfTalkCallback callback) {
+        SelfTalkState.State state = SelfTalkState.get(maid.getId());
+        state.selfTalkPending = false;
+
+        // 本次回复的 assistant 消息：父类 onSuccess 已写入历史尾部
+        Deque<LLMMessage> deque = callback.getChatManager().getHistory().getDeque();
+        LLMMessage last = deque.peekLast();
+        if (last == null) {
+            return;
+        }
+        state.windowSelfTalkMsgs.add(last);
+
+        int keep = callback.getKeepSelfTalkCount();
+        if (state.windowSelfTalkMsgs.size() >= keep && state.windowSelfTalkMsgs.size() > 1) {
+            // 删除窗口内除本次外的所有自话记录（仅保留本次）
+            List<LLMMessage> toRemove = new ArrayList<>(
+                    state.windowSelfTalkMsgs.subList(0, state.windowSelfTalkMsgs.size() - 1));
+            deque.removeAll(toRemove);
+            state.windowSelfTalkMsgs.removeAll(toRemove);
+        }
+    }
+
+    /** 玩家发起 chat：窗口重置（计数重新开始，旧自话记录赦免保留在上下文中） */
+    public static void onPlayerChatStart(EntityMaid maid) {
+        SelfTalkState.State state = SelfTalkState.get(maid.getId());
+        state.playerChatPending = true;
+        state.windowSelfTalkMsgs.clear();
+    }
+
+    /** 玩家 chat 结束（成功或失败）：解除进行中标记 */
+    public static void onPlayerChatEnd(EntityMaid maid) {
+        SelfTalkState.get(maid.getId()).playerChatPending = false;
+    }
+
+    /**
+     * 随机纳入 1~3 类游戏情境信息，拼为提示词尾段。
+     */
+    private static String buildRandomContext(EntityMaid maid) {
+        List<String> categories = new ArrayList<>(CONTEXT_CATEGORIES);
+        Collections.shuffle(categories, maid.getRandom());
+        int count = 1 + maid.getRandom().nextInt(3);
+        count = Math.min(count, categories.size());
+
+        List<String> parts = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            List<String> values = GameContextRegister.getContext(categories.get(i), maid);
+            if (!values.isEmpty()) {
+                parts.add(String.join("；", values));
+            }
+        }
+        if (parts.isEmpty()) {
+            return StringUtils.EMPTY;
+        }
+        return "\n\n当前情境：" + String.join("；", parts) + "。";
+    }
+}

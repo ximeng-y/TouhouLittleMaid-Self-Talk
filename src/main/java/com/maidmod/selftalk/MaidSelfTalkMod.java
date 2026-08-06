@@ -1,0 +1,60 @@
+package com.maidmod.selftalk;
+
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModList;
+import net.neoforged.fml.ModLoadingContext;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.loading.FMLEnvironment;
+import net.neoforged.fml.loading.mixin.DeferredMixinConfigRegistration;
+import net.neoforged.neoforge.common.NeoForge;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * 女仆 AI 自言自语与互相对话（重写版）入口。
+ */
+@Mod(MaidSelfTalkMod.MODID)
+public class MaidSelfTalkMod {
+
+    public static final String MODID = "maid_self_talk";
+    public static final Logger LOGGER = LoggerFactory.getLogger(MaidSelfTalkMod.class);
+
+    public MaidSelfTalkMod(IEventBus modEventBus) {
+        // COMMON 配置（服务端权威）
+        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, Config.SPEC);
+        // 玩家独立设置附件
+        SelfTalkAttachments.ATTACHMENT_TYPES.register(modEventBus);
+        // 网络包
+        modEventBus.addListener(SelfTalkPackets::register);
+        // 服务端状态机
+        NeoForge.EVENT_BUS.register(SelfTalkHandler.class);
+
+        // 客户端专用 mixin 配置：目标类为客户端类（AIChatScreen），
+        // 必须仅客户端注册，否则服务端加载该 mixin 配置时会因目标类不存在而崩溃
+        if (FMLEnvironment.dist.isClient()) {
+            DeferredMixinConfigRegistration.addMixinConfig("maid_self_talk.client.mixins.json");
+            registerClothConfigIfPresent();
+        }
+    }
+
+    /**
+     * Cloth Config 全局配置界面（挂到 TLM 的 AI 全局设置分类）。
+     * <p>
+     * 引用 cloth 客户端类的订阅器类不能在未装 cloth-config 时被加载，
+     * 因此不用 @EventBusSubscriber 自动注册，而是：
+     * 1. 仅在客户端、且 ModList 中存在 cloth_config 时；
+     * 2. 通过 Class.forName + 反射注册（字节码中不出现对 cloth/订阅器类的直接引用）。
+     */
+    private static void registerClothConfigIfPresent() {
+        try {
+            if (ModList.get().isLoaded("cloth_config")) {
+                Class<?> clazz = Class.forName("com.maidmod.selftalk.client.SelfTalkClothConfig");
+                NeoForge.EVENT_BUS.register(clazz);
+            }
+        } catch (Exception | LinkageError e) {
+            // 反射失败仅影响配置界面，不影响模组核心功能
+            LOGGER.warn("Failed to register SelfTalkClothConfig, cloth config UI disabled", e);
+        }
+    }
+}
