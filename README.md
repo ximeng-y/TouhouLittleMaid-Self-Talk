@@ -25,7 +25,7 @@
 | --- | --- |
 | Minecraft | 1.21.1 |
 | NeoForge | 21.1.x |
-| Touhou Little Maid | 1.5.3+ |
+| Touhou Little Maid | 1.5.3 |
 | Java | 21 |
 
 > Cloth Config（15.0.140+）为可选依赖：安装后可在游戏内配置界面调整设置；未安装时配置界面自动禁用，仅能修改 `config/maid_self_talk-common.toml`。
@@ -91,7 +91,7 @@ A NeoForge addon that gives [Touhou Little Maid](https://github.com/TartaricAcid
 | --- | --- |
 | Minecraft | 1.21.1 |
 | NeoForge | 21.1.x |
-| Touhou Little Maid | 1.5.3+ |
+| Touhou Little Maid | 1.5.3 |
 | Java | 21 |
 
 > Cloth Config (15.0.140+) is optional: with it installed you can tweak settings in-game; without it the config UI is disabled automatically and you can only edit `config/maid_self_talk-common.toml`.
