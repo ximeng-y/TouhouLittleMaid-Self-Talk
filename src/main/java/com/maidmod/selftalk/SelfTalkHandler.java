@@ -93,12 +93,17 @@ public final class SelfTalkHandler {
             return;
         }
 
+        // 服务器全局 tick：跨维度一致，用于欢迎窗口计时
+        // （各维度 gameTime 独立计数，直接比较会出现负差导致窗口永不过期）
+        long serverTick = level.getServer().getTickCount();
         long gameTime = level.getGameTime();
 
         // 欢迎检查（优先于自话）：主人登录窗口期内、未欢迎过该主人
         if (Config.WELCOME_ENABLED.get() && !state.welcomedPlayers.contains(ownerUuid)) {
             Long loginTick = PLAYER_LOGIN_TICKS.get(ownerUuid);
-            if (loginTick != null && gameTime - loginTick <= Config.WELCOME_WINDOW_TICKS.get()) {
+            // 主人必须仍在线：玩家已全部退出时不再触发欢迎（避免无玩家空耗 token）
+            if (loginTick != null && maid.getOwner() != null
+                    && serverTick - loginTick <= Config.WELCOME_WINDOW_TICKS.get()) {
                 state.welcomedPlayers.add(ownerUuid);
                 boolean triggered = MaidSelfTalkService.triggerSelfTalk(maid, true,
                         Config.STATE1_KEEP_SELF_TALK_COUNT.get(), Config.STATE1_PLAYER_RANGE.get());
@@ -154,8 +159,8 @@ public final class SelfTalkHandler {
     @SubscribeEvent
     public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer serverPlayer) {
-            long gameTime = serverPlayer.serverLevel().getGameTime();
-            PLAYER_LOGIN_TICKS.put(serverPlayer.getUUID(), gameTime);
+            // 记录服务器全局 tick，与欢迎窗口判定的计时基准一致（跨维度统一）
+            PLAYER_LOGIN_TICKS.put(serverPlayer.getUUID(), (long) serverPlayer.server.getTickCount());
         }
     }
 

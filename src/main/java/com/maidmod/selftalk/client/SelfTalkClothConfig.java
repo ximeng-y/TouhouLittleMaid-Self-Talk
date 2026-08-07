@@ -80,27 +80,11 @@ public final class SelfTalkClothConfig {
         main.add(welcome.build());
 
         // 子页：自话提示词
+        // 注意：自话提示词、主人在身边提示词、欢迎提示词不在界面开放修改，
+        // 只能通过配置文件 maid_self_talk-common.toml 的 [prompt] 段调整（替换文件热重载生效）
         SubCategoryBuilder prompt = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.prompt"))
                 .setExpanded(false);
-        prompt.add(entryBuilder.startTextField(
-                        Component.translatable("config.maid_self_talk.prompt.self_talk"),
-                        Config.SELF_TALK_PROMPT.get())
-                .setTooltip(Component.translatable("config.maid_self_talk.prompt.self_talk.tooltip"))
-                .setSaveConsumer(v -> Config.SELF_TALK_PROMPT.set(v))
-                .build());
-        prompt.add(entryBuilder.startTextField(
-                        Component.translatable("config.maid_self_talk.prompt.self_talk_owner_nearby"),
-                        Config.SELF_TALK_PROMPT_OWNER_NEARBY.get())
-                .setTooltip(Component.translatable("config.maid_self_talk.prompt.self_talk_owner_nearby.tooltip"))
-                .setSaveConsumer(v -> Config.SELF_TALK_PROMPT_OWNER_NEARBY.set(v))
-                .build());
-        prompt.add(entryBuilder.startTextField(
-                        Component.translatable("config.maid_self_talk.prompt.welcome"),
-                        Config.WELCOME_PROMPT.get())
-                .setTooltip(Component.translatable("config.maid_self_talk.prompt.welcome.tooltip"))
-                .setSaveConsumer(v -> Config.WELCOME_PROMPT.set(v))
-                .build());
         prompt.add(entryBuilder.startStrField(
                         Component.translatable("config.maid_self_talk.prompt.language"),
                         Config.SELF_TALK_LANGUAGE.get())
