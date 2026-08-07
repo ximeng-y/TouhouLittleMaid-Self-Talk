@@ -10,7 +10,6 @@ import net.neoforged.neoforge.common.NeoForge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.maidmod.selftalk.command.SelfTalkDebugCommand;
 import com.maidmod.selftalk.network.SelfTalkPackets;
 
 /**
@@ -29,9 +28,8 @@ public class MaidSelfTalkMod {
         SelfTalkAttachments.ATTACHMENT_TYPES.register(modEventBus);
         // 网络包
         modEventBus.addListener(SelfTalkPackets::register);
-        // 服务端状态机与命令
+        // 服务端状态机
         NeoForge.EVENT_BUS.register(SelfTalkHandler.class);
-        NeoForge.EVENT_BUS.register(SelfTalkDebugCommand.class);
 
         // 客户端 Cloth Config 配置界面：通过反射注册（字节码不直接引用 cloth 类，
         // 未安装 cloth-config 时自动跳过，不影响模组核心功能）
