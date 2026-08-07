@@ -16,8 +16,7 @@
 - **玩家独立设置**：每个玩家可单独关闭女仆的自言自语；房主关闭总开关后玩家设置项自动置灰
 - **触发冷却**：随机触发间隔（可配置范围）；玩家对女仆发起 chat 时自动重置自话冷却，避免两者同时抢话
 - **聊天框展示**：自话内容对附近玩家可见；主人侧由原生聊天记录显示，不产生重复消息
-- **配置界面**：接入 TLM 女仆 AI 设置，新增「女仆自言自语」配置页（含状态 1 / 状态 2 / 欢迎语 / 自话提示词子页），间隔采用填入式并带范围校验
-- **调试命令**：`/tlm_ai_pro debug test_self_talk [<maid>]`，绕过冷却与状态机直接触发一次自话，便于测试
+- **配置界面**：接入 TLM 女仆 AI 设置，新增「女仆自言自语」配置页（含状态 1 / 状态 2 / 欢迎语子页），间隔采用填入式并带范围校验
 
 ## 环境要求
 
@@ -44,19 +43,11 @@
 
 - **状态 1 / 状态 2**：主人在线 / 离线时的触发开关、最小与最大触发间隔（秒）、玩家半径、自话保留条数
 - **欢迎语**：主人登录后打招呼的触发窗口
-- **自话提示词 / 欢迎语提示词**：自定义提示词，系统会随机纳入情境信息并注入语言指令，请保证提示词引导女仆说出贴合人设、不同质化的话
+- **自话提示词 / 欢迎语提示词**：不在配置界面开放修改，请直接编辑 `config/maid_self_talk-common.toml` 的 `[prompt]` 段；系统会随机纳入情境信息并注入语言指令，请保证提示词引导女仆说出贴合人设、不同质化的话
 
 ### 玩家独立设置
 
 对着女仆打开 AI 聊天输入界面（与选 AI 模型同一悬浮 UI），点击左侧新增的 💬 按钮，即可单独开启 / 关闭该女仆的自言自语。
-
-### 调试命令
-
-```
-/tlm_ai_pro debug test_self_talk [<maid>]
-```
-
-指定女仆（缺省取附近最近的女仆）立即触发一次自话，绕过冷却与状态机，保留人设与 AI 可用性等硬性前置检查。
 
 ## 许可
 
@@ -82,8 +73,7 @@ A NeoForge addon that gives [Touhou Little Maid](https://github.com/TartaricAcid
 - **Per-player settings**: Each player can turn off a maid's self-talk individually; the option greys out automatically when the host disables the master switch
 - **Trigger cooldown**: Random trigger intervals (configurable range); starting a chat with the maid resets the self-talk cooldown so both never speak at once
 - **Chat display**: Self-talk is visible to nearby players; the owner sees it through the native chat record UI, so no duplicate messages appear
-- **Config UI**: A new "Maid Self-Talk" page is added to the TLM maid AI settings (with State 1 / State 2 / Welcome / Self-Talk Prompt sub-pages); intervals use typed input fields with range validation
-- **Debug command**: `/tlm_ai_pro debug test_self_talk [<maid>]` triggers one self-talk immediately, bypassing the cooldown and state machine but keeping the hard pre-checks (persona & AI availability)
+- **Config UI**: A new "Maid Self-Talk" page is added to the TLM maid AI settings (with State 1 / State 2 / Welcome sub-pages); intervals use typed input fields with range validation
 
 ## Requirements
 
@@ -110,19 +100,11 @@ Maid AI chat settings → Global AI settings → "Maid Self-Talk":
 
 - **State 1 / State 2**: enable switch, min/max trigger interval (seconds), player radius and self-talk keep count for owner online / offline
 - **Welcome**: the trigger window after the owner logs in
-- **Self-Talk Prompt / Welcome Prompt**: customize the prompts; the system randomly injects context info and a language instruction. Keep the prompt guiding the maid to speak in persona, non-repetitive words
+- **Self-Talk Prompt / Welcome Prompt**: not editable in the config UI — edit the `[prompt]` section of `config/maid_self_talk-common.toml` directly; the system randomly injects context info and a language instruction. Keep the prompt guiding the maid to speak in persona, non-repetitive words
 
 ### Per-player settings
 
 Open the AI chat input screen of a maid (the same floating UI where you pick the AI model) and click the new 💬 button on the left to toggle self-talk for that maid.
-
-### Debug command
-
-```
-/tlm_ai_pro debug test_self_talk [<maid>]
-```
-
-Triggers one self-talk immediately for the given maid (or the nearest one nearby), bypassing the cooldown and state machine while keeping the hard pre-checks (persona & AI availability).
 
 ## License
 
