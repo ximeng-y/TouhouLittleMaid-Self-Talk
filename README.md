@@ -51,7 +51,7 @@
 
 # TLM Self-Talk (English)
 
-A NeoForge addon that adds **self-talk / welcome greetings** to [Touhou Little Maid](https://github.com/TartaricAcid/TouhouLittleMaid) maids.
+A NeoForge mod that adds **self-talk / welcome greetings** to [Touhou Little Maid](https://github.com/TartaricAcid/TouhouLittleMaid) maids.
 
 ## Features
 
