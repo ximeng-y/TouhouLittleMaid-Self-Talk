@@ -1,6 +1,5 @@
 # 文档与临时目录
 HANDOFF.md
-AGENTS.md
 .XMTEMP/
 
 # Gradle 构建缓存与产物
