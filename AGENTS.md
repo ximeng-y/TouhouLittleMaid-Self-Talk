@@ -29,6 +29,5 @@
 - 配置文件：`config/maid_self_talk-common.toml`（COMMON 档，服务端权威、不自动下发，客户端各自读本地）
 - NeoForge ConfigFileWatcher **热重载**：替换 toml 立即生效、无需重启；`/reload` 命令不重载配置文件
 - **HTTP 400 陷阱**：自话请求发送前必须调用 `HistoryMessagesCheck.checkMessages(messages)` 清洗未配对的 tool 消息（与 TLM `tryToChat` 同构），否则 OpenAI 兼容 API 拒绝请求；清洗失败时放弃本次触发，绝不向上抛
-- 自话提示词 / 欢迎提示词**已禁止前端修改**，只能改 toml 的 `[prompt]` 段（界面只留语言字段）
 - 欢迎窗口计时必须用 `server.getTickCount()`（全局单调 tick）；各维度 `gameTime` 独立计数，跨维度比较会出现负差
 - cloth-config 界面通过反射注册（`MaidSelfTalkMod.registerClothConfigIfPresent`），未装 cloth-config 时自动跳过、不影响核心功能

@@ -39,8 +39,6 @@
 - **状态 1 / 状态 2**：主人在线 / 离线时的开关、最小与最大触发间隔（秒，填入式、带范围校验）、玩家半径、自话保留条数
 - **欢迎语**：主人上线后的打招呼触发窗口
 
-提示词修改不在配置界面开放；若确需修改（通常不建议），可编辑 `config/maid_self_talk-common.toml` 的 `[prompt]` 段。
-
 ### 玩家独立设置
 
 对着女仆打开 AI 聊天输入界面（通常是按 T 键），点左侧 💬 按钮，单独开关这只女仆的自言自语。
@@ -91,8 +89,6 @@ Maid AI chat settings → Global AI settings → "Maid Self-Talk":
 
 - **State 1 / State 2**: enable switch, min/max trigger interval (seconds, typed input with range validation), player radius, and self-talk keep count for owner online / offline
 - **Welcome**: the greeting trigger window after the owner logs in
-
-Prompt edits are not exposed in the UI — if you really need to change them (usually not recommended), edit the `[prompt]` section of `config/maid_self_talk-common.toml` directly.
 
 ### Per-player settings
 
