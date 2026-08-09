@@ -24,9 +24,11 @@
 
 ## 安装
 
-1. 装 NeoForge 21.1.x 和 Touhou Little Maid 1.5.3
-2. 下载 jar 文件
-3. 打开总开关：女仆 AI 设置 → AI 全局设置 →「女仆自言自语」→ 启用；或直接改配置文件的 `enabled`
+1. 安装 NeoForge 21.1.x 与 Touhou Little Maid 1.5.3
+2. 下载成品 jar，放入 `mods/` 目录：
+    - CurseForge：https://www.curseforge.com/minecraft/mc-mods/touhoulittlemaid-self-talk
+    - Modrinth：审核中
+3. 启动游戏，打开总开关：女仆 AI 设置 → AI 全局设置 →「女仆自言自语」→ 启用；或直接改配置文件的 `enabled`
 
 ## 使用
 
@@ -76,8 +78,10 @@ A NeoForge mod that adds **self-talk / welcome greetings** to [Touhou Little Mai
 ## Installation
 
 1. Install NeoForge 21.1.x and Touhou Little Maid 1.5.3
-2. Download the jar file
-3. Enable the master switch: Maid AI settings → Global AI settings → "Maid Self-Talk" → Enable; or set `enabled` in the config file directly
+2. Download the release jar and put it into the `mods/` folder:
+    - CurseForge: https://www.curseforge.com/minecraft/mc-mods/touhoulittlemaid-self-talk
+    - Modrinth: under review
+3. Launch the game and enable the master switch: Maid AI settings → Global AI settings → "Maid Self-Talk" → Enable; or set `enabled` in the config file directly
 
 ## Usage
 
