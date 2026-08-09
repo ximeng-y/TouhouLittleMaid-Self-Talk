@@ -142,8 +142,8 @@ public final class SelfTalkHandler {
                 return;
             }
             if (!tryAcquireSlot(serverTick)) {
-                // 秒级限流未放行：随机退避 1~3 秒再试，不发请求
-                state.nextTriggerTick = gameTime + 20 + (int) (Math.random() * 40);
+                // 秒级限流未放行：随机退避 8~15 秒再试，不发请求
+                state.nextTriggerTick = gameTime + 160 + (int) (Math.random() * 141);
                 return;
             }
             boolean triggered = MaidSelfTalkService.triggerSelfTalk(maid, false,
@@ -161,8 +161,8 @@ public final class SelfTalkHandler {
                 return;
             }
             if (!tryAcquireSlot(serverTick)) {
-                // 秒级限流未放行：随机退避 1~3 秒再试，不发请求
-                state.nextTriggerTick = gameTime + 20 + (int) (Math.random() * 40);
+                // 秒级限流未放行：随机退避 8~15 秒再试，不发请求
+                state.nextTriggerTick = gameTime + 160 + (int) (Math.random() * 141);
                 return;
             }
             boolean triggered = MaidSelfTalkService.triggerSelfTalk(maid, false,
