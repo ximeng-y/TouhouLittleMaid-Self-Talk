@@ -30,5 +30,5 @@
 - NeoForge ConfigFileWatcher **热重载**：替换 toml 立即生效、无需重启；`/reload` 命令不重载配置文件
 - **HTTP 400 陷阱**：自话请求发送前必须调用 `HistoryMessagesCheck.checkMessages(messages)` 清洗未配对的 tool 消息（与 TLM `tryToChat` 同构），否则 OpenAI 兼容 API 拒绝请求；清洗失败时放弃本次触发，绝不向上抛
 - 欢迎窗口计时必须用 `server.getTickCount()`（全局单调 tick）；各维度 `gameTime` 独立计数，跨维度比较会出现负差
-- **秒级限流**：自话/欢迎触发有全局闸门（`rate_limit.maxTriggerPerSecond`，默认 1 次/秒，跨所有女仆共享），防启动/登录/冷却同相时的瞬时并发建连；被限流女仆**不发请求**、内部随机退避重试（玩家聊天框不会出现报错）；欢迎语同样受限，排队若在窗口期内未轮到会错过该次欢迎
+- **限流闸门**：欢迎语全局每秒最多 1 次（`rate_limit.maxTriggerPerSecond`）；自话全局每 5~8 秒（`rate_limit.selfTalkMinIntervalSeconds` / `selfTalkMaxIntervalSeconds`）放行 1 只；被限流自话**不发请求**、随机退避 8~15 秒重试（玩家聊天框不会出现报错）；欢迎语无退避、窗口期内每 tick 重试，排队若在窗口期内未轮到会错过该次欢迎
 - cloth-config 界面通过反射注册（`MaidSelfTalkMod.registerClothConfigIfPresent`），未装 cloth-config 时自动跳过、不影响核心功能

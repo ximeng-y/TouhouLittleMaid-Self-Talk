@@ -38,9 +38,12 @@ public final class SelfTalkHandler {
     /** 玩家 UUID -> 登录时刻（gameTime） */
     private static final Map<UUID, Long> PLAYER_LOGIN_TICKS = Maps.newHashMap();
 
-    /** 秒级限流闸门：上次放行的服务器秒（serverTick / 20）与该秒内已放行次数（仅服务端主线程访问） */
+    /** 欢迎语秒级闸门：上次放行的服务器秒（serverTick / 20）与该秒内已放行次数（仅服务端主线程访问） */
     private static long lastDispatchSecond = -1;
     private static int dispatchCountThisSecond = 0;
+
+    /** 自话闸门：下次允许自话放行的服务器 tick（仅服务端主线程访问） */
+    private static long nextSelfTalkAllowedTick = 0;
 
     private SelfTalkHandler() {
     }
@@ -108,8 +111,8 @@ public final class SelfTalkHandler {
             // 主人必须仍在线：玩家已全部退出时不再触发欢迎（避免无玩家空耗 token）
             if (loginTick != null && maid.getOwner() != null
                     && serverTick - loginTick <= Config.WELCOME_WINDOW_TICKS.get()) {
-                // 秒级限流未放行则不标记、不发请求，窗口期内每 tick 自然重试
-                if (!tryAcquireSlot(serverTick)) {
+                // 欢迎语闸门未放行则不标记、不发请求，窗口期内每 tick 自然重试
+                if (!tryAcquireWelcomeSlot(serverTick)) {
                     return;
                 }
                 state.welcomedPlayers.add(ownerUuid);
@@ -141,8 +144,8 @@ public final class SelfTalkHandler {
             if (!hasPlayerNearby(maid, Config.STATE1_PLAYER_RANGE.get())) {
                 return;
             }
-            if (!tryAcquireSlot(serverTick)) {
-                // 秒级限流未放行：随机退避 8~15 秒再试，不发请求
+            if (!tryAcquireSelfTalkSlot(serverTick)) {
+                // 自话闸门未放行：随机退避 8~15 秒再试，不发请求
                 state.nextTriggerTick = gameTime + 160 + (int) (Math.random() * 141);
                 return;
             }
@@ -160,8 +163,8 @@ public final class SelfTalkHandler {
             if (!hasPlayerNearby(maid, Config.STATE2_PLAYER_RANGE.get())) {
                 return;
             }
-            if (!tryAcquireSlot(serverTick)) {
-                // 秒级限流未放行：随机退避 8~15 秒再试，不发请求
+            if (!tryAcquireSelfTalkSlot(serverTick)) {
+                // 自话闸门未放行：随机退避 8~15 秒再试，不发请求
                 state.nextTriggerTick = gameTime + 160 + (int) (Math.random() * 141);
                 return;
             }
@@ -214,10 +217,10 @@ public final class SelfTalkHandler {
     }
 
     /**
-     * 全局秒级限流：本秒（serverTick / 20）额度未用完才放行，放行即消耗一个额度。
-     * 被限流时调用方必须放弃本次触发（不发请求），仅内部退避重试。
+     * 欢迎语秒级闸门：本秒（serverTick / 20）额度未用完才放行，放行即消耗一个额度。
+     * 被限流时调用方必须放弃本次触发（不发请求），窗口期内每 tick 自然重试。
      */
-    private static boolean tryAcquireSlot(long serverTick) {
+    private static boolean tryAcquireWelcomeSlot(long serverTick) {
         long second = serverTick / 20;
         if (second != lastDispatchSecond) {
             lastDispatchSecond = second;
@@ -227,6 +230,20 @@ public final class SelfTalkHandler {
             return false;
         }
         dispatchCountThisSecond++;
+        return true;
+    }
+
+    /**
+     * 自话全局闸门：距上次自话放行随机 5~8 秒（可配）后才放行下一只。
+     * 被限流时调用方必须放弃本次触发（不发请求），仅内部退避重试。
+     */
+    private static boolean tryAcquireSelfTalkSlot(long serverTick) {
+        if (serverTick < nextSelfTalkAllowedTick) {
+            return false;
+        }
+        int minTicks = Config.SELF_TALK_MIN_INTERVAL.get() * 20;
+        int maxTicks = Config.SELF_TALK_MAX_INTERVAL.get() * 20;
+        nextSelfTalkAllowedTick = serverTick + minTicks + (int) (Math.random() * (maxTicks - minTicks + 1));
         return true;
     }
 }
