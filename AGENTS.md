@@ -8,7 +8,7 @@
 
 - 东方小女仆（TLM 1.5.3-neoforge+mc1.21.1，Modrinth maven）的 NeoForge 1.21.1 附属 mod：女仆 AI 自言自语 + 主人登录欢迎语
 - 技术栈：NeoForge 21.1.219 / ModDevGradle 2.0.95 / Gradle 8.14.3 / Java 21；cloth-config 仅 compileOnly（可选依赖）
-- 产物 jar：`build/libs/tlm-self-talk-1.0.0.jar`；服务端部署替换 jar 后需重启服务端（代码改动无法热加载）
+- 产物 jar：`build/libs/tlm-self-talk-1.0.2.jar`；服务端部署替换 jar 后需重启服务端（代码改动无法热加载）
 
 ## 构建
 
@@ -30,4 +30,5 @@
 - NeoForge ConfigFileWatcher **热重载**：替换 toml 立即生效、无需重启；`/reload` 命令不重载配置文件
 - **HTTP 400 陷阱**：自话请求发送前必须调用 `HistoryMessagesCheck.checkMessages(messages)` 清洗未配对的 tool 消息（与 TLM `tryToChat` 同构），否则 OpenAI 兼容 API 拒绝请求；清洗失败时放弃本次触发，绝不向上抛
 - 欢迎窗口计时必须用 `server.getTickCount()`（全局单调 tick）；各维度 `gameTime` 独立计数，跨维度比较会出现负差
+- **秒级限流**：自话/欢迎触发有全局闸门（`rate_limit.maxTriggerPerSecond`，默认 1 次/秒，跨所有女仆共享），防启动/登录/冷却同相时的瞬时并发建连；被限流女仆**不发请求**、内部随机退避重试（玩家聊天框不会出现报错）；欢迎语同样受限，排队若在窗口期内未轮到会错过该次欢迎
 - cloth-config 界面通过反射注册（`MaidSelfTalkMod.registerClothConfigIfPresent`），未装 cloth-config 时自动跳过、不影响核心功能

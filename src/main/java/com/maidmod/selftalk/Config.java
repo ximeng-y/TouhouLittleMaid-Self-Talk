@@ -43,6 +43,9 @@ public final class Config {
     /** 玩家登录后的欢迎触发窗口（tick，20 tick = 1 秒） */
     public static ModConfigSpec.IntValue WELCOME_WINDOW_TICKS;
 
+    /** 全局秒级限流：每秒最多放行的自话/欢迎触发次数（所有女仆共享） */
+    public static ModConfigSpec.IntValue MAX_TRIGGER_PER_SECOND;
+
     /** 自话输出语言（TLM 官方模型设定多为英文，需要显式声明输出语言） */
     public static ModConfigSpec.ConfigValue<String> SELF_TALK_LANGUAGE;
 
@@ -89,6 +92,14 @@ public final class Config {
                 .define("enabled", true);
         WELCOME_WINDOW_TICKS = builder.comment("玩家登录后的欢迎触发窗口（tick，20 tick = 1 秒）")
                 .defineInRange("welcomeWindowTicks", 600, 20, 72000);
+        builder.pop();
+
+        builder.push("rate_limit");
+        MAX_TRIGGER_PER_SECOND = builder.comment("""
+                全局秒级限流：整个服务器每秒最多放行的自话/欢迎触发次数（所有女仆共享）。
+                防止启动、主人登录、冷却同相时大量女仆同一瞬间并发建立 LLM 连接，导致端点 connect 超时。
+                被限流的女仆不发请求、内部退避重试，玩家不会看到报错。""")
+                .defineInRange("maxTriggerPerSecond", 1, 1, 20);
         builder.pop();
 
         builder.push("prompt");
