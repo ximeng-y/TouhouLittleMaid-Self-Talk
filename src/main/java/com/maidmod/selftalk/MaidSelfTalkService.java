@@ -107,8 +107,8 @@ public final class MaidSelfTalkService {
         // 随机纳入情境信息，让自话内容贴合当下、不同质化；
         // 主人在身边时强制纳入女仆状态（含当前工作状态），并使用对应的提示词
         boolean ownerNearby = isOwnerNearby(maid);
-        String prompt = welcome ? Config.WELCOME_PROMPT.get()
-                : (ownerNearby ? Config.SELF_TALK_PROMPT_OWNER_NEARBY.get() : Config.SELF_TALK_PROMPT.get());
+        String prompt = welcome ? SelfTalkPrompts.WELCOME
+                : (ownerNearby ? SelfTalkPrompts.SELF_TALK_OWNER_NEARBY : SelfTalkPrompts.SELF_TALK);
         prompt = prompt + languageInstruction(selfTalkLanguage) + buildRandomContext(maid, ownerNearby);
 
         // 与玩家 chat 相同的 context 注入，保证消息结构与缓存前缀一致

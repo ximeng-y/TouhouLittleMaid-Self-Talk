@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'com.maidmod'
-version = '1.0.0'
+version = '1.0.1'
 
 base {
     archivesName = 'tlm-self-talk'
@@ -55,9 +55,9 @@ tasks.named('jar') {
     manifest {
         attributes([
                 'Specification-Title'   : 'tlm-self-talk',
-                'Specification-Version' : '1.0.0',
+                'Specification-Version' : '1.0.1',
                 'Implementation-Title'  : 'TLM Self-Talk',
-                'Implementation-Version': '1.0.0',
+                'Implementation-Version': '1.0.1',
         ])
     }
 }
