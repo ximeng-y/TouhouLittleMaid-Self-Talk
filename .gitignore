@@ -2,6 +2,9 @@
 HANDOFF.md
 .XMTEMP/
 
+# ZCode 会话计划目录（本地维护，不纳入版本管理）
+.zcode/
+
 # Gradle 构建缓存与产物
 .gradle/
 build/
