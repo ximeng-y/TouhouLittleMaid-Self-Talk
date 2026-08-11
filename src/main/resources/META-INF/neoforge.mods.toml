@@ -4,7 +4,7 @@ license = "MIT"
 
 [[mods]]
 modId = "maid_self_talk"
-version = "1.0.2"
+version = "1.0.3"
 displayName = "Maid Self-Talk"
 description = '''
 女仆 AI 自言自语与互相对话（重写版）。
