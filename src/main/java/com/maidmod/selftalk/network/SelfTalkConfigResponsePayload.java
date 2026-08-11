@@ -10,10 +10,11 @@ import net.minecraft.resources.ResourceLocation;
 /**
  * S2C：服务端返回玩家自话设置。
  *
- * @param adminEnabled     管理员是否允许玩家配置（false 时客户端 UI 置灰）
- * @param selfTalkEnabled  该玩家的独立设置值
+ * @param adminEnabled  管理员是否允许玩家配置（false 时客户端 UI 置灰）
+ * @param globalEnabled 玩家全局开关（自己的所有女仆）
+ * @param maidEnabled   请求的女仆单只有效值（全局 && 单只名单）
  */
-public record SelfTalkConfigResponsePayload(boolean adminEnabled, boolean selfTalkEnabled)
+public record SelfTalkConfigResponsePayload(boolean adminEnabled, boolean globalEnabled, boolean maidEnabled)
         implements CustomPacketPayload {
 
     public static final Type<SelfTalkConfigResponsePayload> TYPE =
@@ -22,7 +23,8 @@ public record SelfTalkConfigResponsePayload(boolean adminEnabled, boolean selfTa
     public static final StreamCodec<ByteBuf, SelfTalkConfigResponsePayload> STREAM_CODEC =
             StreamCodec.composite(
                     ByteBufCodecs.BOOL, SelfTalkConfigResponsePayload::adminEnabled,
-                    ByteBufCodecs.BOOL, SelfTalkConfigResponsePayload::selfTalkEnabled,
+                    ByteBufCodecs.BOOL, SelfTalkConfigResponsePayload::globalEnabled,
+                    ByteBufCodecs.BOOL, SelfTalkConfigResponsePayload::maidEnabled,
                     SelfTalkConfigResponsePayload::new);
 
     @Override

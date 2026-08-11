@@ -32,24 +32,38 @@ public final class SelfTalkPackets {
                 SelfTalkPackets::handleConfigResponse);
     }
 
-    /** 服务端：响应玩家的设置查询 */
+    /** 服务端：响应玩家的设置查询（全局值 + 请求女仆的单只有效值） */
     private static void handleConfigRequest(SelfTalkConfigRequestPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             Player player = context.player();
             if (player instanceof ServerPlayer serverPlayer) {
                 boolean adminEnabled = Config.PLAYER_OPTION_ENABLED.get();
-                boolean selfTalkEnabled = serverPlayer.getData(SelfTalkAttachments.SELF_TALK_ENABLED);
-                context.reply(new SelfTalkConfigResponsePayload(adminEnabled, selfTalkEnabled));
+                boolean globalEnabled = serverPlayer.getData(SelfTalkAttachments.SELF_TALK_ENABLED);
+                boolean maidEnabled = globalEnabled
+                        && !serverPlayer.getData(SelfTalkAttachments.SELF_TALK_MAID_OVERRIDES)
+                        .containsKey(payload.maidUuid().toString());
+                context.reply(new SelfTalkConfigResponsePayload(adminEnabled, globalEnabled, maidEnabled));
             }
         });
     }
 
-    /** 服务端：保存玩家的设置 */
+    /** 服务端：保存玩家设置（maidUuid 为空 → 全局开关；非空 → 单只关闭名单） */
     private static void handleConfigSet(SelfTalkConfigSetPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             Player player = context.player();
             if (player instanceof ServerPlayer serverPlayer) {
-                serverPlayer.setData(SelfTalkAttachments.SELF_TALK_ENABLED, payload.selfTalkEnabled());
+                if (payload.maidUuid().isEmpty()) {
+                    serverPlayer.setData(SelfTalkAttachments.SELF_TALK_ENABLED, payload.enabled());
+                } else {
+                    // 名单只存关闭项：关闭时 put false，重新开启时 remove，避免名单膨胀
+                    String key = payload.maidUuid().get().toString();
+                    var overrides = serverPlayer.getData(SelfTalkAttachments.SELF_TALK_MAID_OVERRIDES);
+                    if (payload.enabled()) {
+                        overrides.remove(key);
+                    } else {
+                        overrides.put(key, false);
+                    }
+                }
             }
         });
     }

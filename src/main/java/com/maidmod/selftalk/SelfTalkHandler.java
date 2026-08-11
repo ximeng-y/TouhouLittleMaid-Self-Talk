@@ -109,8 +109,13 @@ public final class SelfTalkHandler {
         if (Config.WELCOME_ENABLED.get() && !state.welcomedPlayers.contains(ownerUuid)) {
             Long loginTick = PLAYER_LOGIN_TICKS.get(ownerUuid);
             // 主人必须仍在线：玩家已全部退出时不再触发欢迎（避免无玩家空耗 token）
+            // 欢迎语同样受玩家设置约束：全局或单只关闭时跳过（不标记 welcomed，
+            // 窗口期内每 tick 自然重试，窗口过期放弃），与自话语义一致
             if (loginTick != null && maid.getOwner() != null
                     && serverTick - loginTick <= Config.WELCOME_WINDOW_TICKS.get()) {
+                if (Config.PLAYER_OPTION_ENABLED.get() && !isSelfTalkEnabledForMaid(maid, level)) {
+                    return;
+                }
                 // 欢迎语闸门未放行则不标记、不发请求，窗口期内每 tick 自然重试
                 if (!tryAcquireWelcomeSlot(serverTick)) {
                     return;
@@ -137,8 +142,8 @@ public final class SelfTalkHandler {
             if (!Config.STATE1_ENABLED.get()) {
                 return;
             }
-            // 玩家独立设置：管理员允许玩家配置时，检查该女仆主人的设置
-            if (Config.PLAYER_OPTION_ENABLED.get() && !isSelfTalkEnabledForPlayer(ownerUuid, level)) {
+            // 玩家独立设置：管理员允许玩家配置时，检查该女仆主人及其单只名单
+            if (Config.PLAYER_OPTION_ENABLED.get() && !isSelfTalkEnabledForMaid(maid, level)) {
                 return;
             }
             if (!hasPlayerNearby(maid, Config.STATE1_PLAYER_RANGE.get())) {
@@ -209,14 +214,22 @@ public final class SelfTalkHandler {
         return !players.isEmpty();
     }
 
-    /** 读取玩家独立设置（附件数据） */
-    private static boolean isSelfTalkEnabledForPlayer(UUID ownerUuid, ServerLevel level) {
+    /**
+     * 读取女仆自话有效值：全局开关 && 单只关闭名单不包含该女仆。
+     * 仅态 1（主人在线）与欢迎语使用；态 2 主人离线查不到设置，按管理员配置。
+     */
+    private static boolean isSelfTalkEnabledForMaid(EntityMaid maid, ServerLevel level) {
+        UUID ownerUuid = maid.getOwnerUUID();
         ServerPlayer owner = level.getServer().getPlayerList().getPlayer(ownerUuid);
         if (owner == null) {
             // 主人在线判定刚通过但此处查不到（极端时序），按启用处理
             return true;
         }
-        return owner.getData(SelfTalkAttachments.SELF_TALK_ENABLED);
+        if (!owner.getData(SelfTalkAttachments.SELF_TALK_ENABLED)) {
+            return false;
+        }
+        return !owner.getData(SelfTalkAttachments.SELF_TALK_MAID_OVERRIDES)
+                .containsKey(maid.getUUID().toString());
     }
 
     /** 触发成功后设置冷却：区间内随机（tick），每次触发后重新随机 */
