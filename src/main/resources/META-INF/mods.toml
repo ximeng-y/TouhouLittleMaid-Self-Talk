@@ -15,21 +15,21 @@ authors = "maidmod"
 
 [[dependencies.maid_self_talk]]
 modId = "forge"
-type = "required"
+mandatory = true
 versionRange = "[46,)"
 ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.maid_self_talk]]
 modId = "minecraft"
-type = "required"
+mandatory = true
 versionRange = "[1.20.1,1.21)"
 ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.maid_self_talk]]
 modId = "touhou_little_maid"
-type = "required"
+mandatory = true
 versionRange = "[1.5.3,)"
 ordering = "NONE"
 side = "BOTH"
