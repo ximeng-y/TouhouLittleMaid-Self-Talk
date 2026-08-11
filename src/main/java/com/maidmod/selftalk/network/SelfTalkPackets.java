@@ -16,7 +16,8 @@ import java.util.Optional;
  */
 public final class SelfTalkPackets {
 
-    private static final String PROTOCOL_VERSION = "1";
+    // v2：玩家设置两级化后三个消息布局均变更，升版让不匹配版本在协商期被拒绝
+    private static final String PROTOCOL_VERSION = "2";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MaidSelfTalkMod.MODID, "main"),
