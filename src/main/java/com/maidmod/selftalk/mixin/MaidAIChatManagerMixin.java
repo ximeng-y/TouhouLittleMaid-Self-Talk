@@ -21,7 +21,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(MaidAIChatManager.class)
 public abstract class MaidAIChatManagerMixin {
 
-    @Inject(method = "chat", at = @At("HEAD"))
+    @Inject(method = "chat", remap = false, at = @At("HEAD"))
     private void maid_self_talk$onPlayerChatStart(String message, ChatClientInfo clientInfo,
                                                   ServerPlayer sender, CallbackInfo ci) {
         MaidAIChatManager self = (MaidAIChatManager) (Object) this;

@@ -1,12 +1,11 @@
 package com.maidmod.selftalk;
 
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.ModList;
-import net.neoforged.fml.ModLoadingContext;
-import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.config.ModConfig;
-import net.neoforged.fml.loading.FMLEnvironment;
-import net.neoforged.neoforge.common.NeoForge;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.ModLoadingContext;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.fml.loading.FMLEnvironment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,15 +20,14 @@ public class MaidSelfTalkMod {
     public static final String MODID = "maid_self_talk";
     public static final Logger LOGGER = LoggerFactory.getLogger(MaidSelfTalkMod.class);
 
-    public MaidSelfTalkMod(IEventBus modEventBus) {
+    public MaidSelfTalkMod() {
+        // Forge 1.20.1 FMLModContainer 只支持无参构造器
         // COMMON 配置（服务端权威）
-        ModLoadingContext.get().getActiveContainer().registerConfig(ModConfig.Type.COMMON, Config.SPEC);
-        // 玩家独立设置附件
-        SelfTalkAttachments.ATTACHMENT_TYPES.register(modEventBus);
-        // 网络包
-        modEventBus.addListener(SelfTalkPackets::register);
+        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, Config.SPEC);
+        // 网络包（SimpleChannel 注册无需事件时机，构造期直接注册，与 TLM NetworkHandler 同构）
+        SelfTalkPackets.register();
         // 服务端状态机
-        NeoForge.EVENT_BUS.register(SelfTalkHandler.class);
+        MinecraftForge.EVENT_BUS.register(SelfTalkHandler.class);
 
         // 客户端 Cloth Config 配置界面：通过反射注册（字节码不直接引用 cloth 类，
         // 未安装 cloth-config 时自动跳过，不影响模组核心功能）
@@ -50,7 +48,7 @@ public class MaidSelfTalkMod {
         try {
             if (ModList.get().isLoaded("cloth_config")) {
                 Class<?> clazz = Class.forName("com.maidmod.selftalk.client.SelfTalkClothConfig");
-                NeoForge.EVENT_BUS.register(clazz);
+                MinecraftForge.EVENT_BUS.register(clazz);
             }
         } catch (Exception | LinkageError e) {
             // 反射失败仅影响配置界面，不影响模组核心功能

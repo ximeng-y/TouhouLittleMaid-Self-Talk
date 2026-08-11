@@ -1,15 +1,15 @@
 package com.maidmod.selftalk.client;
 
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
-import com.maidmod.selftalk.network.SelfTalkConfigRequestPayload;
-import com.maidmod.selftalk.network.SelfTalkConfigSetPayload;
+import com.maidmod.selftalk.network.SelfTalkConfigRequestMessage;
+import com.maidmod.selftalk.network.SelfTalkConfigSetMessage;
+import com.maidmod.selftalk.network.SelfTalkPackets;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.network.PacketDistributor;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 
 /**
  * 玩家独立设置界面：挂在 AI 聊天输入界面（AIChatScreen）上的小方块按钮进入。
@@ -34,7 +34,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     @Override
     protected void init() {
         // 向服务端请求当前设置（管理员开关 + 玩家当前值）
-        PacketDistributor.sendToServer(new SelfTalkConfigRequestPayload());
+        SelfTalkPackets.CHANNEL.sendToServer(new SelfTalkConfigRequestMessage());
         int cx = this.width / 2;
         int cy = this.height / 2;
         this.toggleButton = this.addRenderableWidget(Button.builder(
@@ -45,7 +45,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
 
     private void toggle() {
         boolean next = !selfTalkEnabled;
-        PacketDistributor.sendToServer(new SelfTalkConfigSetPayload(next));
+        SelfTalkPackets.CHANNEL.sendToServer(new SelfTalkConfigSetMessage(next));
         selfTalkEnabled = next;
         refreshButtonState();
     }

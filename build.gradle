@@ -1,63 +1,83 @@
-plugins {
-    id 'java'
-    id 'net.neoforged.moddev' version '2.0.95'
+buildscript {
+    repositories {
+        maven { url = 'https://maven.minecraftforge.net' }
+        maven { url = 'https://maven.parchmentmc.org' }
+        maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
+        maven { url = 'https://maven.aliyun.com/repository/public/' }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    dependencies {
+        classpath group: 'net.minecraftforge.gradle', name: 'ForgeGradle', version: '[6.0.16,6.2)', changing: true
+        classpath 'org.parchmentmc:librarian:1.+'
+        classpath group: 'org.spongepowered', name: 'mixingradle', version: '0.7-SNAPSHOT'
+    }
 }
+
+apply plugin: 'net.minecraftforge.gradle'
+apply plugin: 'org.parchmentmc.librarian.forgegradle'
+apply plugin: 'org.spongepowered.mixin'
+apply plugin: 'java'
 
 group = 'com.maidmod'
 version = '1.0.2'
-
-base {
-    archivesName = 'tlm-self-talk'
-}
+base { archivesName = 'tlm-self-talk' }
 
 java {
-    toolchain.languageVersion = JavaLanguageVersion.of(21)
+    toolchain.languageVersion = JavaLanguageVersion.of(17)
+}
+
+minecraft {
+    mappings channel: 'parchment', version: '2023.08.20-1.20.1'
+    runs {
+        configureEach {
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+            mods { maid_self_talk { source sourceSets.main } }
+        }
+        client { workingDirectory project.file('run') }
+        server { workingDirectory project.file('run') }
+    }
+}
+
+mixin {
+    add sourceSets.main, "maid_self_talk.refmap.json"
+    config "maid_self_talk.mixins.json"
 }
 
 repositories {
     maven {
         name = 'Modrinth'
         url = 'https://api.modrinth.com/maven'
-        content {
-            includeGroup 'maven.modrinth'
-        }
+        content { includeGroup 'maven.modrinth' }
     }
 }
 
 dependencies {
-    // 东方小女仆（TLM）1.5.3 NeoForge 1.21.1，核心依赖
-    implementation 'maven.modrinth:touhou-little-maid:1.5.3-neoforge+mc1.21.1'
-    // Cloth Config（仅编译期：客户端配置界面类引用其 API；
-    // 运行时通过反射注册，未安装 cloth-config 时配置界面自动禁用，不影响模组功能）
-    compileOnly 'maven.modrinth:cloth-config:15.0.140+neoforge'
+    minecraft "net.minecraftforge:forge:1.20.1-47.2.0"
+    // 必须 fg.deobf：Modrinth 1.20.1 发布物是 SRG 名，不 deobf 编译不过
+    implementation fg.deobf('maven.modrinth:touhou-little-maid:1.5.3-forge+mc1.20.1')
+    compileOnly fg.deobf('maven.modrinth:cloth-config:11.1.136+forge')
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 }
 
-neoForge {
-    version = '21.1.219'
-
-    runs {
-        client {
-            client()
-        }
-        server {
-            server()
-        }
-    }
-
-    mods {
-        maid_self_talk {
-            sourceSet(sourceSets.main)
-        }
-    }
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
 }
 
-tasks.named('jar') {
+// 防 refmap 偶发丢失（TLM 同款）
+tasks.compileJava {
+    outputs.upToDateWhen { false }
+}
+
+jar {
     manifest {
         attributes([
                 'Specification-Title'   : 'tlm-self-talk',
-                'Specification-Version' : '1.0.2',
+                'Specification-Version' : project.version,
                 'Implementation-Title'  : 'TLM Self-Talk',
-                'Implementation-Version': '1.0.2',
+                'Implementation-Version': project.version,
+                'MixinConfigs'          : 'maid_self_talk.mixins.json'
         ])
     }
 }

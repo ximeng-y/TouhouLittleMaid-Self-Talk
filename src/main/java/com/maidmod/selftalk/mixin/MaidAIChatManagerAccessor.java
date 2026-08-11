@@ -17,6 +17,6 @@ import java.util.List;
 @Mixin(MaidAIChatManager.class)
 public interface MaidAIChatManagerAccessor {
 
-    @Invoker("getMessages")
+    @Invoker(value = "getMessages", remap = false)
     List<LLMMessage> invokeGetMessages(MaidAIChatManager chatManager, String language);
 }

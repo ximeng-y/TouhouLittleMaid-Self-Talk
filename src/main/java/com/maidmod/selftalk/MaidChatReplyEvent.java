@@ -1,7 +1,7 @@
 package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
-import net.neoforged.bus.api.Event;
+import net.minecraftforge.eventbus.api.Event;
 
 /**
  * 女仆 AI 真实回复事件（服务端主线程发布）。

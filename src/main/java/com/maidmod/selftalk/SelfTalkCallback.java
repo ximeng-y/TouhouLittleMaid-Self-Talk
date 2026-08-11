@@ -10,7 +10,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.AABB;
-import net.neoforged.neoforge.common.NeoForge;
+import net.minecraftforge.common.MinecraftForge;
 
 import java.net.http.HttpRequest;
 import java.util.List;
@@ -55,7 +55,7 @@ public class SelfTalkCallback extends LLMCallback {
         super.onSuccess(responseChat);
         EntityMaid maid = getMaid();
         Runnable finish = () -> {
-            NeoForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, responseChat.getChatText(), welcome));
+            MinecraftForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, responseChat.getChatText(), welcome));
             MaidSelfTalkService.onSelfTalkFinished(maid, this);
             broadcastToNearby(maid, responseChat.getChatText());
         };

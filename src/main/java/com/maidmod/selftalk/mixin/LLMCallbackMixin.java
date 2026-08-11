@@ -22,12 +22,12 @@ import java.net.http.HttpRequest;
 @Mixin(LLMCallback.class)
 public abstract class LLMCallbackMixin {
 
-    @Inject(method = "onSuccess", at = @At("HEAD"))
+    @Inject(method = "onSuccess", remap = false, at = @At("HEAD"))
     private void maid_self_talk$onSuccess(ResponseChat responseChat, CallbackInfo ci) {
         onChatEnd((LLMCallback) (Object) this);
     }
 
-    @Inject(method = "onFailure", at = @At("HEAD"))
+    @Inject(method = "onFailure", remap = false, at = @At("HEAD"))
     private void maid_self_talk$onFailure(HttpRequest request, Throwable throwable, int errorCode, CallbackInfo ci) {
         onChatEnd((LLMCallback) (Object) this);
     }

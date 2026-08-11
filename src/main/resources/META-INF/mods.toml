@@ -1,5 +1,5 @@
 modLoader = "javafml"
-loaderVersion = "[4,)"
+loaderVersion = "[46,)"
 license = "MIT"
 
 [[mods]]
@@ -14,16 +14,16 @@ description = '''
 authors = "maidmod"
 
 [[dependencies.maid_self_talk]]
-modId = "neoforge"
+modId = "forge"
 type = "required"
-versionRange = "[21.1,)"
+versionRange = "[46,)"
 ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.maid_self_talk]]
 modId = "minecraft"
 type = "required"
-versionRange = "[1.21.1,1.22)"
+versionRange = "[1.20.1,1.21)"
 ordering = "NONE"
 side = "BOTH"
 
@@ -33,6 +33,3 @@ type = "required"
 versionRange = "[1.5.3,)"
 ordering = "NONE"
 side = "BOTH"
-
-[[mixins]]
-config = "maid_self_talk.mixins.json"

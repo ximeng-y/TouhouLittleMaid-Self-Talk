@@ -1,62 +1,62 @@
 package com.maidmod.selftalk;
 
-import net.neoforged.neoforge.common.ModConfigSpec;
+import net.minecraftforge.common.ForgeConfigSpec;
 
 /**
  * 模组配置（COMMON 档，管理员统筹）。
  * <p>
  * 注意：本模组为全新实现，配置文件结构不兼容旧版 maid_self_talk。
- * 配置文件名仍为 maid_self_talk-common.toml（NeoForge 自动生成），
- * 旧文件中的未知键会被 NeoForge 忽略，新键使用默认值。
+ * 配置文件名仍为 maid_self_talk-common.toml（Forge 自动生成），
+ * 旧文件中的未知键会被 Forge 忽略，新键使用默认值。
  * 1.0.1 起自话/欢迎提示词硬编码于 {@link SelfTalkPrompts}，不再从本配置读取。
  */
 public final class Config {
     /** 总开关 */
-    public static ModConfigSpec.BooleanValue ENABLED;
+    public static ForgeConfigSpec.BooleanValue ENABLED;
     /** 是否允许玩家独立设置（关闭后玩家设置项置灰且视为启用） */
-    public static ModConfigSpec.BooleanValue PLAYER_OPTION_ENABLED;
+    public static ForgeConfigSpec.BooleanValue PLAYER_OPTION_ENABLED;
 
     /** 态 1：主人在线 */
-    public static ModConfigSpec.BooleanValue STATE1_ENABLED;
+    public static ForgeConfigSpec.BooleanValue STATE1_ENABLED;
     /** 态 1 最小触发间隔（秒） */
-    public static ModConfigSpec.IntValue STATE1_MIN_INTERVAL;
+    public static ForgeConfigSpec.IntValue STATE1_MIN_INTERVAL;
     /** 态 1 最大触发间隔（秒） */
-    public static ModConfigSpec.IntValue STATE1_MAX_INTERVAL;
+    public static ForgeConfigSpec.IntValue STATE1_MAX_INTERVAL;
     /** 态 1：半径多少格内有玩家时才触发 */
-    public static ModConfigSpec.DoubleValue STATE1_PLAYER_RANGE;
+    public static ForgeConfigSpec.DoubleValue STATE1_PLAYER_RANGE;
     /** 态 1 自言自语保留上下文条数 */
-    public static ModConfigSpec.IntValue STATE1_KEEP_SELF_TALK_COUNT;
+    public static ForgeConfigSpec.IntValue STATE1_KEEP_SELF_TALK_COUNT;
 
     /** 态 2：主人离线但附近有玩家 */
-    public static ModConfigSpec.BooleanValue STATE2_ENABLED;
+    public static ForgeConfigSpec.BooleanValue STATE2_ENABLED;
     /** 态 2 最小触发间隔（秒） */
-    public static ModConfigSpec.IntValue STATE2_MIN_INTERVAL;
+    public static ForgeConfigSpec.IntValue STATE2_MIN_INTERVAL;
     /** 态 2 最大触发间隔（秒） */
-    public static ModConfigSpec.IntValue STATE2_MAX_INTERVAL;
+    public static ForgeConfigSpec.IntValue STATE2_MAX_INTERVAL;
     /** 态 2：半径多少格内有玩家时才触发 */
-    public static ModConfigSpec.DoubleValue STATE2_PLAYER_RANGE;
+    public static ForgeConfigSpec.DoubleValue STATE2_PLAYER_RANGE;
     /** 态 2 自言自语保留上下文条数 */
-    public static ModConfigSpec.IntValue STATE2_KEEP_SELF_TALK_COUNT;
+    public static ForgeConfigSpec.IntValue STATE2_KEEP_SELF_TALK_COUNT;
 
     /** 欢迎语开关 */
-    public static ModConfigSpec.BooleanValue WELCOME_ENABLED;
+    public static ForgeConfigSpec.BooleanValue WELCOME_ENABLED;
     /** 玩家登录后的欢迎触发窗口（tick，20 tick = 1 秒） */
-    public static ModConfigSpec.IntValue WELCOME_WINDOW_TICKS;
+    public static ForgeConfigSpec.IntValue WELCOME_WINDOW_TICKS;
 
     /** 欢迎语秒级限流：每秒最多放行的欢迎触发次数（所有女仆共享） */
-    public static ModConfigSpec.IntValue MAX_TRIGGER_PER_SECOND;
+    public static ForgeConfigSpec.IntValue MAX_TRIGGER_PER_SECOND;
     /** 自话放行随机间隔区间下限（秒） */
-    public static ModConfigSpec.IntValue SELF_TALK_MIN_INTERVAL;
+    public static ForgeConfigSpec.IntValue SELF_TALK_MIN_INTERVAL;
     /** 自话放行随机间隔区间上限（秒） */
-    public static ModConfigSpec.IntValue SELF_TALK_MAX_INTERVAL;
+    public static ForgeConfigSpec.IntValue SELF_TALK_MAX_INTERVAL;
 
     /** 自话输出语言（TLM 官方模型设定多为英文，需要显式声明输出语言） */
-    public static ModConfigSpec.ConfigValue<String> SELF_TALK_LANGUAGE;
+    public static ForgeConfigSpec.ConfigValue<String> SELF_TALK_LANGUAGE;
 
-    public static final ModConfigSpec SPEC;
+    public static final ForgeConfigSpec SPEC;
 
     static {
-        ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
+        ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
 
         builder.push("general");
         ENABLED = builder.comment("总开关，默认关闭。开启后女仆才会自言自语/欢迎/对话")

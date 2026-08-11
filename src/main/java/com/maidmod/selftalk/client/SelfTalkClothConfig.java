@@ -7,10 +7,10 @@ import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
 import me.shedaniel.clothconfig2.impl.builders.SubCategoryBuilder;
 import net.minecraft.network.chat.Component;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.neoforge.common.ModConfigSpec;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.common.ForgeConfigSpec;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 /**
  * 管理员全局配置界面（Cloth Config）。
@@ -97,11 +97,11 @@ public final class SelfTalkClothConfig {
     }
 
     private static SubCategoryBuilder stateCategory(ConfigEntryBuilder entryBuilder, String key,
-                                                    ModConfigSpec.BooleanValue enabled,
-                                                    ModConfigSpec.IntValue minInterval,
-                                                    ModConfigSpec.IntValue maxInterval,
-                                                    ModConfigSpec.DoubleValue range,
-                                                    ModConfigSpec.IntValue keepCount) {
+                                                    ForgeConfigSpec.BooleanValue enabled,
+                                                    ForgeConfigSpec.IntValue minInterval,
+                                                    ForgeConfigSpec.IntValue maxInterval,
+                                                    ForgeConfigSpec.DoubleValue range,
+                                                    ForgeConfigSpec.IntValue keepCount) {
         SubCategoryBuilder builder = entryBuilder.startSubCategory(Component.translatable(key))
                 .setExpanded(false);
         builder.add(entryBuilder.startBooleanToggle(Component.translatable(key + ".enabled"),
@@ -140,17 +140,17 @@ public final class SelfTalkClothConfig {
         return builder;
     }
 
-    private static void saveBool(ModConfigSpec.BooleanValue spec, boolean value) {
+    private static void saveBool(ForgeConfigSpec.BooleanValue spec, boolean value) {
         spec.set(value);
         spec.save();
     }
 
-    private static void saveInt(ModConfigSpec.IntValue spec, int value) {
+    private static void saveInt(ForgeConfigSpec.IntValue spec, int value) {
         spec.set(value);
         spec.save();
     }
 
-    private static void saveDouble(ModConfigSpec.DoubleValue spec, double value) {
+    private static void saveDouble(ForgeConfigSpec.DoubleValue spec, double value) {
         spec.set(value);
         spec.save();
     }

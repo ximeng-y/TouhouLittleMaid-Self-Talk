@@ -10,8 +10,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import java.util.List;
 import java.util.Map;
@@ -198,14 +198,14 @@ public final class SelfTalkHandler {
         return !players.isEmpty();
     }
 
-    /** 读取玩家独立设置（附件数据） */
+    /** 读取玩家独立设置（NBT 持久化存储） */
     private static boolean isSelfTalkEnabledForPlayer(UUID ownerUuid, ServerLevel level) {
         ServerPlayer owner = level.getServer().getPlayerList().getPlayer(ownerUuid);
         if (owner == null) {
             // 主人在线判定刚通过但此处查不到（极端时序），按启用处理
             return true;
         }
-        return owner.getData(SelfTalkAttachments.SELF_TALK_ENABLED);
+        return PlayerSettingsStorage.isEnabled(owner);
     }
 
     /** 触发成功后设置冷却：区间内随机（tick），每次触发后重新随机 */
