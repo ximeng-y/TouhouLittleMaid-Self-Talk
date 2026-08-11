@@ -20,7 +20,8 @@ apply plugin: 'org.spongepowered.mixin'
 apply plugin: 'java'
 
 group = 'com.maidmod'
-version = '1.0.2'
+// jar 文件名后缀区分双分支：1.20.1 Forge 线（main 分支为 -neoforge-1.21.1）
+version = '1.0.3-forge-1.20.1'
 base { archivesName = 'tlm-self-talk' }
 
 java {
@@ -74,9 +75,9 @@ jar {
     manifest {
         attributes([
                 'Specification-Title'   : 'tlm-self-talk',
-                'Specification-Version' : project.version,
+                'Specification-Version' : '1.0.3',
                 'Implementation-Title'  : 'TLM Self-Talk',
-                'Implementation-Version': project.version,
+                'Implementation-Version': '1.0.3',
                 'MixinConfigs'          : 'maid_self_talk.mixins.json'
         ])
     }
