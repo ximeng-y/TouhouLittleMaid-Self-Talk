@@ -1,6 +1,6 @@
 # TLM Self-Talk
 
-给 Touhou Little Maid（车万女仆）添加「自言自语 / 欢迎语」的 NeoForge 附属 Mod。
+给 Touhou Little Maid（车万女仆）添加「自言自语 / 欢迎语」的附属 Mod。
 
 ## 功能
 
@@ -15,18 +15,15 @@
 
 ## 环境要求
 
-| 项目 | 版本 |
-| --- | --- |
-| Minecraft | 1.21.1 |
-| NeoForge | 21.1.x |
-| Touhou Little Maid | 1.5.3 |
-| Java | 21 |
+| 加载器 | Minecraft | Java | Touhou Little Maid |
+| --- | --- | --- | --- |
+| NeoForge | 1.21.1 | 21 | 1.5.3 |
+| Forge | 1.20.1 | 17 | 1.5.3 |
 
 ## 安装
 
-1. 装 NeoForge 21.1.x 和 Touhou Little Maid 1.5.3
-2. 下载 jar 文件
-3. 打开总开关：女仆 AI 设置 → AI 全局设置 →「女仆自言自语」→ 启用；或直接改配置文件的 `enabled`
+1. 安装 mod：下载对应版本的 jar
+2. 打开总开关：女仆 AI 设置 → AI 全局设置 →「女仆自言自语」→ 启用；或直接改配置文件的 `enabled`
 
 ## 使用
 
@@ -49,7 +46,7 @@
 
 # TLM Self-Talk (English)
 
-A NeoForge mod that adds **self-talk / welcome greetings** to Touhou Little Maid maids.
+A mod that adds **self-talk / welcome greetings** to Touhou Little Maid maids.
 
 ## Features
 
@@ -64,18 +61,15 @@ A NeoForge mod that adds **self-talk / welcome greetings** to Touhou Little Maid
 
 ## Requirements
 
-| Item | Version |
-| --- | --- |
-| Minecraft | 1.21.1 |
-| NeoForge | 21.1.x |
-| Touhou Little Maid | 1.5.3 |
-| Java | 21 |
+| Loader | Minecraft | Java | Touhou Little Maid |
+| --- | --- | --- | --- |
+| NeoForge | 1.21.1 | 21 | 1.5.3 |
+| Forge | 1.20.1 | 17 | 1.5.3 |
 
 ## Installation
 
-1. Install NeoForge 21.1.x and Touhou Little Maid 1.5.3
-2. Download the jar file
-3. Enable the master switch: Maid AI settings → Global AI settings → "Maid Self-Talk" → Enable; or set `enabled` in the config file directly
+1. Install the mod: download the jar for your version
+2. Enable the master switch: Maid AI settings → Global AI settings → "Maid Self-Talk" → Enable; or set `enabled` in the config file directly
 
 ## Usage
 
