@@ -15,12 +15,10 @@
 
 ## 环境要求
 
-| 项目 | 版本 |
-| --- | --- |
-| Minecraft | 1.21.1 |
-| NeoForge | 21.1.x |
-| Touhou Little Maid | 1.5.3 |
-| Java | 21 |
+| 加载器 | Minecraft | Java | Touhou Little Maid |
+| --- | --- | --- | --- |
+| NeoForge | 1.21.1 | 21 | 1.5.3 |
+| Forge | 1.20.1 | 17 | 1.5.3 |
 
 ## 安装
 
@@ -65,12 +63,10 @@ A NeoForge mod that adds **self-talk / welcome greetings** to [Touhou Little Mai
 
 ## Requirements
 
-| Item | Version |
-| --- | --- |
-| Minecraft | 1.21.1 |
-| NeoForge | 21.1.x |
-| Touhou Little Maid | 1.5.3 |
-| Java | 21 |
+| Loader | Minecraft | Java | Touhou Little Maid |
+| --- | --- | --- | --- |
+| NeoForge | 1.21.1 | 21 | 1.5.3 |
+| Forge | 1.20.1 | 17 | 1.5.3 |
 
 ## Installation
 
