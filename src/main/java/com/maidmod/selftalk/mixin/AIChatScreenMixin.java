@@ -40,11 +40,15 @@ public abstract class AIChatScreenMixin extends Screen {
      * 注入点选 addLeftButtons（TLM 自有 private 方法，非覆写原版）：
      * Forge 1.20.1 生产环境对覆写原版的方法会重命名为官方混淆名（init → m_7856_），
      * 而 TLM 自有方法名保持 mojmap，dev/prod 均可注入。
-     * 按钮坐标直接用目标方法参数计算，不依赖硬编码布局。
+     * <p>
+     * 坐标陷阱：TLM 的 addLeftButtons 方法体会把 leftX 参数逐步推进（两次
+     * {@code leftX = leftX + size + gap}），因此 TAIL 注入点处的 leftX 已是
+     * 第 3 个按钮（⚙）的 x，第 4 个按钮只需再 + (size + gap) 即紧贴左组；
+     * 若按入口值 + 3 * (size + gap) 计算会向右多出 2 组间距（实测偏移约 40px）。
      */
     @Inject(method = "addLeftButtons", remap = false, at = @At("TAIL"))
     private void maid_self_talk$addSelfTalkSettingsButton(int leftX, int y, int size, int gap, CallbackInfo ci) {
-        int x = leftX + 3 * (size + gap);  // 左组 3 个按钮之后
+        int x = leftX + size + gap;  // TAIL 处 leftX 已在 ⚙ 位置，+ 一组间距即第 4 个按钮
         FlatColorButton button = new FlatColorButton(x, y, size, size,
                 Component.literal("💬"), b ->
                 Minecraft.getInstance().setScreen(new SelfTalkPlayerSettingsScreen(this.maid)))
