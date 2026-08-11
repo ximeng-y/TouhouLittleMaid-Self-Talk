@@ -21,17 +21,14 @@ public record SelfTalkConfigSetPayload(Optional<UUID> maidUuid, boolean enabled)
     public static final Type<SelfTalkConfigSetPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(MaidSelfTalkMod.MODID, "config_set"));
 
-    /** Optional&lt;UUID&gt; 手写编解码（writeBoolean + writeUUID），不依赖版本内置 codec */
-    private static final StreamCodec<FriendlyByteBuf, Optional<UUID>> OPTIONAL_UUID = StreamCodec.of(
-            (buf, value) -> {
-                buf.writeBoolean(value.isPresent());
-                value.ifPresent(uuid -> buf.writeUUID(uuid));
-            },
-            buf -> buf.readBoolean() ? Optional.of(buf.readUUID()) : Optional.empty());
+    /** UUID 手写编解码（1.21.1 的 ByteBufCodecs 无 UUID 常量，readUUID/writeUUID 在 FriendlyByteBuf 上） */
+    private static final StreamCodec<FriendlyByteBuf, UUID> UUID_STREAM_CODEC = StreamCodec.of(
+            (buf, uuid) -> buf.writeUUID(uuid),
+            buf -> buf.readUUID());
 
     public static final StreamCodec<FriendlyByteBuf, SelfTalkConfigSetPayload> STREAM_CODEC =
             StreamCodec.composite(
-                    OPTIONAL_UUID, SelfTalkConfigSetPayload::maidUuid,
+                    ByteBufCodecs.optional(UUID_STREAM_CODEC), SelfTalkConfigSetPayload::maidUuid,
                     ByteBufCodecs.BOOL, SelfTalkConfigSetPayload::enabled,
                     SelfTalkConfigSetPayload::new);
 

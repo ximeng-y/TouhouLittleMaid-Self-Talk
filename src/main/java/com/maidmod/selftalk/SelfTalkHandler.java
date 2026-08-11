@@ -13,6 +13,7 @@ import net.minecraft.world.phys.AABB;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -198,11 +199,17 @@ public final class SelfTalkHandler {
     @SubscribeEvent
     public static void onPlayerClone(PlayerEvent.Clone event) {
         // 玩家死亡重生：复制独立设置（1.20.1 方案 B 天然保留，此处对齐语义）
-        if (event.isWasDeath() && event.getOriginal() instanceof ServerPlayer oldPlayer
-                && oldPlayer.hasData(SelfTalkAttachments.SELF_TALK_ENABLED)) {
+        if (event.isWasDeath() && event.getOriginal() instanceof ServerPlayer oldPlayer) {
             ServerPlayer newPlayer = (ServerPlayer) event.getEntity();
-            newPlayer.setData(SelfTalkAttachments.SELF_TALK_ENABLED,
-                    oldPlayer.getData(SelfTalkAttachments.SELF_TALK_ENABLED));
+            if (oldPlayer.hasData(SelfTalkAttachments.SELF_TALK_ENABLED)) {
+                newPlayer.setData(SelfTalkAttachments.SELF_TALK_ENABLED,
+                        oldPlayer.getData(SelfTalkAttachments.SELF_TALK_ENABLED));
+            }
+            // 单只关闭名单同样保留；拷贝副本，避免新旧玩家共享同一 map 实例
+            if (oldPlayer.hasData(SelfTalkAttachments.SELF_TALK_MAID_OVERRIDES)) {
+                newPlayer.setData(SelfTalkAttachments.SELF_TALK_MAID_OVERRIDES,
+                        new HashMap<>(oldPlayer.getData(SelfTalkAttachments.SELF_TALK_MAID_OVERRIDES)));
+            }
         }
     }
 
@@ -228,8 +235,10 @@ public final class SelfTalkHandler {
         if (!owner.getData(SelfTalkAttachments.SELF_TALK_ENABLED)) {
             return false;
         }
-        return !owner.getData(SelfTalkAttachments.SELF_TALK_MAID_OVERRIDES)
-                .containsKey(maid.getUUID().toString());
+        // 用 getExistingData 读取：避免无名单时惰性安装空 map 进存档
+        return owner.getExistingData(SelfTalkAttachments.SELF_TALK_MAID_OVERRIDES)
+                .map(overrides -> !overrides.containsKey(maid.getUUID().toString()))
+                .orElse(true);
     }
 
     /** 触发成功后设置冷却：区间内随机（tick），每次触发后重新随机 */
