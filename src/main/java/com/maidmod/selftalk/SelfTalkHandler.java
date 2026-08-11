@@ -190,6 +190,17 @@ public final class SelfTalkHandler {
         PLAYER_LOGIN_TICKS.remove(event.getEntity().getUUID());
     }
 
+    @SubscribeEvent
+    public static void onPlayerClone(PlayerEvent.Clone event) {
+        // 玩家死亡重生：复制独立设置（1.20.1 方案 B 天然保留，此处对齐语义）
+        if (event.isWasDeath() && event.getOriginal() instanceof ServerPlayer oldPlayer
+                && oldPlayer.hasData(SelfTalkAttachments.SELF_TALK_ENABLED)) {
+            ServerPlayer newPlayer = (ServerPlayer) event.getEntity();
+            newPlayer.setData(SelfTalkAttachments.SELF_TALK_ENABLED,
+                    oldPlayer.getData(SelfTalkAttachments.SELF_TALK_ENABLED));
+        }
+    }
+
     /** 半径内是否存在存活、非旁观模式的玩家 */
     private static boolean hasPlayerNearby(EntityMaid maid, double range) {
         AABB box = maid.getBoundingBox().inflate(range);
