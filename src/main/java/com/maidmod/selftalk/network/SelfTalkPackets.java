@@ -11,7 +11,8 @@ import java.util.Optional;
 /**
  * 玩家自话设置网络包注册（Forge 1.20.1 SimpleChannel）。
  * <p>
- * 由主类通过 {@code modEventBus.addListener(SelfTalkPackets::register)} 手动注册。
+ * 由主类在无参构造器中直接调用 {@link #register()} 注册（与 TLM NetworkHandler 同构，
+ * 注册先于任何包收发，无需等待事件时机）。
  */
 public final class SelfTalkPackets {
 

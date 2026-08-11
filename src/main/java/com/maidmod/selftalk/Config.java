@@ -9,6 +9,9 @@ import net.minecraftforge.common.ForgeConfigSpec;
  * 配置文件名仍为 maid_self_talk-common.toml（Forge 自动生成），
  * 旧文件中的未知键会被 Forge 忽略，新键使用默认值。
  * 1.0.1 起自话/欢迎提示词硬编码于 {@link SelfTalkPrompts}，不再从本配置读取。
+ * <p>
+ * 注意：本分支为 Forge 1.20.1，<b>无 NeoForge 的 ConfigFileWatcher 热重载</b>——
+ * 替换 toml 后需重启服务端才生效（1.21.1 线替换即生效，双分支行为不同）。
  */
 public final class Config {
     /** 总开关 */

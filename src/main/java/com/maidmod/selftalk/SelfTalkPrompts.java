@@ -13,7 +13,7 @@ package com.maidmod.selftalk;
  *   <li>提示词刻意不开放给玩家/管理员编辑：格式引导一旦被改坏就会复现泄露问题。</li>
  * </ul>
  * 1.0.0 配置文件（maid_self_talk-common.toml）中遗留的
- * selfTalkPrompt / selfTalkPromptOwnerNearby / welcomePrompt 键已不再读取（NeoForge 对未知键仅忽略，不报错）。
+ * selfTalkPrompt / selfTalkPromptOwnerNearby / welcomePrompt 键已不再读取（配置文件对未知键仅忽略，不报错）。
  */
 public final class SelfTalkPrompts {
 
