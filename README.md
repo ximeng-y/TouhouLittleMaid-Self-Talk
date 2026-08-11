@@ -1,6 +1,6 @@
 # TLM Self-Talk
 
-给 [Touhou Little Maid](https://github.com/TartaricAcid/TouhouLittleMaid)（车万女仆）添加「自言自语 / 欢迎语」的 NeoForge 附属 Mod。
+给 [Touhou Little Maid](https://github.com/TartaricAcid/TouhouLittleMaid)（车万女仆）添加「自言自语 / 欢迎语」的附属 Mod。
 
 ## 功能
 
@@ -48,7 +48,7 @@
 
 # TLM Self-Talk (English)
 
-A NeoForge mod that adds **self-talk / welcome greetings** to [Touhou Little Maid](https://github.com/TartaricAcid/TouhouLittleMaid) maids.
+A mod that adds **self-talk / welcome greetings** to [Touhou Little Maid](https://github.com/TartaricAcid/TouhouLittleMaid) maids.
 
 ## Features
 
