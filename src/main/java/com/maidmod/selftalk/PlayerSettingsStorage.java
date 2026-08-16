@@ -23,6 +23,9 @@ public final class PlayerSettingsStorage {
     /** 单只关闭名单：女仆 UUID 字符串列表（仅存关闭项，恢复时移除） */
     private static final String DISABLED_MAIDS_KEY = "maid_self_talk:disabled_maids";
 
+    /** 单只关闭名单最大条数：防止恶意客户端无限写入撑爆玩家 NBT（主线程 contains 亦为 O(n) 扫描） */
+    private static final int MAX_DISABLED_MAIDS = 256;
+
     private PlayerSettingsStorage() {
     }
 
@@ -60,6 +63,11 @@ public final class PlayerSettingsStorage {
         String uuid = maidUuid.toString();
         if (disabled) {
             if (!list.contains(StringTag.valueOf(uuid))) {
+                // 超限拒绝写入：恶意客户端可高速发送 Set 包无限追加任意 UUID，
+                // 上限兜底名单体积（NBT 膨胀）与主线程 O(n) 扫描开销
+                if (list.size() >= MAX_DISABLED_MAIDS) {
+                    return;
+                }
                 list.add(StringTag.valueOf(uuid));
             }
         } else {

@@ -1,5 +1,6 @@
 package com.maidmod.selftalk.network;
 
+import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.PlayerSettingsStorage;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
@@ -43,10 +44,23 @@ public class SelfTalkConfigSetMessage {
                 if (msg.maidUuid.isEmpty()) {
                     PlayerSettingsStorage.setEnabled(serverPlayer, msg.enabled);
                 } else {
-                    PlayerSettingsStorage.setMaidDisabled(serverPlayer, msg.maidUuid.get(), !msg.enabled);
+                    UUID maidUuid = msg.maidUuid.get();
+                    // 只允许设置自己拥有的女仆：伪造 UUID 写入任意女仆会污染名单并撑爆玩家 NBT
+                    //（设置界面只能对本人的女仆打开，正常玩家请求必然命中）
+                    if (isOwnedMaid(serverPlayer, maidUuid)) {
+                        PlayerSettingsStorage.setMaidDisabled(serverPlayer, maidUuid, !msg.enabled);
+                    }
                 }
             }
         });
         ctx.get().setPacketHandled(true);
+    }
+
+    /** 目标女仆是否存在且属于该玩家（校验在发送者所在维度即可：设置界面只能对身边女仆打开） */
+    private static boolean isOwnedMaid(ServerPlayer player, UUID maidUuid) {
+        if (!(player.serverLevel().getEntity(maidUuid) instanceof EntityMaid maid)) {
+            return false;
+        }
+        return maidUuid.equals(maid.getOwnerUUID());
     }
 }
