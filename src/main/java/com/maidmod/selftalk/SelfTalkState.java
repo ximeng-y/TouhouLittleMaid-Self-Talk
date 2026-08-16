@@ -51,15 +51,19 @@ public final class SelfTalkState {
     }
 
     public static final class State {
-        /** 下次可触发自话的 gameTime（tick） */
+        /** 下次可触发自话的服务器 tick（全局单调，与 server.getTickCount() 同基准） */
         public long nextTriggerTick = 0;
         /** 是否有自话正在进行（回复未返回） */
         public boolean selfTalkPending = false;
+        /** selfTalkPending 置位时的服务器 tick（-1 = 未置位），用于超时强制复位防卡死 */
+        public long selfTalkPendingSinceTick = -1;
         /**
          * 在途玩家 chat 数（TLM 无并发护栏，玩家可连发多条 chat；
          * 计数而非布尔，避免先完成的回复提前清掉标记导致自话与在途 chat 交错写历史）
          */
         public int playerChatCount = 0;
+        /** playerChatCount 最近一次自增时的服务器 tick（-1 = 未置位），用于超时强制复位防卡死 */
+        public long playerChatSinceTick = -1;
         /** 当前自话窗口内已保留的自言自语 assistant 消息（按时间序） */
         public final List<LLMMessage> windowSelfTalkMsgs = new ArrayList<>();
         /** 本女仆已欢迎过的玩家 */

@@ -4,6 +4,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.response.ResponseChat;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
@@ -13,6 +14,7 @@ import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.common.NeoForge;
 
 import java.net.http.HttpRequest;
+import java.util.Deque;
 import java.util.List;
 import java.util.UUID;
 
@@ -55,16 +57,19 @@ public class SelfTalkCallback extends LLMCallback {
     public void onSuccess(ResponseChat responseChat) {
         // TLM 默认行为：写 assistant 历史（供聊天记录 UI 显示）、显示气泡并给主人发送聊天栏消息
         super.onSuccess(responseChat);
-        // 父类对空白回复（chatText/ttsText 为空）会内部转调 onFailure 并 return，不写历史；
-        // 此处短路，避免继续走成功路径的 finish（空文本广播 + 把陈旧消息误当本次回复计入窗口）
-        if (responseChat.getChatText().isBlank() || responseChat.getTtsText().isBlank()) {
+        // 捕获本次写入历史的 assistant 消息：三重校验（队头 + role + 内容）防并发响应线程交错抓取。
+        // 父类对空白回复内部转调 onFailure 不写历史，队头为旧消息/null，校验不通过返回 null。
+        this.lastAssistantMessage = captureLatestAssistantMessage(responseChat);
+        if (this.lastAssistantMessage == null) {
+            // 无消息可捕获（空白回复）或校验未过（罕见交错）：
+            // 跳过事件/遗忘/广播，复位 pending 防卡死
+            runOnServerThread(() -> {
+                SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
+                state.selfTalkPending = false;
+                state.selfTalkPendingSinceTick = -1;
+            });
             return;
         }
-        // 响应线程、父类写历史之后立即捕获本次回复（父类刚写入队头，本线程写后紧邻读取，
-        // 极大概率即本次回复；同女仆并发响应线程在写入与捕获之间交错时可能取到对方消息，
-        // 该亚微秒级残余竞态只影响遗忘记账，不影响正确性）。
-        // 不能到主线程再 peek——自话与玩家 chat 回复同一瞬间完成时可能取到玩家消息
-        this.lastAssistantMessage = getChatManager().getHistory().getDeque().peekFirst();
         EntityMaid maid = getMaid();
         Runnable finish = () -> {
             NeoForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, responseChat.getChatText(), welcome));
@@ -79,10 +84,29 @@ public class SelfTalkCallback extends LLMCallback {
         }
     }
 
+    /**
+     * 捕获父类刚写入历史的 assistant 消息（队头=最新，CappedQueue.offerFirst）。
+     * 三重校验（队头非空 + role 为 ASSISTANT + 内容与本次响应一致）防同女仆并发响应线程
+     * 在写入与捕获间交错时抓取到对方消息；校验不过返回 null。
+     */
+    private LLMMessage captureLatestAssistantMessage(ResponseChat responseChat) {
+        Deque<LLMMessage> deque = getChatManager().getHistory().getDeque();
+        LLMMessage head = deque.peekFirst();
+        if (head != null && head.role() == Role.ASSISTANT
+                && responseChat.toString().equals(head.message())) {
+            return head;
+        }
+        return null;
+    }
+
     @Override
     public void onFailure(HttpRequest request, Throwable throwable, int errorCode) {
         super.onFailure(request, throwable, errorCode);
-        runOnServerThread(() -> SelfTalkState.get(getMaid().getId()).selfTalkPending = false);
+        runOnServerThread(() -> {
+            SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
+            state.selfTalkPending = false;
+            state.selfTalkPendingSinceTick = -1;
+        });
     }
 
     /**

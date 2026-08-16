@@ -40,7 +40,7 @@ import java.util.UUID;
  */
 public final class SelfTalkHandler {
 
-    /** 玩家 UUID -> 登录时刻（gameTime） */
+    /** 玩家 UUID -> 登录时刻（服务器 tick，与欢迎窗口判定同基准） */
     private static final Map<UUID, Long> PLAYER_LOGIN_TICKS = Maps.newHashMap();
 
     /** 欢迎语秒级闸门：上次放行的服务器秒（serverTick / 20）与该秒内已放行次数（仅服务端主线程访问） */
@@ -53,6 +53,9 @@ public final class SelfTalkHandler {
     /** 被限流自话的随机退避区间（tick）：8~15 秒，仅内部重试、不发请求 */
     private static final int BACKOFF_MIN_TICKS = 8 * 20;
     private static final int BACKOFF_MAX_TICKS = 15 * 20;
+
+    /** pending 超时阈值（tick）：5 分钟，回调永不返回时强制复位防卡死 */
+    private static final long PENDING_TIMEOUT_TICKS = 5 * 60 * 20;
 
     /** 状态周期清扫间隔（tick）：5 分钟（兜底清理卸载女仆的残留状态） */
     private static final long CLEANUP_INTERVAL_TICKS = 5 * 60 * 20;
@@ -95,6 +98,19 @@ public final class SelfTalkHandler {
         }
 
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
+        // pending 超时兜底：回调永不返回（如 HTTP 请求挂死）时强制复位，防女仆自话/chat 永久卡死
+        if (state.selfTalkPending && state.selfTalkPendingSinceTick >= 0
+                && serverTick - state.selfTalkPendingSinceTick > PENDING_TIMEOUT_TICKS) {
+            MaidSelfTalkMod.LOGGER.warn("Self-talk pending timed out for maid {}, force reset", maid.getId());
+            state.selfTalkPending = false;
+            state.selfTalkPendingSinceTick = -1;
+        }
+        if (state.playerChatCount > 0 && state.playerChatSinceTick >= 0
+                && serverTick - state.playerChatSinceTick > PENDING_TIMEOUT_TICKS) {
+            MaidSelfTalkMod.LOGGER.warn("Player chat pending timed out for maid {}, force reset", maid.getId());
+            state.playerChatCount = 0;
+            state.playerChatSinceTick = -1;
+        }
         // 有进行中的自话或玩家 chat 时，跳过本次触发
         if (state.selfTalkPending || state.playerChatCount > 0) {
             return;
@@ -121,10 +137,6 @@ public final class SelfTalkHandler {
             return;
         }
 
-        // 服务器全局 tick：跨维度一致，用于欢迎窗口计时与状态清扫
-        // （各维度 gameTime 独立计数，直接比较会出现负差导致窗口永不过期）
-        long gameTime = level.getGameTime();
-
         // 欢迎检查（优先于自话）：主人登录窗口期内、未欢迎过该主人
         if (Config.WELCOME_ENABLED.get() && !state.welcomedPlayers.contains(ownerUuid)) {
             Long loginTick = PLAYER_LOGIN_TICKS.get(ownerUuid);
@@ -145,7 +157,7 @@ public final class SelfTalkHandler {
                 if (triggered) {
                     // 仅在真实发起后才标记：触发失败（如清洗/接入异常）时窗口期内可继续重试
                     state.welcomedPlayers.add(ownerUuid);
-                    applyCooldown(state, gameTime,
+                    applyCooldown(state, serverTick,
                             Config.STATE1_MIN_INTERVAL.get(), Config.STATE1_MAX_INTERVAL.get());
                 }
                 return;
@@ -153,7 +165,7 @@ public final class SelfTalkHandler {
         }
 
         // 冷却期
-        if (gameTime < state.nextTriggerTick) {
+        if (serverTick < state.nextTriggerTick) {
             return;
         }
 
@@ -172,14 +184,14 @@ public final class SelfTalkHandler {
             }
             if (!tryAcquireSelfTalkSlot(serverTick)) {
                 // 自话闸门未放行：随机退避 8~15 秒再试，不发请求
-                state.nextTriggerTick = gameTime + BACKOFF_MIN_TICKS
+                state.nextTriggerTick = serverTick + BACKOFF_MIN_TICKS
                         + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
                 return;
             }
             boolean triggered = MaidSelfTalkService.triggerSelfTalk(maid, false,
                     Config.STATE1_KEEP_SELF_TALK_COUNT.get(), Config.STATE1_PLAYER_RANGE.get());
             if (triggered) {
-                applyCooldown(state, gameTime,
+                applyCooldown(state, serverTick,
                         Config.STATE1_MIN_INTERVAL.get(), Config.STATE1_MAX_INTERVAL.get());
             }
         } else {
@@ -192,14 +204,14 @@ public final class SelfTalkHandler {
             }
             if (!tryAcquireSelfTalkSlot(serverTick)) {
                 // 自话闸门未放行：随机退避 8~15 秒再试，不发请求
-                state.nextTriggerTick = gameTime + BACKOFF_MIN_TICKS
+                state.nextTriggerTick = serverTick + BACKOFF_MIN_TICKS
                         + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
                 return;
             }
             boolean triggered = MaidSelfTalkService.triggerSelfTalk(maid, false,
                     Config.STATE2_KEEP_SELF_TALK_COUNT.get(), Config.STATE2_PLAYER_RANGE.get());
             if (triggered) {
-                applyCooldown(state, gameTime,
+                applyCooldown(state, serverTick,
                         Config.STATE2_MIN_INTERVAL.get(), Config.STATE2_MAX_INTERVAL.get());
             }
         }
@@ -307,8 +319,8 @@ public final class SelfTalkHandler {
     }
 
     /** 触发成功后设置冷却：区间内随机（tick），每次触发后重新随机 */
-    private static void applyCooldown(SelfTalkState.State state, long gameTime, int minSeconds, int maxSeconds) {
-        state.nextTriggerTick = gameTime + Config.randomIntervalTicks(minSeconds, maxSeconds);
+    private static void applyCooldown(SelfTalkState.State state, long serverTick, int minSeconds, int maxSeconds) {
+        state.nextTriggerTick = serverTick + Config.randomIntervalTicks(minSeconds, maxSeconds);
     }
 
     /**

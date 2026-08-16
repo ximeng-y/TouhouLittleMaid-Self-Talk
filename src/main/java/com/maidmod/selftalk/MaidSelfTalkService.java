@@ -75,8 +75,8 @@ public final class MaidSelfTalkService {
 
         // 自话语言：优先女仆已记录的聊天语言（玩家 chat 过则为客户端语言，保证上下文前缀缓存一致），
         // 否则用配置默认（TLM 官方模型设定多为英文，配置默认 zh_cn 保证中文输出）
-        String selfTalkLanguage = StringUtils.isBlank(chatManager.chatLanguage)
-                ? Config.SELF_TALK_LANGUAGE.get() : chatManager.chatLanguage;
+        String selfTalkLanguage = sanitizeLanguage(StringUtils.isBlank(chatManager.chatLanguage)
+                ? Config.SELF_TALK_LANGUAGE.get() : chatManager.chatLanguage);
 
         // 组装与玩家 chat 同构的消息前缀（语言影响设定占位符的替换）
         List<LLMMessage> messages;
@@ -117,7 +117,9 @@ public final class MaidSelfTalkService {
         messages.add(LLMMessage.userChat(maid, message));
 
         // 标记进行中（防重入）
-        SelfTalkState.get(maid.getId()).selfTalkPending = true;
+        SelfTalkState.State state = SelfTalkState.get(maid.getId());
+        state.selfTalkPending = true;
+        state.selfTalkPendingSinceTick = maid.level().getServer().getTickCount();
 
         LLMClient client = site.client();
         try {
@@ -125,7 +127,8 @@ public final class MaidSelfTalkService {
         } catch (Throwable t) {
             // client.chat 同步阶段可能抛异常（如 site.url 非法导致 URI.create 失败、header 构造异常）：
             // 清掉进行中标记避免该女仆自话永久卡死，绝不向上抛（调用方可能处于实体 tick 路径）
-            SelfTalkState.get(maid.getId()).selfTalkPending = false;
+            state.selfTalkPending = false;
+            state.selfTalkPendingSinceTick = -1;
             MaidSelfTalkMod.LOGGER.warn("Failed to dispatch self-talk request for maid {}", maid.getId(), t);
             return false;
         }
@@ -142,6 +145,7 @@ public final class MaidSelfTalkService {
     public static void onSelfTalkFinished(EntityMaid maid, SelfTalkCallback callback) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.selfTalkPending = false;
+        state.selfTalkPendingSinceTick = -1;
 
         // 本次回复的 assistant 消息：回调在响应线程写历史后立即捕获（CappedQueue 新消息在队头）
         LLMMessage last = callback.getLastAssistantMessage();
@@ -165,6 +169,7 @@ public final class MaidSelfTalkService {
     public static void onPlayerChatStart(EntityMaid maid) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.playerChatCount++;
+        state.playerChatSinceTick = maid.level().getServer().getTickCount();
         state.windowSelfTalkMsgs.clear();
         resetSelfTalkCooldown(maid, state);
     }
@@ -184,8 +189,8 @@ public final class MaidSelfTalkService {
             minSeconds = Config.STATE2_MIN_INTERVAL.get();
             maxSeconds = Config.STATE2_MAX_INTERVAL.get();
         }
-        long gameTime = maid.level().getGameTime();
-        state.nextTriggerTick = gameTime + Config.randomIntervalTicks(minSeconds, maxSeconds);
+        long serverTick = maid.level().getServer().getTickCount();
+        state.nextTriggerTick = serverTick + Config.randomIntervalTicks(minSeconds, maxSeconds);
     }
 
     /** 玩家 chat 结束（成功或失败）：解除一条在途计数 */
@@ -193,6 +198,10 @@ public final class MaidSelfTalkService {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         if (state.playerChatCount > 0) {
             state.playerChatCount--;
+        }
+        // 仅当全部在途 chat 结束时清零计时，连发场景下保留最后一条的置位时刻供超时兜底
+        if (state.playerChatCount == 0) {
+            state.playerChatSinceTick = -1;
         }
     }
 
@@ -239,6 +248,18 @@ public final class MaidSelfTalkService {
      * 语言标签白名单化：selfTalkLanguage 可能来自玩家 chat 时记录的客户端语言（玩家可控），
      * 未知标签一律回退中文指令，不把原文本拼入提示词（防提示词注入）。
      */
+    /**
+     * 自话语言白名单化：仅接受简体中文/英文，其余回退简体中文。
+     * chatManager.chatLanguage 来自玩家 chat 时记录的客户端语言（玩家可控），
+     * 未经校验直接进 invokeGetMessages 会经由 TLM 占位符替换路径，存在注入面。
+     */
+    private static String sanitizeLanguage(String language) {
+        return switch (language) {
+            case "zh_cn", "zh", "en_us", "en" -> language;
+            default -> "zh_cn";
+        };
+    }
+
     private static String languageInstruction(String language) {
         return switch (language) {
             case "zh_cn", "zh" -> "\n\n请始终用简体中文说话。";
