@@ -255,13 +255,6 @@ public final class MaidSelfTalkService {
     }
 
     /**
-     * 按配置语言生成输出语言指令，追加到提示词中。
-     * TLM 官方模型人设设定多为英文，若不显式声明语言，模型可能跟随英文设定输出英文。
-     * <p>
-     * 语言标签来自玩家可伪造的 chatLanguage（TLM 聊天包），
-     * 白名单外一律回退默认中文指令，避免不可信字符串注入提示词。
-     */
-    /**
      * 自话语言白名单化：仅接受简体中文/英文，其余回退简体中文。
      * chatManager.chatLanguage 来自玩家 chat 时记录的客户端语言（玩家可控），
      * 未经校验直接进 invokeGetMessages 会经由 TLM 占位符替换路径，存在注入面。
@@ -273,6 +266,13 @@ public final class MaidSelfTalkService {
         };
     }
 
+    /**
+     * 按配置语言生成输出语言指令，追加到提示词中。
+     * TLM 官方模型人设设定多为英文，若不显式声明语言，模型可能跟随英文设定输出英文。
+     * <p>
+     * 语言标签来自玩家可伪造的 chatLanguage（TLM 聊天包），
+     * 白名单外一律回退默认中文指令，避免不可信字符串注入提示词。
+     */
     private static String languageInstruction(String language) {
         return switch (language) {
             case "zh_cn", "zh" -> "\n\n请始终用简体中文说话。";
