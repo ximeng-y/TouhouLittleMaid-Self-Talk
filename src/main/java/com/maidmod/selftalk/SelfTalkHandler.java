@@ -36,7 +36,7 @@ import java.util.UUID;
  */
 public final class SelfTalkHandler {
 
-    /** 玩家 UUID -> 登录时刻（gameTime） */
+    /** 玩家 UUID -> 登录时刻（服务器 tick，与欢迎窗口判定同基准） */
     private static final Map<UUID, Long> PLAYER_LOGIN_TICKS = Maps.newHashMap();
 
     /** 欢迎语秒级闸门：上次放行的服务器秒（serverTick / 20）与该秒内已放行次数（仅服务端主线程访问） */
@@ -213,9 +213,10 @@ public final class SelfTalkHandler {
 
     @SubscribeEvent
     public static void onEntityLeaveLevel(EntityLeaveLevelEvent event) {
-        // 女仆离开世界（被拾取进背包、被移除等）时清理内存状态，防止长期泄漏；
-        // 注意：跨维度传送也会触发本事件，状态会被重建（welcomedPlayers 清空、
-        // 冷却重置），但欢迎窗口仅登录后短暂存在、冷却有全局闸门兜底，影响可接受
+        // 女仆离开世界（被拾取进背包、被移除等）时清理内存状态，防止长期泄漏。
+        // TLM 女仆实际无法跨维度（EntityMaid.changeDimension 覆写直接拦截），
+        // 即使泛化场景下维度传送也会生成新实体实例+新实体 ID（状态按实体 ID 键控，天然重置），
+        // 因此此处清理不会破坏"每只女仆对每名主人仅欢迎一次"或冷却语义
         if (event.getEntity() instanceof EntityMaid maid) {
             SelfTalkState.remove(maid.getId());
         }

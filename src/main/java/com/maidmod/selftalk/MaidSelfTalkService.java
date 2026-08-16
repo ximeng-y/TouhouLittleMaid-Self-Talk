@@ -144,6 +144,7 @@ public final class MaidSelfTalkService {
     public static void onSelfTalkFinished(EntityMaid maid, SelfTalkCallback callback, LLMMessage assistantMsg) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.selfTalkPending = false;
+        state.selfTalkPendingSinceTick = -1;
         if (assistantMsg == null) {
             // 捕获失败（响应线程与服务端线程写入历史交错等罕见情形）：放弃本次记账，等待下次自话
             return;
@@ -253,7 +254,7 @@ public final class MaidSelfTalkService {
      * TLM 官方模型人设设定多为英文，若不显式声明语言，模型可能跟随英文设定输出英文。
      * <p>
      * 语言标签来自玩家可伪造的 chatLanguage（TLM 聊天包），
-     * 白名单外一律回退默认中文指令，避免不可信字符串进入提示词或使 formatted() 抛格式异常。
+     * 白名单外一律回退默认中文指令，避免不可信字符串注入提示词。
      */
     private static String languageInstruction(String language) {
         return switch (language) {

@@ -56,11 +56,15 @@ public class SelfTalkConfigSetMessage {
         ctx.get().setPacketHandled(true);
     }
 
-    /** 目标女仆是否存在且属于该玩家（校验在发送者所在维度即可：设置界面只能对身边女仆打开） */
+    /**
+     * 目标女仆是否存在且属于该玩家：客户端发送的是女仆实体 UUID，校验其主人是否为发送者本人。
+     * 服务端只读主人自己的持久化设置，非本人的单只设置请求一律丢弃
+     * （TLM 聊天界面本身无归属校验，任何玩家都可对任意女仆打开，故必须在此拦截）
+     */
     private static boolean isOwnedMaid(ServerPlayer player, UUID maidUuid) {
         if (!(player.serverLevel().getEntity(maidUuid) instanceof EntityMaid maid)) {
             return false;
         }
-        return maidUuid.equals(maid.getOwnerUUID());
+        return player.getUUID().equals(maid.getOwnerUUID());
     }
 }

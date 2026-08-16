@@ -60,8 +60,14 @@ public class SelfTalkCallback extends LLMCallback {
         // （LLM 响应线程）立即读取，避免与服务端线程的玩家 chat 写入历史交错
         LLMMessage assistantMsg = captureLatestAssistantMessage(responseChat);
         if (assistantMsg == null) {
-            // 父类早退（空回复转 onFailure，未写历史）时无消息可捕获，
-            // 跳过事件/遗忘/广播，避免空文本广播与窗口记账污染
+            // 父类早退（空回复转 onFailure，未写历史）时无消息可捕获；
+            // 或捕获校验未过（罕见交错）——跳过事件/遗忘/广播，但要复位 pending
+            // 解锁自话闸门（父类早退路径已由 onFailure 复位，此处兜底交错场景）
+            runOnServerThread(() -> {
+                SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
+                state.selfTalkPending = false;
+                state.selfTalkPendingSinceTick = -1;
+            });
             return;
         }
         EntityMaid maid = getMaid();
