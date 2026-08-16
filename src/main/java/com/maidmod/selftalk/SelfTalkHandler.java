@@ -16,6 +16,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -284,10 +285,15 @@ public final class SelfTalkHandler {
 
     /** 清扫 STATES 中已不加载于任何维度的实体条目（服务端主线程调用） */
     private static void cleanupStaleStates(MinecraftServer server) {
+        // 先收集再删除：遍历中直接 remove 会触发 HashMap fail-fast 的 ConcurrentModificationException
+        List<Integer> staleIds = new ArrayList<>();
         for (Map.Entry<Integer, SelfTalkState.State> entry : SelfTalkState.entrySet()) {
             if (!isEntityLoaded(server, entry.getKey())) {
-                SelfTalkState.remove(entry.getKey());
+                staleIds.add(entry.getKey());
             }
+        }
+        for (int maidId : staleIds) {
+            SelfTalkState.remove(maidId);
         }
     }
 
