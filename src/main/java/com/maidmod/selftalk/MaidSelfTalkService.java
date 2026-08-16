@@ -10,12 +10,9 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMSite;
 import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.mixin.MaidAIChatManagerAccessor;
-import com.mojang.datafixers.util.Pair;
 import org.apache.commons.lang3.StringUtils;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 
 /**
@@ -115,11 +112,22 @@ public final class MaidSelfTalkService {
         String message = UserPromptContexts.addContext(maid, prompt);
         messages.add(LLMMessage.userChat(maid, message));
 
-        // 标记进行中（防重入）
-        SelfTalkState.get(maid.getId()).selfTalkPending = true;
+        // 标记进行中（防重入），记录置位时刻供超时强制复位
+        SelfTalkState.State state = SelfTalkState.get(maid.getId());
+        state.selfTalkPending = true;
+        state.selfTalkPendingSinceTick = maid.level().getServer().getTickCount();
 
         LLMClient client = site.client();
-        client.chat(new SelfTalkCallback(chatManager, messages, welcome, keep, broadcastRange));
+        try {
+            client.chat(new SelfTalkCallback(chatManager, messages, welcome, keep, broadcastRange));
+        } catch (Throwable t) {
+            // chat() 同步抛异常（如站点 URL 非法导致 URI.create 抛 IllegalArgumentException）时
+            // 不会有任何回调来复位标记，必须在此回滚，否则该女仆自话永久停摆
+            state.selfTalkPending = false;
+            state.selfTalkPendingSinceTick = -1;
+            MaidSelfTalkMod.LOGGER.error("Failed to send self-talk request, self-talk skipped", t);
+            return false;
+        }
         return true;
     }
 
@@ -129,25 +137,25 @@ public final class MaidSelfTalkService {
      * 遗忘规则：当前自话窗口（从玩家上一次正常 chat 起）内保留条数触碰上限时，
      * 删除窗口内除本次外的全部自话记录，仅保留本次——防止自话记录无限撑大上下文。
      * 玩家发起 chat 时窗口重置（旧自话记录"赦免"保留在上下文中，计数重新开始）。
+     *
+     * @param assistantMsg 本次回复的 assistant 消息：由 {@link SelfTalkCallback} 在
+     *                     LLM 响应线程捕获（TLM CappedQueue 队头=最新，不能用 peekLast 取最旧）
      */
-    public static void onSelfTalkFinished(EntityMaid maid, SelfTalkCallback callback) {
+    public static void onSelfTalkFinished(EntityMaid maid, SelfTalkCallback callback, LLMMessage assistantMsg) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.selfTalkPending = false;
-
-        // 本次回复的 assistant 消息：父类 onSuccess 已写入历史尾部
-        Deque<LLMMessage> deque = callback.getChatManager().getHistory().getDeque();
-        LLMMessage last = deque.peekLast();
-        if (last == null) {
+        if (assistantMsg == null) {
+            // 捕获失败（响应线程与服务端线程写入历史交错等罕见情形）：放弃本次记账，等待下次自话
             return;
         }
-        state.windowSelfTalkMsgs.add(last);
+        state.windowSelfTalkMsgs.add(assistantMsg);
 
         int keep = callback.getKeepSelfTalkCount();
         if (state.windowSelfTalkMsgs.size() >= keep && state.windowSelfTalkMsgs.size() > 1) {
             // 删除窗口内除本次外的所有自话记录（仅保留本次）
             List<LLMMessage> toRemove = new ArrayList<>(
                     state.windowSelfTalkMsgs.subList(0, state.windowSelfTalkMsgs.size() - 1));
-            deque.removeAll(toRemove);
+            callback.getChatManager().getHistory().getDeque().removeAll(toRemove);
             state.windowSelfTalkMsgs.removeAll(toRemove);
         }
     }
@@ -156,6 +164,9 @@ public final class MaidSelfTalkService {
     public static void onPlayerChatStart(EntityMaid maid) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.playerChatPending = true;
+        // 记录置位时刻：TLM chat() 存在不产生回调的早退路径，标记可能无人复位，
+        // 状态机据此超时强制复位（见 SelfTalkHandler）
+        state.playerChatPendingSinceTick = maid.level().getServer().getTickCount();
         state.windowSelfTalkMsgs.clear();
         resetSelfTalkCooldown(maid, state);
     }
@@ -175,15 +186,26 @@ public final class MaidSelfTalkService {
             minSeconds = Config.STATE2_MIN_INTERVAL.get();
             maxSeconds = Config.STATE2_MAX_INTERVAL.get();
         }
+        // 与 SelfTalkHandler 同基准：服务器全局 tick（各维度 gameTime 独立计数，跨维度比较会出现负差）
+        long serverTick = maid.level().getServer().getTickCount();
+        state.nextTriggerTick = serverTick + randomIntervalTicks(minSeconds, maxSeconds);
+    }
+
+    /**
+     * 区间随机间隔（tick）：min + rand * (max - min + 1)。
+     * 供自话/欢迎触发后的冷却与玩家 chat 后的冷却复用，保证区间语义一致。
+     */
+    public static int randomIntervalTicks(int minSeconds, int maxSeconds) {
         int minTicks = minSeconds * 20;
         int maxTicks = maxSeconds * 20;
-        long gameTime = maid.level().getGameTime();
-        state.nextTriggerTick = gameTime + minTicks + (int) (Math.random() * (maxTicks - minTicks + 1));
+        return minTicks + (int) (Math.random() * (maxTicks - minTicks + 1));
     }
 
     /** 玩家 chat 结束（成功或失败）：解除进行中标记 */
     public static void onPlayerChatEnd(EntityMaid maid) {
-        SelfTalkState.get(maid.getId()).playerChatPending = false;
+        SelfTalkState.State state = SelfTalkState.get(maid.getId());
+        state.playerChatPending = false;
+        state.playerChatPendingSinceTick = -1;
     }
 
     /**
@@ -229,12 +251,15 @@ public final class MaidSelfTalkService {
     /**
      * 按配置语言生成输出语言指令，追加到提示词中。
      * TLM 官方模型人设设定多为英文，若不显式声明语言，模型可能跟随英文设定输出英文。
+     * <p>
+     * 语言标签来自玩家可伪造的 chatLanguage（TLM 聊天包），
+     * 白名单外一律回退默认中文指令，避免不可信字符串进入提示词或使 formatted() 抛格式异常。
      */
     private static String languageInstruction(String language) {
         return switch (language) {
             case "zh_cn", "zh" -> "\n\n请始终用简体中文说话。";
             case "en_us", "en" -> "\n\nPlease always speak in English.";
-            default -> "\n\n请始终用%s说话。".formatted(language);
+            default -> "\n\n请始终用简体中文说话。";
         };
     }
 }

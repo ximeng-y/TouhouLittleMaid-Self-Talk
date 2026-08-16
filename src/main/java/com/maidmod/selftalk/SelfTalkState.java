@@ -29,20 +29,17 @@ public final class SelfTalkState {
         STATES.remove(maidId);
     }
 
-    /** 女仆死亡/卸载时清理状态 */
-    public static void cleanupIfDead(int maidId, boolean alive) {
-        if (!alive) {
-            STATES.remove(maidId);
-        }
-    }
-
     public static final class State {
-        /** 下次可触发自话的 gameTime（tick） */
+        /** 下次可触发自话的服务器 tick（全局单调，与 {@code server.getTickCount()} 同基准） */
         public long nextTriggerTick = 0;
         /** 是否有自话正在进行（回复未返回） */
         public boolean selfTalkPending = false;
         /** 是否有玩家 chat 正在进行 */
         public boolean playerChatPending = false;
+        /** selfTalkPending 置位时的服务器 tick（-1 = 未置位），用于超时强制复位防卡死 */
+        public long selfTalkPendingSinceTick = -1;
+        /** playerChatPending 置位时的服务器 tick（-1 = 未置位），用于超时强制复位防卡死 */
+        public long playerChatPendingSinceTick = -1;
         /** 当前自话窗口内已保留的自言自语 assistant 消息（按时间序） */
         public final List<LLMMessage> windowSelfTalkMsgs = new ArrayList<>();
         /** 本女仆已欢迎过的玩家 */

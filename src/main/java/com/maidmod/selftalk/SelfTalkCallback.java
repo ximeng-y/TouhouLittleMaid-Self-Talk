@@ -4,6 +4,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.response.ResponseChat;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
@@ -13,6 +14,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.MinecraftForge;
 
 import java.net.http.HttpRequest;
+import java.util.Deque;
 import java.util.List;
 import java.util.UUID;
 
@@ -53,10 +55,19 @@ public class SelfTalkCallback extends LLMCallback {
     public void onSuccess(ResponseChat responseChat) {
         // TLM 默认行为：写 assistant 历史（供聊天记录 UI 显示）、显示气泡并给主人发送聊天栏消息
         super.onSuccess(responseChat);
+        // 捕获本次写入历史的 assistant 消息实例：
+        // TLM CappedQueue.add 用 offerFirst（队头=最新），且必须在 super 返回后的同一线程
+        // （LLM 响应线程）立即读取，避免与服务端线程的玩家 chat 写入历史交错
+        LLMMessage assistantMsg = captureLatestAssistantMessage(responseChat);
+        if (assistantMsg == null) {
+            // 父类早退（空回复转 onFailure，未写历史）时无消息可捕获，
+            // 跳过事件/遗忘/广播，避免空文本广播与窗口记账污染
+            return;
+        }
         EntityMaid maid = getMaid();
         Runnable finish = () -> {
             MinecraftForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, responseChat.getChatText(), welcome));
-            MaidSelfTalkService.onSelfTalkFinished(maid, this);
+            MaidSelfTalkService.onSelfTalkFinished(maid, this, assistantMsg);
             broadcastToNearby(maid, responseChat.getChatText());
         };
         if (isOnServerThread()) {
@@ -67,10 +78,29 @@ public class SelfTalkCallback extends LLMCallback {
         }
     }
 
+    /**
+     * 捕获父类刚写入历史的 assistant 消息（队头=最新）。
+     * 父类 {@code onSuccess} 写入的是 {@code responseChat.toString()}，据此校验队头消息，
+     * 避免与其他线程（玩家 chat 响应）写入的历史交错时抓错消息；校验不过则返回 null。
+     */
+    private LLMMessage captureLatestAssistantMessage(ResponseChat responseChat) {
+        Deque<LLMMessage> deque = getChatManager().getHistory().getDeque();
+        LLMMessage head = deque.peekFirst();
+        if (head != null && head.role() == Role.ASSISTANT
+                && responseChat.toString().equals(head.message())) {
+            return head;
+        }
+        return null;
+    }
+
     @Override
     public void onFailure(HttpRequest request, Throwable throwable, int errorCode) {
         super.onFailure(request, throwable, errorCode);
-        runOnServerThread(() -> SelfTalkState.get(getMaid().getId()).selfTalkPending = false);
+        runOnServerThread(() -> {
+            SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
+            state.selfTalkPending = false;
+            state.selfTalkPendingSinceTick = -1;
+        });
     }
 
     /**
