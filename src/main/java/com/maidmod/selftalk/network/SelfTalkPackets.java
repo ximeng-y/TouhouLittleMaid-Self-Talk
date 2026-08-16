@@ -1,5 +1,6 @@
 package com.maidmod.selftalk.network;
 
+import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.Config;
 import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.SelfTalkAttachments;
@@ -23,7 +24,7 @@ import java.util.UUID;
 public final class SelfTalkPackets {
 
     /** 单只关闭名单容量上限：防恶意客户端用任意 UUID 无限撑大附件与存档（每次写入还有全量拷贝放大） */
-    private static final int MAX_MAID_OVERRIDES = 128;
+    private static final int MAX_MAID_OVERRIDES = 256;
     /** 每玩家每秒最多处理的设置包数（正常 UI 操作远低于此，仅防包风暴） */
     private static final int MAX_CONFIG_PACKETS_PER_SECOND = 20;
     /** 玩家 UUID -> [上次处理的秒, 该秒内处理数]（仅服务端主线程访问；条目极小，随玩家长期积累可忽略） */
@@ -69,6 +70,10 @@ public final class SelfTalkPackets {
                 if (payload.maidUuid().isEmpty()) {
                     serverPlayer.setData(SelfTalkAttachments.SELF_TALK_ENABLED, payload.enabled());
                 } else {
+                    // 归属校验：仅允许主人操作自己拥有的女仆，防伪造 UUID 污染名单
+                    if (!isOwnedMaid(serverPlayer, payload.maidUuid().get())) {
+                        return;
+                    }
                     // 名单只存关闭项：关闭时 put false，重新开启时 remove，避免名单膨胀。
                     // 拷贝后 setData 回写，而非原地修改（防未来加 networkSerialize 时漏同步）
                     Map<String, Boolean> overrides = new HashMap<>(
@@ -89,6 +94,12 @@ public final class SelfTalkPackets {
                 }
             }
         });
+    }
+
+    /** 校验女仆是否存在且属于该玩家（防伪造 UUID 写入他人女仆或不存在实体的条目） */
+    private static boolean isOwnedMaid(ServerPlayer player, UUID maidUuid) {
+        return player.serverLevel().getEntity(maidUuid) instanceof EntityMaid maid
+                && player.getUUID().equals(maid.getOwnerUUID());
     }
 
     /** 每玩家每秒限流：防恶意客户端包风暴（正常设置界面操作远低于该频率） */
