@@ -43,7 +43,6 @@ public final class SelfTalkState {
             STATES.remove(maidId);
         }
     }
-
     /** 玩家登出：清除所有女仆对该玩家的欢迎标记，下次登录窗口内可再次欢迎 */
     public static void removeWelcomeForPlayer(UUID playerUuid) {
         for (State state : STATES.values()) {

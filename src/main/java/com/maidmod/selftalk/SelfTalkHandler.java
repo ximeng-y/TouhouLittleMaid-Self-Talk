@@ -83,15 +83,14 @@ public final class SelfTalkHandler {
             return;
         }
         // 周期性清扫（任何女仆 tick 时触发）：清理已不加载实体的残留状态。
-        // 区块卸载的女仆不再收到 MaidTickEvent，仅靠死亡路径清理会随实体流转无限增长，
-        // 且实体 ID 复用会让新女仆继承陈旧状态（如卡死的 pending 标记）
+        // 区块卸载/死亡的女仆不再收到 MaidTickEvent，仅靠死亡路径清理会随实体流转无限增长
         long serverTick = level.getServer().getTickCount();
         if (serverTick - lastCleanupTick >= CLEANUP_INTERVAL_TICKS) {
             lastCleanupTick = serverTick;
             cleanupStaleStates(level.getServer());
         }
         if (!maid.isAlive()) {
-            SelfTalkState.remove(maid.getId());
+            SelfTalkState.cleanupIfDead(maid.getId(), false);
             return;
         }
 

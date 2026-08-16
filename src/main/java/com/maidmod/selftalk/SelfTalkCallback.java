@@ -60,7 +60,9 @@ public class SelfTalkCallback extends LLMCallback {
         if (responseChat.getChatText().isBlank() || responseChat.getTtsText().isBlank()) {
             return;
         }
-        // 响应线程、父类写历史之后立即捕获本次回复（父类刚写入队头，本线程写后立即读，必为本次回复）。
+        // 响应线程、父类写历史之后立即捕获本次回复（父类刚写入队头，本线程写后紧邻读取，
+        // 极大概率即本次回复；同女仆并发响应线程在写入与捕获之间交错时可能取到对方消息，
+        // 该亚微秒级残余竞态只影响遗忘记账，不影响正确性）。
         // 不能到主线程再 peek——自话与玩家 chat 回复同一瞬间完成时可能取到玩家消息
         this.lastAssistantMessage = getChatManager().getHistory().getDeque().peekFirst();
         EntityMaid maid = getMaid();
