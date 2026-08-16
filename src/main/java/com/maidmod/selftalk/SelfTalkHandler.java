@@ -6,14 +6,17 @@ import com.github.tartaricacid.touhoulittlemaid.api.event.MaidTickEvent;
 import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.google.common.collect.Maps;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -49,6 +52,11 @@ public final class SelfTalkHandler {
     /** pending 标记超时（tick，5 分钟）：TLM chat 早退路径/同步异常不产生回调时强制复位防卡死 */
     private static final long PENDING_TIMEOUT_TICKS = 5 * 60 * 20;
 
+    /** 状态周期清扫间隔（tick）：5 分钟（兜底清理卸载女仆的残留状态） */
+    private static final long CLEANUP_INTERVAL_TICKS = 5 * 60 * 20;
+    /** 上次状态清扫的服务器 tick */
+    private static long lastCleanupTick = 0;
+
     private SelfTalkHandler() {
     }
 
@@ -72,6 +80,13 @@ public final class SelfTalkHandler {
         if (!(maid.level() instanceof ServerLevel level)) {
             return;
         }
+        // 周期性清扫（任何女仆 tick 时触发）：清理已不加载实体的残留状态。
+        // 区块卸载/死亡的女仆不再收到 MaidTickEvent，仅靠死亡路径清理会随实体流转无限增长
+        long serverTick = level.getServer().getTickCount();
+        if (serverTick - lastCleanupTick >= CLEANUP_INTERVAL_TICKS) {
+            lastCleanupTick = serverTick;
+            cleanupStaleStates(level.getServer());
+        }
         if (!maid.isAlive()) {
             SelfTalkState.remove(maid.getId());
             return;
@@ -80,21 +95,20 @@ public final class SelfTalkHandler {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         // pending 超时强制复位：TLM chat() 存在不创建回调的早退路径（LLM 关闭、token 超限、
         // site 无效、DeepSeek key 缺失等），标记一旦置位可能无人复位，女仆自话会永久停摆
-        long serverTick = level.getServer().getTickCount();
         if (state.selfTalkPending && state.selfTalkPendingSinceTick >= 0
                 && serverTick - state.selfTalkPendingSinceTick > PENDING_TIMEOUT_TICKS) {
             MaidSelfTalkMod.LOGGER.warn("Self-talk pending timed out for maid {}, force reset", maid.getId());
             state.selfTalkPending = false;
             state.selfTalkPendingSinceTick = -1;
         }
-        if (state.playerChatPending && state.playerChatPendingSinceTick >= 0
-                && serverTick - state.playerChatPendingSinceTick > PENDING_TIMEOUT_TICKS) {
+        if (state.playerChatCount > 0 && state.playerChatSinceTick >= 0
+                && serverTick - state.playerChatSinceTick > PENDING_TIMEOUT_TICKS) {
             MaidSelfTalkMod.LOGGER.warn("Player chat pending timed out for maid {}, force reset", maid.getId());
-            state.playerChatPending = false;
-            state.playerChatPendingSinceTick = -1;
+            state.playerChatCount = 0;
+            state.playerChatSinceTick = -1;
         }
         // 有进行中的自话或玩家 chat 时，跳过本次触发
-        if (state.selfTalkPending || state.playerChatPending) {
+        if (state.selfTalkPending || state.playerChatCount > 0) {
             return;
         }
         // AI 前置门槛
@@ -211,15 +225,44 @@ public final class SelfTalkHandler {
         PLAYER_LOGIN_TICKS.remove(event.getEntity().getUUID());
     }
 
+    /**
+     * 女仆离开维度时即时清理状态（EntityLeaveLevelEvent）。
+     * 传送也会触发离开事件（实体随后加入新维度），按移除原因排除；
+     * 若事件触发时 removalReason 尚未设置（时序差异）则此处跳过，
+     * 由周期性清扫 {@link #cleanupStaleStates} 兜底，不影响正确性。
+     */
     @SubscribeEvent
     public static void onEntityLeaveLevel(EntityLeaveLevelEvent event) {
-        // 女仆离开世界（被拾取进背包、被移除等）时清理内存状态，防止长期泄漏。
-        // TLM 女仆实际无法跨维度（EntityMaid.changeDimension 覆写直接拦截），
-        // 即使泛化场景下维度传送也会生成新实体实例+新实体 ID（状态按实体 ID 键控，天然重置），
-        // 因此此处清理不会破坏"每只女仆对每名主人仅欢迎一次"或冷却语义
-        if (event.getEntity() instanceof EntityMaid maid) {
+        if (event.getLevel() instanceof ServerLevel
+                && event.getEntity() instanceof EntityMaid maid
+                && maid.isRemoved()
+                && maid.getRemovalReason() != Entity.RemovalReason.CHANGED_DIMENSION) {
             SelfTalkState.remove(maid.getId());
         }
+    }
+
+    /** 清扫 STATES 中已不加载于任何维度的实体条目（服务端主线程调用） */
+    private static void cleanupStaleStates(MinecraftServer server) {
+        // 先收集再删除：遍历中直接 remove 会触发 HashMap fail-fast 的 ConcurrentModificationException
+        List<Integer> staleIds = new ArrayList<>();
+        for (Map.Entry<Integer, SelfTalkState.State> entry : SelfTalkState.entrySet()) {
+            if (!isEntityLoaded(server, entry.getKey())) {
+                staleIds.add(entry.getKey());
+            }
+        }
+        for (int maidId : staleIds) {
+            SelfTalkState.remove(maidId);
+        }
+    }
+
+    /** 实体 ID 是否仍加载于任意服务端维度 */
+    private static boolean isEntityLoaded(MinecraftServer server, int entityId) {
+        for (ServerLevel level : server.getAllLevels()) {
+            if (level.getEntity(entityId) != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 半径内是否存在存活、非旁观模式的玩家 */

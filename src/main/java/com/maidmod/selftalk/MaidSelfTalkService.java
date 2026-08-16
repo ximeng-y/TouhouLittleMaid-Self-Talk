@@ -70,8 +70,8 @@ public final class MaidSelfTalkService {
 
         // 自话语言：优先女仆已记录的聊天语言（玩家 chat 过则为客户端语言，保证上下文前缀缓存一致），
         // 否则用配置默认（TLM 官方模型设定多为英文，配置默认 zh_cn 保证中文输出）
-        String selfTalkLanguage = StringUtils.isBlank(chatManager.chatLanguage)
-                ? Config.SELF_TALK_LANGUAGE.get() : chatManager.chatLanguage;
+        String selfTalkLanguage = sanitizeLanguage(StringUtils.isBlank(chatManager.chatLanguage)
+                ? Config.SELF_TALK_LANGUAGE.get() : chatManager.chatLanguage);
 
         // 组装与玩家 chat 同构的消息前缀（语言影响设定占位符的替换）
         List<LLMMessage> messages;
@@ -164,10 +164,10 @@ public final class MaidSelfTalkService {
     /** 玩家发起 chat：窗口重置（计数重新开始，旧自话记录赦免保留在上下文中），并重新计时自话冷却 */
     public static void onPlayerChatStart(EntityMaid maid) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
-        state.playerChatPending = true;
+        state.playerChatCount++;
         // 记录置位时刻：TLM chat() 存在不产生回调的早退路径，标记可能无人复位，
         // 状态机据此超时强制复位（见 SelfTalkHandler）
-        state.playerChatPendingSinceTick = maid.level().getServer().getTickCount();
+        state.playerChatSinceTick = maid.level().getServer().getTickCount();
         state.windowSelfTalkMsgs.clear();
         resetSelfTalkCooldown(maid, state);
     }
@@ -202,11 +202,16 @@ public final class MaidSelfTalkService {
         return minTicks + (int) (Math.random() * (maxTicks - minTicks + 1));
     }
 
-    /** 玩家 chat 结束（成功或失败）：解除进行中标记 */
+    /** 玩家 chat 结束（成功或失败）：解除一条在途计数 */
     public static void onPlayerChatEnd(EntityMaid maid) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
-        state.playerChatPending = false;
-        state.playerChatPendingSinceTick = -1;
+        if (state.playerChatCount > 0) {
+            state.playerChatCount--;
+        }
+        // 仅当全部在途 chat 结束时清零计时，连发场景下保留最后一条的置位时刻供超时兜底
+        if (state.playerChatCount == 0) {
+            state.playerChatSinceTick = -1;
+        }
     }
 
     /**
@@ -256,6 +261,18 @@ public final class MaidSelfTalkService {
      * 语言标签来自玩家可伪造的 chatLanguage（TLM 聊天包），
      * 白名单外一律回退默认中文指令，避免不可信字符串注入提示词。
      */
+    /**
+     * 自话语言白名单化：仅接受简体中文/英文，其余回退简体中文。
+     * chatManager.chatLanguage 来自玩家 chat 时记录的客户端语言（玩家可控），
+     * 未经校验直接进 invokeGetMessages 会经由 TLM 占位符替换路径，存在注入面。
+     */
+    private static String sanitizeLanguage(String language) {
+        return switch (language) {
+            case "zh_cn", "zh", "en_us", "en" -> language;
+            default -> "zh_cn";
+        };
+    }
+
     private static String languageInstruction(String language) {
         return switch (language) {
             case "zh_cn", "zh" -> "\n\n请始终用简体中文说话。";
