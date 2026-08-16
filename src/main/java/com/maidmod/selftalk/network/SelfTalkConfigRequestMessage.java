@@ -34,7 +34,8 @@ public class SelfTalkConfigRequestMessage {
     public static void handle(SelfTalkConfigRequestMessage msg, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
             ServerPlayer serverPlayer = ctx.get().getSender();
-            if (serverPlayer != null && msg.maidUuid != null) {
+            if (serverPlayer != null && msg.maidUuid != null
+                    && SelfTalkConfigSetMessage.allowConfigPacket(serverPlayer.getUUID())) {
                 boolean adminEnabled = Config.PLAYER_OPTION_ENABLED.get();
                 boolean globalEnabled = PlayerSettingsStorage.isEnabled(serverPlayer);
                 boolean maidEnabled = globalEnabled
