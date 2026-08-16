@@ -32,10 +32,6 @@
   "config.maid_self_talk.welcome.window_ticks": "Welcome Window (tick)",
   "config.maid_self_talk.welcome.window_ticks.tooltip": "Time window after the owner logs in during which maids may greet (20 ticks = 1 second).",
   "config.maid_self_talk.prompt": "Self-Talk Prompts",
-  "config.maid_self_talk.prompt.self_talk": "Self-Talk Prompt (owner away)",
-  "config.maid_self_talk.prompt.self_talk.tooltip": "Prompt for self-talk. Some game context (position/nearby entities/equipment, etc.) is randomly appended. The prompt is sent as a user message like a player chat (same prefix for cache), but never written into chat history or shown in the chat record UI.",
-  "config.maid_self_talk.prompt.welcome": "Welcome Prompt",
-  "config.maid_self_talk.prompt.welcome.tooltip": "Prompt for the welcome greeting, same rules as the self-talk prompt.",
   "config.maid_self_talk.screen.self_talk_button.tip": "Self-Talk Settings",
   "config.maid_self_talk.screen.player_settings.title": "Self-Talk Settings",
   "config.maid_self_talk.screen.player_settings.maid": "Maid: %s",
@@ -43,8 +39,6 @@
   "config.maid_self_talk.screen.player_settings.maid_toggle": "This maid self-talks: %s",
   "config.maid_self_talk.screen.player_settings.global_off_hint": "Turned off by your global setting; enable it first",
   "config.maid_self_talk.screen.player_settings.admin_disabled": "Disabled by server admin",
-  "config.maid_self_talk.prompt.self_talk_owner_nearby": "Self-Talk Prompt (owner nearby)",
-  "config.maid_self_talk.prompt.self_talk_owner_nearby.tooltip": "Self-talk prompt used when the owner is nearby (within 16 blocks). Same rules as the other one.",
   "config.maid_self_talk.prompt.language": "Self-Talk Language",
   "config.maid_self_talk.prompt.language.tooltip": "Output language of self-talk (language tag, e.g. zh_cn / en_us). TLM official model personas are mostly English; without an explicit language instruction the maid may answer in English."
 }
