@@ -38,6 +38,8 @@ public class SelfTalkCallback extends LLMCallback {
     private final int keepSelfTalkCount;
     /** 聊天框广播半径（格）：范围内存活玩家可见自话内容 */
     private final double broadcastRange;
+    /** 本次回复的 assistant 消息（响应线程在父类写历史后立即捕获，供遗忘机制识别） */
+    private LLMMessage lastAssistantMessage;
 
     public SelfTalkCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
                             boolean welcome, int keepSelfTalkCount, double broadcastRange) {
@@ -53,6 +55,14 @@ public class SelfTalkCallback extends LLMCallback {
     public void onSuccess(ResponseChat responseChat) {
         // TLM 默认行为：写 assistant 历史（供聊天记录 UI 显示）、显示气泡并给主人发送聊天栏消息
         super.onSuccess(responseChat);
+        // 父类对空白回复（chatText/ttsText 为空）会内部转调 onFailure 并 return，不写历史；
+        // 此处短路，避免继续走成功路径的 finish（空文本广播 + 把陈旧消息误当本次回复计入窗口）
+        if (responseChat.getChatText().isBlank() || responseChat.getTtsText().isBlank()) {
+            return;
+        }
+        // 响应线程、父类写历史之后立即捕获本次回复（父类刚写入队头，本线程写后立即读，必为本次回复）。
+        // 不能到主线程再 peek——自话与玩家 chat 回复同一瞬间完成时可能取到玩家消息
+        this.lastAssistantMessage = getChatManager().getHistory().getDeque().peekFirst();
         EntityMaid maid = getMaid();
         Runnable finish = () -> {
             NeoForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, responseChat.getChatText(), welcome));
@@ -104,5 +114,10 @@ public class SelfTalkCallback extends LLMCallback {
 
     public int getKeepSelfTalkCount() {
         return keepSelfTalkCount;
+    }
+
+    /** 本次回复的 assistant 消息（可能为 null：空白回复等未写历史的路径） */
+    public LLMMessage getLastAssistantMessage() {
+        return lastAssistantMessage;
     }
 }
