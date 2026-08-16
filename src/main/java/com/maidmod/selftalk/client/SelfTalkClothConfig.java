@@ -51,13 +51,15 @@ public final class SelfTalkClothConfig {
                 .setSaveConsumer(v -> saveBool(Config.PLAYER_OPTION_ENABLED, v))
                 .build());
 
-        // 子页：态 1 / 态 2
+        // 子页：态 1 / 态 2（默认值与 Config 定义保持一致，重置默认时不会写入错误值）
         main.add(stateCategory(entryBuilder, "config.maid_self_talk.state_owner_online",
                 Config.STATE1_ENABLED, Config.STATE1_MIN_INTERVAL, Config.STATE1_MAX_INTERVAL,
-                Config.STATE1_PLAYER_RANGE, Config.STATE1_KEEP_SELF_TALK_COUNT).build());
+                Config.STATE1_PLAYER_RANGE, Config.STATE1_KEEP_SELF_TALK_COUNT,
+                true, 60, 300, 16.0, 5).build());
         main.add(stateCategory(entryBuilder, "config.maid_self_talk.state_owner_offline",
                 Config.STATE2_ENABLED, Config.STATE2_MIN_INTERVAL, Config.STATE2_MAX_INTERVAL,
-                Config.STATE2_PLAYER_RANGE, Config.STATE2_KEEP_SELF_TALK_COUNT).build());
+                Config.STATE2_PLAYER_RANGE, Config.STATE2_KEEP_SELF_TALK_COUNT,
+                true, 120, 600, 32.0, 3).build());
 
         // 子页：欢迎语
         SubCategoryBuilder welcome = entryBuilder.startSubCategory(
@@ -80,8 +82,8 @@ public final class SelfTalkClothConfig {
         main.add(welcome.build());
 
         // 子页：自话提示词
-        // 注意：自话提示词、主人在身边提示词、欢迎提示词不在界面开放修改，
-        // 只能通过配置文件 maid_self_talk-common.toml 的 [prompt] 段调整（替换文件热重载生效）
+        // 注意：自话提示词、主人在身边提示词、欢迎提示词已硬编码于 SelfTalkPrompts（1.0.1 起），
+        // 不可配置；本子页仅开放输出语言一项
         SubCategoryBuilder prompt = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.prompt"))
                 .setExpanded(false);
@@ -89,7 +91,7 @@ public final class SelfTalkClothConfig {
                         Component.translatable("config.maid_self_talk.prompt.language"),
                         Config.SELF_TALK_LANGUAGE.get())
                 .setTooltip(Component.translatable("config.maid_self_talk.prompt.language.tooltip"))
-                .setSaveConsumer(v -> Config.SELF_TALK_LANGUAGE.set(v))
+                .setSaveConsumer(v -> saveStr(Config.SELF_TALK_LANGUAGE, v))
                 .build());
         main.add(prompt.build());
 
@@ -101,43 +103,50 @@ public final class SelfTalkClothConfig {
                                                     ForgeConfigSpec.IntValue minInterval,
                                                     ForgeConfigSpec.IntValue maxInterval,
                                                     ForgeConfigSpec.DoubleValue range,
-                                                    ForgeConfigSpec.IntValue keepCount) {
+                                                    ForgeConfigSpec.IntValue keepCount,
+                                                    boolean defaultEnabled, int defaultMin, int defaultMax,
+                                                    double defaultRange, int defaultKeep) {
         SubCategoryBuilder builder = entryBuilder.startSubCategory(Component.translatable(key))
                 .setExpanded(false);
         builder.add(entryBuilder.startBooleanToggle(Component.translatable(key + ".enabled"),
                         enabled.get())
-                .setDefaultValue(true)
+                .setDefaultValue(defaultEnabled)
                 .setTooltip(Component.translatable(key + ".enabled.tooltip"))
                 .setSaveConsumer(v -> saveBool(enabled, v))
                 .build());
         builder.add(entryBuilder.startIntField(Component.translatable(key + ".min_interval"),
                         minInterval.get())
                 .setMin(10).setMax(86400)
-                .setDefaultValue(60)
+                .setDefaultValue(defaultMin)
                 .setTooltip(Component.translatable(key + ".min_interval.tooltip"))
                 .setSaveConsumer(v -> saveInt(minInterval, v))
                 .build());
         builder.add(entryBuilder.startIntField(Component.translatable(key + ".max_interval"),
                         maxInterval.get())
                 .setMin(10).setMax(86400)
-                .setDefaultValue(300)
+                .setDefaultValue(defaultMax)
                 .setTooltip(Component.translatable(key + ".max_interval.tooltip"))
                 .setSaveConsumer(v -> saveInt(maxInterval, v))
                 .build());
         builder.add(entryBuilder.startDoubleField(Component.translatable(key + ".player_range"),
                         range.get())
                 .setMin(1.0).setMax(512.0)
-                .setDefaultValue(16.0)
+                .setDefaultValue(defaultRange)
                 .setTooltip(Component.translatable(key + ".player_range.tooltip"))
                 .setSaveConsumer(v -> saveDouble(range, v))
                 .build());
         builder.add(entryBuilder.startIntSlider(Component.translatable(key + ".keep_self_talk_count"),
                         keepCount.get(), 1, 50)
-                .setDefaultValue(5)
+                .setDefaultValue(defaultKeep)
                 .setTooltip(Component.translatable(key + ".keep_self_talk_count.tooltip"))
                 .setSaveConsumer(v -> saveInt(keepCount, v))
                 .build());
         return builder;
+    }
+
+    private static void saveStr(ForgeConfigSpec.ConfigValue<String> spec, String value) {
+        spec.set(value);
+        spec.save();
     }
 
     private static void saveBool(ForgeConfigSpec.BooleanValue spec, boolean value) {
