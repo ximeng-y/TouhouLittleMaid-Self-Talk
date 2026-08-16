@@ -74,7 +74,7 @@ public final class Config {
                 .defineInRange("maxIntervalSeconds", 300, 10, 86400);
         STATE1_PLAYER_RANGE = builder.comment("态 1：半径多少格内有玩家时才触发")
                 .defineInRange("playerRange", 16.0, 1.0, 512.0);
-        STATE1_KEEP_SELF_TALK_COUNT = builder.comment("态 1：自言自语保留上下文条数。超过该条数时触发一次遗忘，仅保留最近一次自言自语")
+        STATE1_KEEP_SELF_TALK_COUNT = builder.comment("态 1：自言自语保留上下文条数。达到或超过该条数时触发一次遗忘，仅保留最近一次自言自语")
                 .defineInRange("keepSelfTalkCount", 5, 1, 50);
         builder.pop();
 
@@ -87,7 +87,7 @@ public final class Config {
                 .defineInRange("maxIntervalSeconds", 600, 10, 86400);
         STATE2_PLAYER_RANGE = builder.comment("态 2：半径多少格内有玩家时才触发")
                 .defineInRange("playerRange", 32.0, 1.0, 512.0);
-        STATE2_KEEP_SELF_TALK_COUNT = builder.comment("态 2：自言自语保留上下文条数。超过该条数时触发一次遗忘，仅保留最近一次自言自语")
+        STATE2_KEEP_SELF_TALK_COUNT = builder.comment("态 2：自言自语保留上下文条数。达到或超过该条数时触发一次遗忘，仅保留最近一次自言自语")
                 .defineInRange("keepSelfTalkCount", 3, 1, 50);
         builder.pop();
 
@@ -127,5 +127,20 @@ public final class Config {
     }
 
     private Config() {
+    }
+
+    /**
+     * 秒区间随机转 tick：min/max 倒置时自动交换（配置项无跨字段校验，
+     * 管理员手改 toml 可能写出 min > max，交换后语义明确且区间恒正）。
+     */
+    public static int randomIntervalTicks(int minSeconds, int maxSeconds) {
+        if (maxSeconds < minSeconds) {
+            int temp = minSeconds;
+            minSeconds = maxSeconds;
+            maxSeconds = temp;
+        }
+        int minTicks = minSeconds * 20;
+        int maxTicks = maxSeconds * 20;
+        return minTicks + (int) (Math.random() * (maxTicks - minTicks + 1));
     }
 }

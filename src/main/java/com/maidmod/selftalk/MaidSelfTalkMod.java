@@ -13,7 +13,7 @@ import org.slf4j.LoggerFactory;
 import com.maidmod.selftalk.network.SelfTalkPackets;
 
 /**
- * 女仆 AI 自言自语与互相对话（重写版）入口。
+ * 女仆 AI 自言自语（重写版）入口。
  */
 @Mod(MaidSelfTalkMod.MODID)
 public class MaidSelfTalkMod {

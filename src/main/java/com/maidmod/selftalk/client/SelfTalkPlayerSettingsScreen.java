@@ -32,6 +32,8 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private boolean maidEnabled = true;
     private Button globalButton;
     private Button maidButton;
+    /** 本地是否已修改过设置（为 true 时忽略迟到的查询响应，避免界面闪回旧值） */
+    private boolean dirty = false;
 
     public SelfTalkPlayerSettingsScreen(EntityMaid maid) {
         super(Component.translatable("config.maid_self_talk.screen.player_settings.title"));
@@ -57,6 +59,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         boolean next = !globalEnabled;
         PacketDistributor.sendToServer(new SelfTalkConfigSetPayload(Optional.empty(), next));
         globalEnabled = next;
+        dirty = true;
         if (!next) {
             // 全局关闭后单只必然不触发，本地单只值同步为关
             maidEnabled = false;
@@ -71,14 +74,17 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         boolean next = !maidEnabled;
         PacketDistributor.sendToServer(new SelfTalkConfigSetPayload(Optional.of(this.maid.getUUID()), next));
         maidEnabled = next;
+        dirty = true;
         refreshButtonState();
     }
 
-    /** 服务端响应到达后刷新（网络层回调） */
+    /** 服务端响应到达后刷新（网络层回调；本地已修改时仅更新管理员开关，不覆盖本地乐观状态） */
     public void applyResponse(boolean adminEnabled, boolean globalEnabled, boolean maidEnabled) {
         this.adminEnabled = adminEnabled;
-        this.globalEnabled = globalEnabled;
-        this.maidEnabled = maidEnabled;
+        if (!dirty) {
+            this.globalEnabled = globalEnabled;
+            this.maidEnabled = maidEnabled;
+        }
         refreshButtonState();
     }
 
