@@ -12,14 +12,6 @@ import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
-/**
- * 管理员全局配置界面（Cloth Config）。
- * <p>
- * 通过 TLM 的公开扩展点 {@link AddClothConfigEvent} 挂到「AI 全局设置」分类下，
- * 结构为「女仆自言自语」父分类，内含「态 1」「态 2」「欢迎语」「自话提示词」子页。
- * <b>注意：</b>本类引用了 cloth 客户端类，只能在安装了 cloth-config 时加载，
- * 因此不使用 @EventBusSubscriber 自动注册，改由主类在运行时判断后反射注册。
- */
 @OnlyIn(Dist.CLIENT)
 public final class SelfTalkClothConfig {
 
@@ -30,11 +22,9 @@ public final class SelfTalkClothConfig {
     public static void onAddClothConfig(AddClothConfigEvent event) {
         ConfigBuilder root = event.getRoot();
         ConfigEntryBuilder entryBuilder = event.getEntryBuilder();
-        // 挂到 TLM 的 AI 全局设置分类下
         ConfigCategory globalAi = root.getOrCreateCategory(
                 Component.translatable("config.touhou_little_maid.global_ai"));
 
-        // 父分类：女仆自言自语
         SubCategoryBuilder main = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.title"))
                 .setExpanded(true);
@@ -51,7 +41,6 @@ public final class SelfTalkClothConfig {
                 .setSaveConsumer(v -> saveBool(Config.PLAYER_OPTION_ENABLED, v))
                 .build());
 
-        // 子页：态 1 / 态 2（默认值需与 Config 定义一致）
         main.add(stateCategory(entryBuilder, "config.maid_self_talk.state_owner_online",
                 Config.STATE1_ENABLED, Config.STATE1_MIN_INTERVAL, Config.STATE1_MAX_INTERVAL,
                 Config.STATE1_PLAYER_RANGE, Config.STATE1_KEEP_SELF_TALK_COUNT,
@@ -61,7 +50,6 @@ public final class SelfTalkClothConfig {
                 Config.STATE2_PLAYER_RANGE, Config.STATE2_KEEP_SELF_TALK_COUNT,
                 120, 600, 32.0, 3).build());
 
-        // 子页：欢迎语
         SubCategoryBuilder welcome = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.welcome"))
                 .setExpanded(false);
@@ -81,9 +69,6 @@ public final class SelfTalkClothConfig {
                 .build());
         main.add(welcome.build());
 
-        // 子页：自话提示词
-        // 注意：提示词硬编码于 SelfTalkPrompts（1.0.1 起不可配置，防止格式引导被改坏
-        // 导致 TLM 两段式输出切分失败、语音段泄露进聊天栏），此处仅配置输出语言
         SubCategoryBuilder prompt = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.prompt"))
                 .setExpanded(false);
@@ -95,6 +80,58 @@ public final class SelfTalkClothConfig {
                 .setSaveConsumer(v -> saveString(Config.SELF_TALK_LANGUAGE, v))
                 .build());
         main.add(prompt.build());
+
+        SubCategoryBuilder interChat = entryBuilder.startSubCategory(
+                        Component.translatable("config.maid_self_talk.inter_chat"))
+                .setExpanded(false);
+        interChat.add(entryBuilder.startBooleanToggle(Component.translatable("config.maid_self_talk.inter_chat.enabled"),
+                        Config.INTER_CHAT_ENABLED.get())
+                .setDefaultValue(false)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.enabled.tooltip"))
+                .setSaveConsumer(v -> saveBool(Config.INTER_CHAT_ENABLED, v))
+                .build());
+        interChat.add(entryBuilder.startIntField(Component.translatable("config.maid_self_talk.inter_chat.min_interval"),
+                        Config.INTER_CHAT_MIN_INTERVAL.get())
+                .setMin(10).setMax(86400)
+                .setDefaultValue(300)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.min_interval.tooltip"))
+                .setSaveConsumer(v -> saveInt(Config.INTER_CHAT_MIN_INTERVAL, v))
+                .build());
+        interChat.add(entryBuilder.startIntField(Component.translatable("config.maid_self_talk.inter_chat.max_interval"),
+                        Config.INTER_CHAT_MAX_INTERVAL.get())
+                .setMin(10).setMax(86400)
+                .setDefaultValue(600)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.max_interval.tooltip"))
+                .setSaveConsumer(v -> saveInt(Config.INTER_CHAT_MAX_INTERVAL, v))
+                .build());
+        interChat.add(entryBuilder.startDoubleField(Component.translatable("config.maid_self_talk.inter_chat.player_range"),
+                        Config.INTER_CHAT_PLAYER_RANGE.get())
+                .setMin(1.0).setMax(512.0)
+                .setDefaultValue(16.0)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.player_range.tooltip"))
+                .setSaveConsumer(v -> saveDouble(Config.INTER_CHAT_PLAYER_RANGE, v))
+                .build());
+        interChat.add(entryBuilder.startDoubleField(Component.translatable("config.maid_self_talk.inter_chat.maid_range"),
+                        Config.INTER_CHAT_MAID_RANGE.get())
+                .setMin(1.0).setMax(512.0)
+                .setDefaultValue(8.0)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.maid_range.tooltip"))
+                .setSaveConsumer(v -> saveDouble(Config.INTER_CHAT_MAID_RANGE, v))
+                .build());
+        interChat.add(entryBuilder.startIntSlider(Component.translatable("config.maid_self_talk.inter_chat.keep_rounds"),
+                        Config.INTER_CHAT_KEEP_ROUNDS.get(), 1, 50)
+                .setDefaultValue(5)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.keep_rounds.tooltip"))
+                .setSaveConsumer(v -> saveInt(Config.INTER_CHAT_KEEP_ROUNDS, v))
+                .build());
+        interChat.add(entryBuilder.startDoubleField(Component.translatable("config.maid_self_talk.inter_chat.chain_probability"),
+                        Config.INTER_CHAT_CHAIN_PROBABILITY.get())
+                .setMin(0.0).setMax(1.0)
+                .setDefaultValue(0.3)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.chain_probability.tooltip"))
+                .setSaveConsumer(v -> saveDouble(Config.INTER_CHAT_CHAIN_PROBABILITY, v))
+                .build());
+        main.add(interChat.build());
 
         globalAi.addEntry(main.build());
     }

@@ -68,5 +68,15 @@ public final class SelfTalkState {
         public final List<LLMMessage> windowSelfTalkMsgs = new ArrayList<>();
         /** 本女仆已欢迎过的玩家 */
         public final java.util.Set<UUID> welcomedPlayers = new java.util.HashSet<>();
+
+        // ===== 互聊状态（与自话独立） =====
+        /** 下次可触发互聊的服务器 tick */
+        public long nextInterChatTriggerTick = 0;
+        /** 是否有互聊正在进行（回复未返回） */
+        public boolean interChatPending = false;
+        /** interChatPending 置位时的服务器 tick（-1 = 未置位） */
+        public long interChatPendingSinceTick = -1;
+        /** 当前互聊窗口内已保留的互聊 assistant 消息（按时间序，含发起与回答） */
+        public final List<LLMMessage> windowInterChatMsgs = new ArrayList<>();
     }
 }

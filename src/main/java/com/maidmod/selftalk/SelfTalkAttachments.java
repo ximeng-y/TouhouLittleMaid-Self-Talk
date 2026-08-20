@@ -29,6 +29,15 @@ public final class SelfTalkAttachments {
     public static final Supplier<AttachmentType<Map<String, Boolean>>> SELF_TALK_MAID_OVERRIDES =
             ATTACHMENT_TYPES.register("self_talk_maid_overrides", SelfTalkAttachments::buildMaidOverrides);
 
+    /** 玩家独立设置：自己的女仆是否触发互聊（默认启用） */
+    public static final Supplier<AttachmentType<Boolean>> INTER_CHAT_ENABLED =
+            ATTACHMENT_TYPES.register("inter_chat_enabled",
+                    () -> AttachmentType.builder(() -> true).serialize(Codec.BOOL).build());
+
+    /** 互聊单只关闭名单 */
+    public static final Supplier<AttachmentType<Map<String, Boolean>>> INTER_CHAT_MAID_OVERRIDES =
+            ATTACHMENT_TYPES.register("inter_chat_maid_overrides", SelfTalkAttachments::buildMaidOverrides);
+
     /** builder 泛型需显式指定（HashMap::new 会同时匹配 Supplier 与 Function 重载） */
     private static AttachmentType<Map<String, Boolean>> buildMaidOverrides() {
         return AttachmentType.builder((Supplier<Map<String, Boolean>>) HashMap::new)

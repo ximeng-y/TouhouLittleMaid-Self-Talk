@@ -3,6 +3,7 @@ package com.maidmod.selftalk.mixin;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.response.ResponseChat;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.InterChatCallback;
 import com.maidmod.selftalk.MaidSelfTalkService;
 import com.maidmod.selftalk.SelfTalkCallback;
 import org.spongepowered.asm.mixin.Mixin;
@@ -33,8 +34,8 @@ public abstract class LLMCallbackMixin {
     }
 
     private static void onChatEnd(LLMCallback callback) {
-        if (callback instanceof SelfTalkCallback) {
-            // 自话回调自行管理状态与遗忘
+        if (callback instanceof SelfTalkCallback || callback instanceof InterChatCallback) {
+            // 自话/互聊回调自行管理各自状态与遗忘，不参与玩家 chat 计数
             return;
         }
         EntityMaid maid = callback.getMaid();

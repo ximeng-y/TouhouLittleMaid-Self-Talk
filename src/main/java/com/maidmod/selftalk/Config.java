@@ -53,6 +53,22 @@ public final class Config {
     /** 自话输出语言（TLM 官方模型设定多为英文，需要显式声明输出语言） */
     public static ModConfigSpec.ConfigValue<String> SELF_TALK_LANGUAGE;
 
+    // ===== 互聊 =====
+    /** 互聊总开关 */
+    public static ModConfigSpec.BooleanValue INTER_CHAT_ENABLED;
+    /** 互聊最小触发间隔（秒） */
+    public static ModConfigSpec.IntValue INTER_CHAT_MIN_INTERVAL;
+    /** 互聊最大触发间隔（秒） */
+    public static ModConfigSpec.IntValue INTER_CHAT_MAX_INTERVAL;
+    /** 互聊：半径多少格内有玩家时才触发 */
+    public static ModConfigSpec.DoubleValue INTER_CHAT_PLAYER_RANGE;
+    /** 互聊：自身多少格内有另一只女仆时才触发 */
+    public static ModConfigSpec.DoubleValue INTER_CHAT_MAID_RANGE;
+    /** 互聊保留轮数（问/答算一轮，单问也算一轮） */
+    public static ModConfigSpec.IntValue INTER_CHAT_KEEP_ROUNDS;
+    /** 互聊连续触发概率（0~1） */
+    public static ModConfigSpec.DoubleValue INTER_CHAT_CHAIN_PROBABILITY;
+
     public static final ModConfigSpec SPEC;
 
     static {
@@ -121,6 +137,23 @@ public final class Config {
                 自话/欢迎提示词本身已硬编码在 SelfTalkPrompts 中（1.0.1 起不再从本配置读取），
                 旧配置文件中的 selfTalkPrompt / selfTalkPromptOwnerNearby / welcomePrompt 键被忽略，不影响运行。""")
                 .define("selfTalkLanguage", "zh_cn");
+        builder.pop();
+
+        builder.push("inter_maid_chat");
+        INTER_CHAT_ENABLED = builder.comment("女仆互聊总开关，默认关闭。开启后满足玩家距离与女仆间距离的女仆才会发起互聊")
+                .define("enabled", false);
+        INTER_CHAT_MIN_INTERVAL = builder.comment("互聊最小触发间隔（秒）")
+                .defineInRange("minIntervalSeconds", 300, 10, 86400);
+        INTER_CHAT_MAX_INTERVAL = builder.comment("互聊最大触发间隔（秒）")
+                .defineInRange("maxIntervalSeconds", 600, 10, 86400);
+        INTER_CHAT_PLAYER_RANGE = builder.comment("互聊：半径多少格内有玩家时才触发（玩家距离）")
+                .defineInRange("playerRange", 16.0, 1.0, 512.0);
+        INTER_CHAT_MAID_RANGE = builder.comment("互聊：自身多少格内有另一只女仆时才触发（女仆间距离）")
+                .defineInRange("maidRange", 8.0, 1.0, 512.0);
+        INTER_CHAT_KEEP_ROUNDS = builder.comment("互聊保留轮数。问/答算一轮，单问无答也算一轮；达到该轮数时触发遗忘，仅保留最近一条消息")
+                .defineInRange("keepRounds", 5, 1, 50);
+        INTER_CHAT_CHAIN_PROBABILITY = builder.comment("互聊连续触发概率（0~1），每轮回答后按此概率决定是否让对方继续回应")
+                .defineInRange("chainProbability", 0.3, 0.0, 1.0);
         builder.pop();
 
         SPEC = builder.build();
