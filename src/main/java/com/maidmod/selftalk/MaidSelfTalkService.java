@@ -146,8 +146,12 @@ public final class MaidSelfTalkService {
     }
 
     /**
-     * 玩家发起 chat（请求已真实派发）：窗口重置（计数重新开始，旧自话/互聊记录赦免保留在上下文中），
+     * 玩家发起 chat（请求已真实派发）：清空自话/互聊计数窗口（打断连续，计数重新开始），
      * 并重新计时自话与互聊冷却。
+     * <p>
+     * 内容保留：自话记录已随 TLM 回调写入历史 deque，互聊记录已在 normalChat HEAD
+     * 注入本次请求的上下文（见 {@link com.maidmod.selftalk.mixin.MaidAIChatManagerMixin}），
+     * 清空只重置计数，不丢已注入内容。
      */
     public static void onPlayerChatStart(EntityMaid maid) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());

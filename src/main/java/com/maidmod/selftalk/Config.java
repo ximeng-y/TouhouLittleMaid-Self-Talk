@@ -68,6 +68,7 @@ public final class Config {
     public static ModConfigSpec.IntValue INTER_CHAT_KEEP_ROUNDS;
     /** 互聊连续触发概率（0~1） */
     public static ModConfigSpec.DoubleValue INTER_CHAT_CHAIN_PROBABILITY;
+    public static ModConfigSpec.IntValue INTER_CHAT_MAX_CHAIN_ROUNDS;
 
     public static final ModConfigSpec SPEC;
 
@@ -154,6 +155,8 @@ public final class Config {
                 .defineInRange("keepRounds", 5, 1, 50);
         INTER_CHAT_CHAIN_PROBABILITY = builder.comment("互聊连续触发概率（0~1），每轮回答后按此概率决定是否让对方继续回应")
                 .defineInRange("chainProbability", 0.3, 0.0, 1.0);
+        INTER_CHAT_MAX_CHAIN_ROUNDS = builder.comment("一次互聊会话的最大消息条数（含发起者消息），达到后强制结束本次互聊。为连续概率配到 1.0 等极端配置兜底，防止无限链式往返消耗 token")
+                .defineInRange("maxChainRounds", 10, 1, 50);
         builder.pop();
 
         SPEC = builder.build();

@@ -15,13 +15,14 @@ import java.util.List;
 
 public final class MaidInterChatService {
     private MaidInterChatService() {}
+    /** 发起者消息为链上第 1 条 */
     public static boolean triggerInitiator(EntityMaid initiator, EntityMaid responder, double broadcastRange) {
-        return triggerInternal(initiator, responder, null, false, broadcastRange);
+        return triggerInternal(initiator, responder, null, false, broadcastRange, 1);
     }
-    public static boolean triggerResponder(EntityMaid responder, EntityMaid initiator, String peerText, double broadcastRange) {
-        return triggerInternal(responder, initiator, peerText, true, broadcastRange);
+    public static boolean triggerResponder(EntityMaid responder, EntityMaid initiator, String peerText, double broadcastRange, int chainRound) {
+        return triggerInternal(responder, initiator, peerText, true, broadcastRange, chainRound);
     }
-    private static boolean triggerInternal(EntityMaid maid, EntityMaid peer, String peerText, boolean isResponder, double broadcastRange) {
+    private static boolean triggerInternal(EntityMaid maid, EntityMaid peer, String peerText, boolean isResponder, double broadcastRange, int chainRound) {
         MaidAIChatManager chatManager = maid.getAiChatManager();
         if (chatManager == null) return false;
         if (!AIConfig.LLM_ENABLED.get()) return false;
@@ -48,7 +49,7 @@ public final class MaidInterChatService {
         state.interChatPending = true;
         state.interChatPendingSinceTick = maid.level().getServer().getTickCount();
         LLMClient client = site.client();
-        InterChatCallback callback = new InterChatCallback(chatManager, messages, peer, peerText, broadcastRange, isResponder);
+        InterChatCallback callback = new InterChatCallback(chatManager, messages, peer, peerText, broadcastRange, isResponder, chainRound);
         try { client.chat(callback); } catch (Throwable t) { state.interChatPending = false; state.interChatPendingSinceTick = -1; MaidSelfTalkMod.LOGGER.warn("Failed to dispatch inter-chat request for maid {}", maid.getId(), t); return false; }
         return true;
     }
@@ -67,6 +68,21 @@ public final class MaidInterChatService {
         state.windowInterChatMsgs.add(LLMMessage.assistantChat(maid, peerText));
         trimInterChatWindow(state);
     }
+    /**
+     * 玩家主动 chat 时（normalChat HEAD，TLM 刚构建完 [system 设定, 摘要, ...历史]、尚未 append 玩家新消息）
+     * 把互聊窗口内容拼接进本次请求的 messages，使玩家 chat 上下文 = 对话历史（含自话）+ 互聊记录 + 玩家的话。
+     * <p>
+     * 注入的是窗口副本；窗口本体随后在 TAIL 的 {@code onPlayerChatStart} 中清空
+     * （打断连续、计数重新开始），互聊记录不写 TLM 历史（不出现在历史聊天记录界面）。
+     */
+    public static void injectPlayerChatContext(EntityMaid maid, List<LLMMessage> messages) {
+        SelfTalkState.State state = SelfTalkState.get(maid.getId());
+        if (state.windowInterChatMsgs.isEmpty()) {
+            return;
+        }
+        messages.addAll(new ArrayList<>(state.windowInterChatMsgs));
+    }
+
     /** 超出 keepRounds 轮时仅保留最近 1 条消息（与自言自语「仅保留最近一次」的抛弃逻辑一致） */
     private static void trimInterChatWindow(SelfTalkState.State state) {
         int keepRounds = Config.INTER_CHAT_KEEP_ROUNDS.get();

@@ -131,6 +131,12 @@ public final class SelfTalkClothConfig {
                 .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.chain_probability.tooltip"))
                 .setSaveConsumer(v -> saveDouble(Config.INTER_CHAT_CHAIN_PROBABILITY, v))
                 .build());
+        interChat.add(entryBuilder.startIntSlider(Component.translatable("config.maid_self_talk.inter_chat.max_chain_rounds"),
+                        Config.INTER_CHAT_MAX_CHAIN_ROUNDS.get(), 1, 50)
+                .setDefaultValue(10)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.max_chain_rounds.tooltip"))
+                .setSaveConsumer(v -> saveInt(Config.INTER_CHAT_MAX_CHAIN_ROUNDS, v))
+                .build());
         main.add(interChat.build());
 
         globalAi.addEntry(main.build());

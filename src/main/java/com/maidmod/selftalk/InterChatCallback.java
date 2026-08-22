@@ -22,15 +22,18 @@ public class InterChatCallback extends LLMCallback {
     private final String peerText;
     private final double broadcastRange;
     private final boolean isResponder;
+    /** 本条消息在互聊链上的序号（发起者消息为 1），用于链长护栏 */
+    private final int chainRound;
 
     public InterChatCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
                              EntityMaid peer, String peerText,
-                             double broadcastRange, boolean isResponder) {
+                             double broadcastRange, boolean isResponder, int chainRound) {
         super(chatManager, messages);
         this.peer = peer;
         this.peerText = peerText;
         this.broadcastRange = broadcastRange;
         this.isResponder = isResponder;
+        this.chainRound = chainRound;
         this.needAddTools = false;
     }
 
@@ -88,6 +91,9 @@ public class InterChatCallback extends LLMCallback {
         if (!(nextSpeaker.level() instanceof ServerLevel level)) return;
         // 热重载下中途关闭互聊时立即终止在途链
         if (!Config.INTER_CHAT_ENABLED.get()) return;
+        // 链长护栏：本条消息已是链上第 chainRound 条，达到上限即结束本次互聊，
+        // 防止连续概率配到 1.0 等极端配置下无限往返消耗 token
+        if (chainRound >= Config.INTER_CHAT_MAX_CHAIN_ROUNDS.get()) return;
         SelfTalkState.State nextState = SelfTalkState.get(nextSpeaker.getId());
         if (nextState.selfTalkPending || nextState.interChatPending || nextState.playerChatCount > 0) return;
         if (!SelfTalkHandler.hasPlayerNearby(nextSpeaker, Config.INTER_CHAT_PLAYER_RANGE.get())) return;
@@ -95,7 +101,7 @@ public class InterChatCallback extends LLMCallback {
         if (Config.PLAYER_OPTION_ENABLED.get() && !SelfTalkHandler.isInterChatEnabledForMaid(nextSpeaker, level)) return;
         // 链式续接是发起者回复后的单条连续请求，天然串行、每轮隔一次 LLM 往返，
         // 不走 5~8s 全局节流桶（发起者派发已占用该桶），否则 responder 路径永远被退避。
-        MaidInterChatService.triggerResponder(nextSpeaker, lastSpeaker, lastText, broadcastRange);
+        MaidInterChatService.triggerResponder(nextSpeaker, lastSpeaker, lastText, broadcastRange, chainRound + 1);
     }
 
     private boolean isMaidNearby(EntityMaid a, EntityMaid b, double range) {
