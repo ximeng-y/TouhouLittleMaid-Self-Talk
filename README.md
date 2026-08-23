@@ -6,7 +6,7 @@
 
 - **女仆自言自语**：主人在线时会随机开口，主人离线但附近有其他玩家时同样会触发
 - **欢迎语**：主人上线时女仆主动打招呼，不限距离，已加载区块中的女仆都能触发
-- **女仆互相对话**：女仆会随机的与其附近的女仆聊天
+- **女仆互相对话**：女仆会随机地与其附近的女仆聊天
 - **无人设不说话**：未配置人设的女仆不触发，避免出戏/不可预计的 Token 消耗
 - **上下文控制**：自言自语保留条数可配置，当超过条数上限时会自动丢弃前面的自言自语内容，仅保留最后一条。玩家与女仆的主动聊天记录不受影响
 - **随机注入游戏情境**：触发自言自语时，会从女仆当前位置、附近实体、装备等情境信息中随机注入几种信息，使自言自语具有随机性
@@ -39,13 +39,12 @@
 
 女仆 AI 聊天设置 → AI 全局设置 →「女仆互聊」：
 
-- **基础**：总开关（默认关闭）、最小与最大触发间隔（秒）、最小触发玩家距离、最小触发女仆间距离
-
+- **基础**：总开关（默认关闭）、最小与最大触发间隔（秒）、玩家距离（格）、女仆间距离（格）
 - **上下文与连续对话**：保留轮数（问/答算一轮，超限后仅保留最近一条消息）、连续概率（每轮回答后按此概率继续）、最大链长（一次互聊的消息条数上限，连续概率拉满时的兜底）
 
 ### 玩家独立设置
 
-对着女仆打开 AI 聊天输入界面（通常是按 T 键），点左侧 💬 按钮，单独开关这只女仆的自言自语/互聊。
+对着女仆打开 AI 聊天输入界面（通常是按 T 键），点左侧 💬 按钮，单独开关这只女仆的自言自语/互聊/互相对话。
 
 ## 许可
 
@@ -94,8 +93,7 @@ Maid AI chat settings → Global AI settings → "Maid Self-Talk":
 
 Maid AI chat settings → Global AI settings → "Maid Inter-Chat":
 
-- **Basics**: master switch (off by default), min/max trigger interval (seconds), minimum trigger distance to players, and minimum trigger distance between maids
-
+- **Basics**: master switch (off by default), min/max trigger interval (seconds), player range (blocks), and maid range (blocks)
 - **Context & chain**: keep rounds (a Q/A counts as one round; only the latest message remains when exceeded), chain probability (chance to continue after each reply), max chain length (hard cap on messages per session, guarding against maxed-out chain probability)
 
 ### Per-player settings
