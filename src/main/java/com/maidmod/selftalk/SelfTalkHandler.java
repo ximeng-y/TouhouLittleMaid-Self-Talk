@@ -184,7 +184,10 @@ public final class SelfTalkHandler {
                 // 玩家在触发范围内，且自身范围内有至少一只可用女仆时才触发；否则静默跳过
                 if (hasPlayerNearby(maid, Config.INTER_CHAT_PLAYER_RANGE.get())) {
                     List<EntityMaid> nearbyMaids = findNearbyMaids(maid, Config.INTER_CHAT_MAID_RANGE.get());
-                    if (!nearbyMaids.isEmpty()) {
+                    if (nearbyMaids.isEmpty()) {
+                        // 附近无其他女仆：同样短退避，避免每 tick 空扫 AABB
+                        state.nextInterChatTriggerTick = serverTick + RESPONDER_RETRY_TICKS;
+                    } else {
                         EntityMaid responder = pickAvailableResponder(nearbyMaids, level);
                         if (responder != null) {
                             if (!tryAcquireSelfTalkSlot(serverTick)) {

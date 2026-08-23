@@ -104,6 +104,10 @@ public final class SelfTalkProvenance {
      * 此处以当前完整历史为基准惰性剪枝：集合规模超出「历史条数 + 余量」时，
      * 丢弃历史中已不存在的指纹（legacy 快照同理——消息没了，快照条目即死数据）。
      * 调用点：wrapSegments（服务端主线程，随每次 LLM 请求触发），无需独立计时器。
+     * <p>
+     * 极端时序免责：登记仍在 LLM 响应线程执行，若恰落在剪枝的弱一致迭代窗口内，
+     * 刚登记的指纹理论上可被误剪（需集合已膨胀 + 亚毫秒窗口重合），后果仅为该条
+     * 消息单次段归属错判，随 CappedQueue 逐出/下次剪枝自愈，无崩溃与数据损坏。
      */
     static void pruneIfBloated(EntityMaid maid, Deque<LLMMessage> historyDeque) {
         if (maid == null || historyDeque.isEmpty()) {
