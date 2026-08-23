@@ -34,6 +34,9 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private Button interMaidButton;
     private boolean dirtySelf = false;
     private boolean dirtyInter = false;
+    /** 重开全局后主动请求刷新：该响应须穿透 dirty 守卫（单只值以服务端为准） */
+    private boolean refreshSelfExpected = false;
+    private boolean refreshInterExpected = false;
 
     public SelfTalkPlayerSettingsScreen(EntityMaid maid) {
         super(Component.translatable("config.maid_self_talk.screen.player_settings.title"));
@@ -70,6 +73,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
             maidEnabled = false;
         } else {
             SelfTalkPackets.CHANNEL.sendToServer(new SelfTalkConfigRequestMessage(this.maid.getUUID()));
+            refreshSelfExpected = true;
         }
         refreshButtonState();
     }
@@ -91,6 +95,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
             interMaidEnabled = false;
         } else {
             SelfTalkPackets.CHANNEL.sendToServer(new InterChatConfigRequestMessage(this.maid.getUUID()));
+            refreshInterExpected = true;
         }
         refreshButtonState();
     }
@@ -105,19 +110,23 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
 
     public void applyResponse(boolean adminEnabled, boolean globalEnabled, boolean maidEnabled) {
         this.adminEnabled = adminEnabled;
-        if (!dirtySelf) {
+        // dirty 守卫丢弃的是打开界面时初始请求的迟到响应（防覆盖用户刚做的切换）；
+        // 重开全局后的主动刷新响应必须接受，否则单只开关停留在关闭全局时的本地值
+        if (!dirtySelf || refreshSelfExpected) {
             this.globalEnabled = globalEnabled;
             this.maidEnabled = maidEnabled;
         }
+        refreshSelfExpected = false;
         refreshButtonState();
     }
 
     public void applyInterChatResponse(boolean adminEnabled, boolean globalEnabled, boolean maidEnabled) {
         this.adminEnabled = adminEnabled;
-        if (!dirtyInter) {
+        if (!dirtyInter || refreshInterExpected) {
             this.interGlobalEnabled = globalEnabled;
             this.interMaidEnabled = maidEnabled;
         }
+        refreshInterExpected = false;
         refreshButtonState();
     }
 

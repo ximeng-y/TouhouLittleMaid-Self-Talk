@@ -63,6 +63,22 @@ public final class SegmentTags {
     }
 
     /**
+     * 请求侧玩家输入清洗：静默剥除玩家原话中的本 mod 段标签（精确 + 变体，不留日志）。
+     * 玩家消息会被主人段标签包裹进请求，原话自带标签可提前闭合主人段、伪造段边界，
+     * 混淆模型的来源区分；仅清洗请求体，TLM 历史仍写原文（前端无感）。
+     */
+    public static String stripTagsFromPlayerInput(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        String result = text;
+        for (String tag : KNOWN_TAGS) {
+            result = StringUtils.replace(result, tag, StringUtils.EMPTY);
+        }
+        return VARIANT_REG.matcher(result).replaceAll("");
+    }
+
+    /**
      * 原地剥离 {@link ResponseChat} 的两个 public 可变字段（chatText/ttsText）。
      * <p>
      * 调用点必须早于所有持久化/展示：LLMCallback.onSuccess HEAD（mixin）

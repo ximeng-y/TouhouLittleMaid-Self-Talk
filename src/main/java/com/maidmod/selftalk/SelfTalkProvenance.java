@@ -6,6 +6,8 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.util.Collection;
 import java.util.Deque;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * 自话/互聊来源判定（段标签）的持久化指纹管理。
@@ -19,6 +21,12 @@ import java.util.Deque;
  * 持久化由 {@code MaidAIChatDataMixin} 在女仆 NBT 读写时完成，本类只操作内存。
  */
 public final class SelfTalkProvenance {
+
+    /**
+     * 剪枝触发余量（条）：集合规模超出「当前历史条数 + 余量」才剪枝，
+     * 容忍在途登记与窗口消息的短时抖动，避免每次 wrap 都全量重建。
+     */
+    private static final int PRUNE_SLACK = 64;
 
     private SelfTalkProvenance() {
     }
@@ -88,5 +96,31 @@ public final class SelfTalkProvenance {
             }
         }
         host.maid_self_talk$setLegacyInitialized(true);
+    }
+
+    /**
+     * 指纹集膨胀剪枝：TLM 历史 CappedQueue 容量满时静默逐出最旧消息（pollLast，无任何回调），
+     * 被逐出消息的指纹不经由任何删除钩子，长期运行下只增不减（指纹含完整正文，随 NBT 持久化）。
+     * 此处以当前完整历史为基准惰性剪枝：集合规模超出「历史条数 + 余量」时，
+     * 丢弃历史中已不存在的指纹（legacy 快照同理——消息没了，快照条目即死数据）。
+     * 调用点：wrapSegments（服务端主线程，随每次 LLM 请求触发），无需独立计时器。
+     */
+    static void pruneIfBloated(EntityMaid maid, Deque<LLMMessage> historyDeque) {
+        if (maid == null || historyDeque.isEmpty()) {
+            return;
+        }
+        SelfTalkProvenanceHost host = (SelfTalkProvenanceHost) maid;
+        Set<String> selfTalk = host.maid_self_talk$selfFingerprints();
+        Set<String> legacy = host.maid_self_talk$legacyFingerprints();
+        int alive = historyDeque.size();
+        if (selfTalk.size() <= alive + PRUNE_SLACK && legacy.size() <= alive + PRUNE_SLACK) {
+            return;
+        }
+        Set<String> aliveFingerprints = new HashSet<>(alive * 2);
+        for (LLMMessage message : historyDeque) {
+            aliveFingerprints.add(fingerprint(message));
+        }
+        selfTalk.retainAll(aliveFingerprints);
+        legacy.retainAll(aliveFingerprints);
     }
 }

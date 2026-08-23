@@ -14,8 +14,8 @@ import java.util.List;
 /**
  * 历史压缩（TLM 摘要替换旧消息）时同步删除对应的自话指纹。
  * <p>
- * 注入点选 TAIL：{@code completeHistorySummary} 的两处提前返回
- * （摘要空白、快照与历史不一致）都不会到达 TAIL，即指纹删除只在
+ * 注入点选 TAIL：{@code completeHistorySummary} 的所有提前返回路径
+ * （压缩进行标志守卫、摘要空白、快照与历史不一致）都不会到达 TAIL，即指纹删除只在
  * 「pollLast 已真正删除历史消息」的成功路径上执行——判定始终与历史内容同步。
  * <p>
  * 该回调在 LLM 响应线程执行（TLM 异步摘要），指纹为实体字段并发集，跨线程读写安全。

@@ -15,7 +15,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * 跨维度经 TLM TeleportHelper 原实体搬家自然保留；死亡重生/存档读档
  * 由 {@code MaidAIChatDataMixin} 的 NBT 读写钩子恢复。
  * 本 mixin 零方法注入（纯字段载体），TLM 类 prod 不混淆、无重映射问题。
- * 集合懒初始化为并发集：登记/删除在 LLM 响应线程，读取在服务端主线程。
+ * 集合懒初始化为并发集：登记/删除在 LLM 响应线程，读取在服务端主线程；
+ * getter 加 synchronized 防懒初始化竞态——首次并发访问时两线程各建集合相互覆盖会丢登记，
+ * monitor 顺带保证字段引用的跨线程可见性（集合内容的线程安全由并发集自身保证）。
  */
 @Mixin(EntityMaid.class)
 public abstract class EntityMaidProvenanceMixin implements SelfTalkProvenanceHost {
@@ -28,7 +30,7 @@ public abstract class EntityMaidProvenanceMixin implements SelfTalkProvenanceHos
     private boolean maid_self_talk$legacyInitialized;
 
     @Override
-    public Set<String> maid_self_talk$selfFingerprints() {
+    public synchronized Set<String> maid_self_talk$selfFingerprints() {
         if (this.maid_self_talk$selfFingerprints == null) {
             this.maid_self_talk$selfFingerprints = ConcurrentHashMap.newKeySet();
         }
@@ -36,7 +38,7 @@ public abstract class EntityMaidProvenanceMixin implements SelfTalkProvenanceHos
     }
 
     @Override
-    public Set<String> maid_self_talk$legacyFingerprints() {
+    public synchronized Set<String> maid_self_talk$legacyFingerprints() {
         if (this.maid_self_talk$legacyFingerprints == null) {
             this.maid_self_talk$legacyFingerprints = ConcurrentHashMap.newKeySet();
         }

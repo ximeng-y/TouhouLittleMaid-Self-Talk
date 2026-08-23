@@ -73,7 +73,7 @@ public final class SelfTalkPackets {
             return true;
         }
         if (entry[1] >= MAX_CONFIG_PACKETS_PER_SECOND) {
-            MaidSelfTalkMod.LOGGER.warn("Player {} exceeded self-talk config packet rate limit", playerUuid);
+            MaidSelfTalkMod.LOGGER.warn("Player {} exceeded config packet rate limit", playerUuid);
             return false;
         }
         entry[1]++;
