@@ -40,6 +40,9 @@ public final class SegmentTags {
     private static final Pattern VARIANT_REG = Pattern.compile("<\\s*/?\\s*maid-(owner|self)-chat\\s*>",
             Pattern.CASE_INSENSITIVE);
 
+    /** 零宽字符（玩家可用其拼接出变体正则不命中的伪标签，多数 LLM tokenizer 会归一化还原） */
+    private static final Pattern ZERO_WIDTH_REG = Pattern.compile("[\\u200B-\\u200D\\u2060\\uFEFF]");
+
     private SegmentTags() {
     }
 
@@ -75,6 +78,7 @@ public final class SegmentTags {
         for (String tag : KNOWN_TAGS) {
             result = StringUtils.replace(result, tag, StringUtils.EMPTY);
         }
+        result = ZERO_WIDTH_REG.matcher(result).replaceAll("");
         return VARIANT_REG.matcher(result).replaceAll("");
     }
 

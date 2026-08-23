@@ -64,6 +64,8 @@ public class SelfTalkCallback extends LLMCallback {
         // 指纹随消息同生同灭）。投递到服务端主线程：附件容器（AttachmentHolder）的
         // IdentityHashMap 非线程安全，响应线程直接 getData 会与主线程首次读取产生结构性竞争；
         // submit 队列 FIFO，登记先于下方 pending 复位与 finish（含 trim 删指纹）执行
+        // （onSuccess 在 LLM 响应线程的生产路径下成立；finish 的 trim 排除最新消息，
+        // 偶发主线程重入时序亦无害）
         runOnServerThread(() -> SelfTalkProvenance.registerSelfTalk(getMaid(), this.lastAssistantMessage));
         if (this.lastAssistantMessage == null) {
             // 无消息可捕获（空白回复）或校验未过（罕见交错）：

@@ -111,22 +111,26 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     public void applyResponse(boolean adminEnabled, boolean globalEnabled, boolean maidEnabled) {
         this.adminEnabled = adminEnabled;
         // dirty 守卫丢弃的是打开界面时初始请求的迟到响应（防覆盖用户刚做的切换）；
-        // 重开全局后的主动刷新响应必须接受，否则单只开关停留在关闭全局时的本地值
-        if (!dirtySelf || refreshSelfExpected) {
+        // 重开全局后的主动刷新响应须穿透守卫，但仅当全局值与本地最新意图一致——
+        // 初始响应可能晚于用户点击到达（携带陈旧值），不校验会吃掉 refresh 标志，
+        // 把随后的新鲜响应挡在守卫外（此时保留标志等下一响应）
+        boolean accept = !dirtySelf || (refreshSelfExpected && this.globalEnabled == globalEnabled);
+        if (accept) {
             this.globalEnabled = globalEnabled;
             this.maidEnabled = maidEnabled;
+            refreshSelfExpected = false;
         }
-        refreshSelfExpected = false;
         refreshButtonState();
     }
 
     public void applyInterChatResponse(boolean adminEnabled, boolean globalEnabled, boolean maidEnabled) {
         this.adminEnabled = adminEnabled;
-        if (!dirtyInter || refreshInterExpected) {
+        boolean accept = !dirtyInter || (refreshInterExpected && this.interGlobalEnabled == globalEnabled);
+        if (accept) {
             this.interGlobalEnabled = globalEnabled;
             this.interMaidEnabled = maidEnabled;
+            refreshInterExpected = false;
         }
-        refreshInterExpected = false;
         refreshButtonState();
     }
 
