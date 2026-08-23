@@ -72,6 +72,7 @@ public final class MaidSelfTalkService {
         if (messages == null) {
             return false;
         }
+        int historyCount = messages.size();
 
         // 互聊窗口手动拼接：让自话能读到最近保留的互聊上下文，但不进 TLM 历史
         SelfTalkState.State chatState = SelfTalkState.get(maid.getId());
@@ -85,6 +86,8 @@ public final class MaidSelfTalkService {
             MaidSelfTalkMod.LOGGER.warn("HistoryMessagesCheck after inter window failed, self-talk skipped", t);
             return false;
         }
+        // 段标签包裹（历史+互聊窗口；随后的 prompt 消息为尾部、不参与包裹）
+        SelfTalkContexts.wrapSegments(maid, messages, historyCount, interWindow.size());
 
         boolean ownerNearby = isOwnerNearby(maid);
         String prompt = welcome ? SelfTalkPrompts.WELCOME
@@ -141,6 +144,8 @@ public final class MaidSelfTalkService {
             List<LLMMessage> toRemove = new ArrayList<>(
                     state.windowSelfTalkMsgs.subList(0, state.windowSelfTalkMsgs.size() - 1));
             deque.removeAll(toRemove);
+            // 指纹随消息同删，保证判定与历史内容始终同步
+            SelfTalkProvenance.removeByMessages(maid, toRemove);
             state.windowSelfTalkMsgs.removeAll(toRemove);
         }
     }

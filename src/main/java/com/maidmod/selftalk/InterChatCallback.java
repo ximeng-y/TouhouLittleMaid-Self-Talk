@@ -39,6 +39,8 @@ public class InterChatCallback extends LLMCallback {
 
     @Override
     public void onSuccess(ResponseChat responseChat) {
+        // 本类不调 super.onSuccess（父类 mixin 的剥离不会进入），首行显式剥离段标签
+        SegmentTags.stripResponse(responseChat);
         String chatText = responseChat.getChatText();
         String ttsText = responseChat.getTtsText();
         if (chatText.isBlank() || ttsText.isBlank()) {

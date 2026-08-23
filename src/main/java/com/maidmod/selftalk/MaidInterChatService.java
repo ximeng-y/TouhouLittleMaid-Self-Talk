@@ -32,13 +32,17 @@ public final class MaidInterChatService {
         String language = SelfTalkContexts.sanitizeLanguage(StringUtils.isBlank(chatManager.chatLanguage) ? Config.SELF_TALK_LANGUAGE.get() : chatManager.chatLanguage);
         List<LLMMessage> messages = SelfTalkContexts.fetchCleanedMessages(chatManager, language, "inter-chat");
         if (messages == null) return false;
+        int historyCount = messages.size();
+        int windowCount = 0;
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         List<LLMMessage> windowCopy = new ArrayList<>(state.windowInterChatMsgs);
         for (LLMMessage wm : windowCopy) { messages.add(wm); }
+        windowCount += windowCopy.size();
         if (isResponder && peerText != null && !peerText.isBlank()) {
             boolean alreadyInWindow = !windowCopy.isEmpty() && windowCopy.get(windowCopy.size() - 1).message().equals(peerText);
             if (!alreadyInWindow) {
                 messages.add(LLMMessage.assistantChat(maid, peerText));
+                windowCount++;
             }
         }
         String prompt = isResponder ? SelfTalkPrompts.INTER_CHAT_RESPONDER : SelfTalkPrompts.INTER_CHAT_INITIATOR;
@@ -46,6 +50,8 @@ public final class MaidInterChatService {
         String fullPrompt = UserPromptContexts.addContext(maid, prompt);
         messages.add(LLMMessage.userChat(maid, fullPrompt));
         try { HistoryMessagesCheck.checkMessages(messages); } catch (Throwable t) { MaidSelfTalkMod.LOGGER.warn("HistoryMessagesCheck after prompt failed for inter-chat, skipped", t); return false; }
+        // 段标签包裹（历史+互聊窗口+peerText；prompt 消息为尾部、不参与包裹）
+        SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowCount);
         state.interChatPending = true;
         state.interChatPendingSinceTick = maid.level().getServer().getTickCount();
         LLMClient client = site.client();

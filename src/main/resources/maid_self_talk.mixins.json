@@ -4,6 +4,9 @@
   "package": "com.maidmod.selftalk.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "HistorySummaryManagerAccessor",
+    "HistorySummaryManagerMixin",
+    "MaidAIChatDataMixin",
     "MaidAIChatManagerAccessor",
     "MaidAIChatManagerMixin",
     "LLMCallbackMixin"

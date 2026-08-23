@@ -5,6 +5,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.response.ResponseChat
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.InterChatCallback;
 import com.maidmod.selftalk.MaidSelfTalkService;
+import com.maidmod.selftalk.SegmentTags;
 import com.maidmod.selftalk.SelfTalkCallback;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -25,6 +26,8 @@ public abstract class LLMCallbackMixin {
 
     @Inject(method = "onSuccess", at = @At("HEAD"))
     private void maid_self_talk$onSuccess(ResponseChat responseChat, CallbackInfo ci) {
+        // 剥离段标签（先于 TLM 写历史/气泡，标签永不落盘、不上屏）
+        SegmentTags.stripResponse(responseChat);
         onChatEnd((LLMCallback) (Object) this);
     }
 
