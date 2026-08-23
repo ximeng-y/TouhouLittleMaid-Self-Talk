@@ -12,7 +12,7 @@
 - **随机注入游戏情境**：触发自言自语时，会从女仆当前位置、附近实体、装备等情境信息中随机注入几种信息，使自言自语具有随机性
 - **单独开关**：每位玩家可单独关闭某只女仆的自言自语；房主可控制总开关（服务器则需要修改配置文件）
 - **触发冷却**：可配置的随机触发间隔区间
-- **聊天可见**：女仆的自言自语对附近玩家可见（即使此玩家不是女仆的主人）
+- **聊天可见**：女仆的自言自语与互聊对附近玩家可见（即使此玩家不是女仆的主人）
 
 ## 环境要求
 
@@ -26,7 +26,7 @@
 1. 安装 mod：下载对应版本的 jar：
     - CurseForge：https://www.curseforge.com/minecraft/mc-mods/touhoulittlemaid-self-talk
     - Modrinth：审核中
-2. 启动游戏，打开总开关：女仆 AI 设置 → AI 全局设置 →「女仆自言自语」→ 启用；或直接改配置文件的 `enabled`
+2. 启动游戏，打开总开关：女仆 AI 设置 → AI 全局设置 →「女仆自言自语」→ 启用；「女仆互聊」需在其子页单独启用
 
 ## 使用
 
@@ -37,9 +37,15 @@
 - **状态 1 / 状态 2**：主人在线 / 离线时的开关、最小与最大触发间隔（秒，填入式、带范围校验）、玩家半径、自话保留条数
 - **欢迎语**：主人上线后的打招呼触发窗口
 
+女仆 AI 聊天设置 → AI 全局设置 →「女仆互聊」：
+
+- **基础**：总开关（默认关闭）、最小与最大触发间隔（秒）、最小触发玩家距离、最小触发女仆间距离
+
+- **上下文与连续对话**：保留轮数（问/答算一轮，超限后仅保留最近一条消息）、连续概率（每轮回答后按此概率继续）、最大链长（一次互聊的消息条数上限，连续概率拉满时的兜底）
+
 ### 玩家独立设置
 
-对着女仆打开 AI 聊天输入界面（通常是按 T 键），点左侧 💬 按钮，单独开关这只女仆的自言自语。
+对着女仆打开 AI 聊天输入界面（通常是按 T 键），点左侧 💬 按钮，单独开关这只女仆的自言自语/互聊。
 
 ## 许可
 
@@ -61,7 +67,7 @@ A mod that adds **self-talk / welcome greetings / maid-to-maid chats** to [Touho
 - **Random in-game context**: When triggering self-talk, a few pieces of context such as current position, nearby entities, and equipment are randomly injected to keep self-talk varied
 - **Per-player switch**: Each player can turn off self-talk for an individual maid; the host controls the master switch (on a dedicated server this requires editing the config file)
 - **Trigger cooldown**: A configurable random interval range between triggers
-- **Visible in chat**: Self-talk is visible to nearby players (even if they are not the maid's owner)
+- **Visible in chat**: Self-talk and maid-to-maid chats are visible to nearby players (even if they are not the maid's owner)
 
 ## Requirements
 
@@ -75,7 +81,7 @@ A mod that adds **self-talk / welcome greetings / maid-to-maid chats** to [Touho
 1. Install the mod: download the jar for your version:
     - CurseForge: https://www.curseforge.com/minecraft/mc-mods/touhoulittlemaid-self-talk
     - Modrinth: under review
-2. Launch the game and enable the master switch: Maid AI settings → Global AI settings → "Maid Self-Talk" → Enable; or set `enabled` in the config file directly
+2. Launch the game and enable the master switch: Maid AI settings → Global AI settings → "Maid Self-Talk" → Enable; Maid Inter-Chat needs to be enabled separately in its own sub-page
 
 ## Usage
 
@@ -86,9 +92,15 @@ Maid AI chat settings → Global AI settings → "Maid Self-Talk":
 - **State 1 / State 2**: enable switch, min/max trigger interval (seconds, typed input with range validation), player radius, and self-talk keep count for owner online / offline
 - **Welcome**: the greeting trigger window after the owner logs in
 
+Maid AI chat settings → Global AI settings → "Maid Inter-Chat":
+
+- **Basics**: master switch (off by default), min/max trigger interval (seconds), minimum trigger distance to players, and minimum trigger distance between maids
+
+- **Context & chain**: keep rounds (a Q/A counts as one round; only the latest message remains when exceeded), chain probability (chance to continue after each reply), max chain length (hard cap on messages per session, guarding against maxed-out chain probability)
+
 ### Per-player settings
 
-Open the maid's AI chat input screen (usually by pressing T) and click the 💬 button on the left to toggle self-talk for that maid.
+Open the maid's AI chat input screen (usually by pressing T) and click the 💬 button on the left to toggle self-talk / maid-to-maid chat for that maid.
 
 ## License
 
