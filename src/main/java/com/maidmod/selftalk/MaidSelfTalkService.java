@@ -1,6 +1,5 @@
 package com.maidmod.selftalk;
 
-import com.github.tartaricacid.touhoulittlemaid.ai.agent.context.GameContextRegister;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.HistoryMessagesCheck;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.UserPromptContexts;
@@ -9,10 +8,10 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMSite;
 import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
-import com.maidmod.selftalk.mixin.MaidAIChatManagerAccessor;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 
 /**
@@ -31,11 +30,6 @@ import java.util.List;
  */
 public final class MaidSelfTalkService {
 
-    /** 可随机纳入的情境信息分类（TLM 内置 Context 分类 id） */
-    private static final List<String> CONTEXT_CATEGORIES = List.of(
-            "nearby_entities", "equipment", "position", "user", "effects", "status", "world");
-    /** 女仆状态分类（含当前工作状态 work_task 等） */
-    private static final String STATUS_CATEGORY = "status";
     /** "主人在身边"判定半径（格） */
     private static final double OWNER_NEARBY_RANGE = 16.0;
 
@@ -70,49 +64,42 @@ public final class MaidSelfTalkService {
 
         // 自话语言：优先女仆已记录的聊天语言（玩家 chat 过则为客户端语言，保证上下文前缀缓存一致），
         // 否则用配置默认（TLM 官方模型设定多为英文，配置默认 zh_cn 保证中文输出）
-        String selfTalkLanguage = sanitizeLanguage(StringUtils.isBlank(chatManager.chatLanguage)
+        String selfTalkLanguage = SelfTalkContexts.sanitizeLanguage(StringUtils.isBlank(chatManager.chatLanguage)
                 ? Config.SELF_TALK_LANGUAGE.get() : chatManager.chatLanguage);
 
-        // 组装与玩家 chat 同构的消息前缀（语言影响设定占位符的替换）
-        List<LLMMessage> messages;
-        try {
-            messages = ((MaidAIChatManagerAccessor) (Object) chatManager)
-                    .invokeGetMessages(chatManager, selfTalkLanguage);
-        } catch (Throwable t) {
-            // accessor 未注册或 TLM 版本不兼容时的兜底：放弃本次触发，绝不向上抛
-            // （调用方可能处于实体 tick 路径，异常会导致女仆被崩溃恢复机制移除）
-            MaidSelfTalkMod.LOGGER.error("Failed to invoke MaidAIChatManager.getMessages, self-talk skipped", t);
+        // 组装与玩家 chat 同构的消息前缀（语言影响设定占位符的替换），并做 tool 消息清洗
+        List<LLMMessage> messages = SelfTalkContexts.fetchCleanedMessages(chatManager, selfTalkLanguage, "self-talk");
+        if (messages == null) {
             return false;
         }
-        if (messages.isEmpty()) {
-            // 双保险：设定为空走 TLM 会自动生成人设，此处直接放弃本次触发
-            return false;
-        }
+        int historyCount = messages.size();
 
-        // 与玩家 chat 同构（TLM tryToChat 发送前调用 HistoryMessagesCheck.checkMessages）：
-        // 清洗历史中未配对的 tool 消息。自话路径不经 TLM 的 chat 流程，
-        // 若历史裁剪后残留孤立 tool 消息，直接发送会被 LLM 服务端以 HTTP 400 拒绝
-        // （Messages with role 'tool' must be a response to a preceding message with 'tool_calls'）
+        // 互聊窗口手动拼接：让自话能读到最近保留的互聊上下文，但不进 TLM 历史
+        SelfTalkState.State chatState = SelfTalkState.get(maid.getId());
+        List<LLMMessage> interWindow = new ArrayList<>(chatState.windowInterChatMsgs);
+        for (LLMMessage wm : interWindow) {
+            messages.add(wm);
+        }
         try {
             HistoryMessagesCheck.checkMessages(messages);
         } catch (Throwable t) {
-            // 清洗失败（如 TLM 版本不兼容）时放弃本次触发，绝不向上抛
-            MaidSelfTalkMod.LOGGER.warn("HistoryMessagesCheck failed, self-talk skipped", t);
+            MaidSelfTalkMod.LOGGER.warn("HistoryMessagesCheck after inter window failed, self-talk skipped", t);
             return false;
         }
+        // 段标签包裹（历史+互聊窗口；随后的 prompt 消息为尾部、不参与包裹）
+        SelfTalkContexts.wrapSegments(maid, messages, historyCount, interWindow.size());
 
-        // 随机纳入情境信息，让自话内容贴合当下、不同质化；
-        // 主人在身边时强制纳入女仆状态（含当前工作状态），并使用对应的提示词
         boolean ownerNearby = isOwnerNearby(maid);
         String prompt = welcome ? SelfTalkPrompts.WELCOME
                 : (ownerNearby ? SelfTalkPrompts.SELF_TALK_OWNER_NEARBY : SelfTalkPrompts.SELF_TALK);
-        prompt = prompt + languageInstruction(selfTalkLanguage) + buildRandomContext(maid, ownerNearby);
+        // 随机纳入情境信息，让自话内容贴合当下、不同质化
+        prompt = prompt + SelfTalkContexts.languageInstruction(selfTalkLanguage) + SelfTalkContexts.buildRandomContext(maid);
 
         // 与玩家 chat 相同的 context 注入，保证消息结构与缓存前缀一致
         String message = UserPromptContexts.addContext(maid, prompt);
         messages.add(LLMMessage.userChat(maid, message));
 
-        // 标记进行中（防重入），记录置位时刻供超时强制复位
+        // 标记进行中（防重入）
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.selfTalkPending = true;
         state.selfTalkPendingSinceTick = maid.level().getServer().getTickCount();
@@ -121,11 +108,11 @@ public final class MaidSelfTalkService {
         try {
             client.chat(new SelfTalkCallback(chatManager, messages, welcome, keep, broadcastRange));
         } catch (Throwable t) {
-            // chat() 同步抛异常（如站点 URL 非法导致 URI.create 抛 IllegalArgumentException）时
-            // 不会有任何回调来复位标记，必须在此回滚，否则该女仆自话永久停摆
+            // client.chat 同步阶段可能抛异常（如 site.url 非法导致 URI.create 失败、header 构造异常）：
+            // 清掉进行中标记避免该女仆自话永久卡死，绝不向上抛（调用方可能处于实体 tick 路径）
             state.selfTalkPending = false;
             state.selfTalkPendingSinceTick = -1;
-            MaidSelfTalkMod.LOGGER.error("Failed to send self-talk request, self-talk skipped", t);
+            MaidSelfTalkMod.LOGGER.warn("Failed to dispatch self-talk request for maid {}", maid.getId(), t);
             return false;
         }
         return true;
@@ -137,39 +124,48 @@ public final class MaidSelfTalkService {
      * 遗忘规则：当前自话窗口（从玩家上一次正常 chat 起）内保留条数触碰上限时，
      * 删除窗口内除本次外的全部自话记录，仅保留本次——防止自话记录无限撑大上下文。
      * 玩家发起 chat 时窗口重置（旧自话记录"赦免"保留在上下文中，计数重新开始）。
-     *
-     * @param assistantMsg 本次回复的 assistant 消息：由 {@link SelfTalkCallback} 在
-     *                     LLM 响应线程捕获（TLM CappedQueue 队头=最新，不能用 peekLast 取最旧）
      */
-    public static void onSelfTalkFinished(EntityMaid maid, SelfTalkCallback callback, LLMMessage assistantMsg) {
+    public static void onSelfTalkFinished(EntityMaid maid, SelfTalkCallback callback) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.selfTalkPending = false;
         state.selfTalkPendingSinceTick = -1;
-        if (assistantMsg == null) {
-            // 捕获失败（响应线程与服务端线程写入历史交错等罕见情形）：放弃本次记账，等待下次自话
+
+        // 本次回复的 assistant 消息：回调在响应线程写历史后立即捕获（CappedQueue 新消息在队头）
+        LLMMessage last = callback.getLastAssistantMessage();
+        if (last == null) {
             return;
         }
-        state.windowSelfTalkMsgs.add(assistantMsg);
+        state.windowSelfTalkMsgs.add(last);
 
         int keep = callback.getKeepSelfTalkCount();
         if (state.windowSelfTalkMsgs.size() >= keep && state.windowSelfTalkMsgs.size() > 1) {
             // 删除窗口内除本次外的所有自话记录（仅保留本次）
+            Deque<LLMMessage> deque = callback.getChatManager().getHistory().getDeque();
             List<LLMMessage> toRemove = new ArrayList<>(
                     state.windowSelfTalkMsgs.subList(0, state.windowSelfTalkMsgs.size() - 1));
-            callback.getChatManager().getHistory().getDeque().removeAll(toRemove);
+            deque.removeAll(toRemove);
+            // 指纹随消息同删，保证判定与历史内容始终同步
+            SelfTalkProvenance.removeByMessages(maid, toRemove);
             state.windowSelfTalkMsgs.removeAll(toRemove);
         }
     }
 
-    /** 玩家发起 chat：窗口重置（计数重新开始，旧自话记录赦免保留在上下文中），并重新计时自话冷却 */
+    /**
+     * 玩家发起 chat（请求已真实派发）：清空自话/互聊计数窗口（打断连续，计数重新开始），
+     * 并重新计时自话与互聊冷却。
+     * <p>
+     * 内容保留：自话记录已随 TLM 回调写入历史 deque，互聊记录已在 normalChat HEAD
+     * 注入本次请求的上下文（见 {@link com.maidmod.selftalk.mixin.MaidAIChatManagerMixin}），
+     * 清空只重置计数，不丢已注入内容。
+     */
     public static void onPlayerChatStart(EntityMaid maid) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.playerChatCount++;
-        // 记录置位时刻：TLM chat() 存在不产生回调的早退路径，标记可能无人复位，
-        // 状态机据此超时强制复位（见 SelfTalkHandler）
         state.playerChatSinceTick = maid.level().getServer().getTickCount();
         state.windowSelfTalkMsgs.clear();
+        state.windowInterChatMsgs.clear();
         resetSelfTalkCooldown(maid, state);
+        resetInterChatCooldown(maid, state);
     }
 
     /**
@@ -187,19 +183,15 @@ public final class MaidSelfTalkService {
             minSeconds = Config.STATE2_MIN_INTERVAL.get();
             maxSeconds = Config.STATE2_MAX_INTERVAL.get();
         }
-        // 与 SelfTalkHandler 同基准：服务器全局 tick（各维度 gameTime 独立计数，跨维度比较会出现负差）
         long serverTick = maid.level().getServer().getTickCount();
-        state.nextTriggerTick = serverTick + randomIntervalTicks(minSeconds, maxSeconds);
+        state.nextTriggerTick = serverTick + Config.randomIntervalTicks(minSeconds, maxSeconds);
     }
 
-    /**
-     * 区间随机间隔（tick）：min + rand * (max - min + 1)。
-     * 供自话/欢迎触发后的冷却与玩家 chat 后的冷却复用，保证区间语义一致。
-     */
-    public static int randomIntervalTicks(int minSeconds, int maxSeconds) {
-        int minTicks = minSeconds * 20;
-        int maxTicks = maxSeconds * 20;
-        return minTicks + (int) (Math.random() * (maxTicks - minTicks + 1));
+    /** 互聊冷却重新计时（与自话冷却独立，唯一打断来源同为玩家主动 chat） */
+    private static void resetInterChatCooldown(EntityMaid maid, SelfTalkState.State state) {
+        long serverTick = maid.level().getServer().getTickCount();
+        state.nextInterChatTriggerTick = serverTick + Config.randomIntervalTicks(
+                Config.INTER_CHAT_MIN_INTERVAL.get(), Config.INTER_CHAT_MAX_INTERVAL.get());
     }
 
     /** 玩家 chat 结束（成功或失败）：解除一条在途计数 */
@@ -214,70 +206,9 @@ public final class MaidSelfTalkService {
         }
     }
 
-    /**
-     * 随机纳入 1~3 类游戏情境信息，拼为提示词尾段。
-     * <p>
-     * 主人在身边（{@code ownerNearby}）时，女仆状态分类（含当前工作状态）必定纳入，
-     * 其余分类照常随机。
-     */
-    private static String buildRandomContext(EntityMaid maid, boolean ownerNearby) {
-        List<String> pool = new ArrayList<>(CONTEXT_CATEGORIES);
-        List<String> picked = new ArrayList<>();
-        if (ownerNearby) {
-            // 主人在身边：必须注入女仆状态（含当前工作状态）
-            picked.add(STATUS_CATEGORY);
-            pool.remove(STATUS_CATEGORY);
-        }
-        int count = 1 + maid.getRandom().nextInt(3);
-        int remaining = Math.min(count - picked.size(), pool.size());
-        for (int i = 0; i < remaining; i++) {
-            // 从剩余分类中随机抽取一个（RandomSource 非 java.util.Random，手写抽取）
-            picked.add(pool.remove(maid.getRandom().nextInt(pool.size())));
-        }
-
-        List<String> parts = new ArrayList<>();
-        for (String category : picked) {
-            List<String> values = GameContextRegister.getContext(category, maid);
-            if (!values.isEmpty()) {
-                parts.add(String.join("；", values));
-            }
-        }
-        if (parts.isEmpty()) {
-            return StringUtils.EMPTY;
-        }
-        return "\n\n当前情境：" + String.join("；", parts) + "。";
-    }
-
     /** 主人是否在身边（在线且在判定半径内） */
     private static boolean isOwnerNearby(EntityMaid maid) {
         var owner = maid.getOwner();
         return owner != null && maid.distanceToSqr(owner) <= OWNER_NEARBY_RANGE * OWNER_NEARBY_RANGE;
-    }
-
-    /**
-     * 自话语言白名单化：仅接受简体中文/英文，其余回退简体中文。
-     * chatManager.chatLanguage 来自玩家 chat 时记录的客户端语言（玩家可控），
-     * 未经校验直接进 invokeGetMessages 会经由 TLM 占位符替换路径，存在注入面。
-     */
-    private static String sanitizeLanguage(String language) {
-        return switch (language) {
-            case "zh_cn", "zh", "en_us", "en" -> language;
-            default -> "zh_cn";
-        };
-    }
-
-    /**
-     * 按配置语言生成输出语言指令，追加到提示词中。
-     * TLM 官方模型人设设定多为英文，若不显式声明语言，模型可能跟随英文设定输出英文。
-     * <p>
-     * 语言标签来自玩家可伪造的 chatLanguage（TLM 聊天包），
-     * 白名单外一律回退默认中文指令，避免不可信字符串注入提示词。
-     */
-    private static String languageInstruction(String language) {
-        return switch (language) {
-            case "zh_cn", "zh" -> "\n\n请始终用简体中文说话。";
-            case "en_us", "en" -> "\n\nPlease always speak in English.";
-            default -> "\n\n请始终用简体中文说话。";
-        };
     }
 }

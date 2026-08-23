@@ -1,5 +1,6 @@
 package com.maidmod.selftalk.client;
 
+import com.maidmod.selftalk.network.InterChatConfigResponseMessage;
 import com.maidmod.selftalk.network.SelfTalkConfigResponseMessage;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
@@ -14,11 +15,19 @@ public final class SelfTalkPlayerSettingsClient {
     private SelfTalkPlayerSettingsClient() {
     }
 
-    /** 收到服务端设置响应后，刷新当前打开的设置界面 */
+    /** 收到服务端自话设置响应后，刷新当前打开的设置界面 */
     public static void onConfigResponse(SelfTalkConfigResponseMessage msg) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.screen instanceof SelfTalkPlayerSettingsScreen screen) {
             screen.applyResponse(msg.isAdminEnabled(), msg.isGlobalEnabled(), msg.isMaidEnabled());
+        }
+    }
+
+    /** 收到服务端互聊设置响应后，刷新界面 */
+    public static void onInterChatConfigResponse(InterChatConfigResponseMessage msg) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof SelfTalkPlayerSettingsScreen screen) {
+            screen.applyInterChatResponse(msg.isAdminEnabled(), msg.isGlobalEnabled(), msg.isMaidEnabled());
         }
     }
 }

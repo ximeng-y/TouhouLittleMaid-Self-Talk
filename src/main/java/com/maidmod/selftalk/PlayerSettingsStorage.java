@@ -14,14 +14,19 @@ import java.util.UUID;
  * 数据写入 persistentData 的 PERSISTED_NBT_TAG（"PlayerPersisted"）子标签：
  * Forge 的 ServerPlayer.restoreFrom 会将该子标签从旧玩家复制到新玩家，
  * 因此设置跨死亡重生自动保留；该子标签随玩家 NBT 存档，服务端重启亦保留。
+ * 自话与互聊两级设置共用同一套读写模式，仅 key 不同。
  */
 public final class PlayerSettingsStorage {
 
     /** 命名空间化 key，避免与其他 mod 在共享子标签内撞键 */
     private static final String KEY = "maid_self_talk:enabled";
-
     /** 单只关闭名单：女仆 UUID 字符串列表（仅存关闭项，恢复时移除） */
     private static final String DISABLED_MAIDS_KEY = "maid_self_talk:disabled_maids";
+
+    /** 互聊全局开关 */
+    private static final String INTER_CHAT_KEY = "maid_self_talk:inter_chat_enabled";
+    /** 互聊单只关闭名单（与自话名单独立） */
+    private static final String INTER_CHAT_DISABLED_MAIDS_KEY = "maid_self_talk:inter_chat_disabled_maids";
 
     /** 单只关闭名单最大条数：防止恶意客户端无限写入撑爆玩家 NBT（主线程 contains 亦为 O(n) 扫描） */
     private static final int MAX_DISABLED_MAIDS = 256;
@@ -29,37 +34,67 @@ public final class PlayerSettingsStorage {
     private PlayerSettingsStorage() {
     }
 
+    // ===== 自话 =====
+
     /** 默认启用：未设置过时返回 true */
     public static boolean isEnabled(Player player) {
-        CompoundTag sub = player.getPersistentData().getCompound(Player.PERSISTED_NBT_TAG);
-        // 必须显式 contains：getBoolean 对缺失 key 返回 false，直接调用会翻转默认值
-        return !sub.contains(KEY) || sub.getBoolean(KEY);
+        return readEnabled(player, KEY);
     }
 
     public static void setEnabled(Player player, boolean enabled) {
-        CompoundTag persisted = player.getPersistentData();
-        // getCompound 对缺失 key 返回新空 tag 且不写回原 tag，必须先 contains 判断再 put
-        if (!persisted.contains(Player.PERSISTED_NBT_TAG, Tag.TAG_COMPOUND)) {
-            persisted.put(Player.PERSISTED_NBT_TAG, new CompoundTag());
-        }
-        persisted.getCompound(Player.PERSISTED_NBT_TAG).putBoolean(KEY, enabled);
+        writeEnabled(player, KEY, enabled);
     }
 
     /** 单只关闭名单是否包含该女仆（缺省 = 跟随全局，不关闭） */
     public static boolean isMaidDisabled(Player player, UUID maidUuid) {
-        CompoundTag sub = player.getPersistentData().getCompound(Player.PERSISTED_NBT_TAG);
-        ListTag list = sub.getList(DISABLED_MAIDS_KEY, Tag.TAG_STRING);
-        return list.contains(StringTag.valueOf(maidUuid.toString()));
+        return readMaidDisabled(player, DISABLED_MAIDS_KEY, maidUuid);
     }
 
     /** 设置单只关闭：关闭去重后追加，恢复时移除；名单为空时删除 key 避免空 tag 残留 */
     public static void setMaidDisabled(Player player, UUID maidUuid, boolean disabled) {
-        CompoundTag persisted = player.getPersistentData();
-        if (!persisted.contains(Player.PERSISTED_NBT_TAG, Tag.TAG_COMPOUND)) {
-            persisted.put(Player.PERSISTED_NBT_TAG, new CompoundTag());
-        }
-        CompoundTag sub = persisted.getCompound(Player.PERSISTED_NBT_TAG);
-        ListTag list = sub.getList(DISABLED_MAIDS_KEY, Tag.TAG_STRING);
+        writeMaidDisabled(player, DISABLED_MAIDS_KEY, maidUuid, disabled);
+    }
+
+    // ===== 互聊 =====
+
+    /** 默认启用：未设置过时返回 true */
+    public static boolean isInterChatEnabled(Player player) {
+        return readEnabled(player, INTER_CHAT_KEY);
+    }
+
+    public static void setInterChatEnabled(Player player, boolean enabled) {
+        writeEnabled(player, INTER_CHAT_KEY, enabled);
+    }
+
+    /** 单只关闭名单是否包含该女仆（缺省 = 跟随全局，不关闭） */
+    public static boolean isInterChatMaidDisabled(Player player, UUID maidUuid) {
+        return readMaidDisabled(player, INTER_CHAT_DISABLED_MAIDS_KEY, maidUuid);
+    }
+
+    public static void setInterChatMaidDisabled(Player player, UUID maidUuid, boolean disabled) {
+        writeMaidDisabled(player, INTER_CHAT_DISABLED_MAIDS_KEY, maidUuid, disabled);
+    }
+
+    // ===== 共用读写 =====
+
+    /** 必须显式 contains：getBoolean 对缺失 key 返回 false，直接调用会翻转默认值 */
+    private static boolean readEnabled(Player player, String key) {
+        CompoundTag sub = persistedSub(player);
+        return !sub.contains(key) || sub.getBoolean(key);
+    }
+
+    private static void writeEnabled(Player player, String key, boolean enabled) {
+        persistedSubForWrite(player).putBoolean(key, enabled);
+    }
+
+    private static boolean readMaidDisabled(Player player, String key, UUID maidUuid) {
+        CompoundTag sub = persistedSub(player);
+        return sub.getList(key, Tag.TAG_STRING).contains(StringTag.valueOf(maidUuid.toString()));
+    }
+
+    private static void writeMaidDisabled(Player player, String key, UUID maidUuid, boolean disabled) {
+        CompoundTag sub = persistedSubForWrite(player);
+        ListTag list = sub.getList(key, Tag.TAG_STRING);
         String uuid = maidUuid.toString();
         if (disabled) {
             if (!list.contains(StringTag.valueOf(uuid))) {
@@ -74,9 +109,23 @@ public final class PlayerSettingsStorage {
             list.removeIf(tag -> tag.getAsString().equals(uuid));
         }
         if (list.isEmpty()) {
-            sub.remove(DISABLED_MAIDS_KEY);
+            sub.remove(key);
         } else {
-            sub.put(DISABLED_MAIDS_KEY, list);
+            sub.put(key, list);
         }
+    }
+
+    /** 读路径：getCompound 对缺失 key 返回新空 tag 且不写回原 tag，只读安全 */
+    private static CompoundTag persistedSub(Player player) {
+        return player.getPersistentData().getCompound(Player.PERSISTED_NBT_TAG);
+    }
+
+    /** 写路径：必须先 contains 判断再 put，确保子标签真实存在 */
+    private static CompoundTag persistedSubForWrite(Player player) {
+        CompoundTag persisted = player.getPersistentData();
+        if (!persisted.contains(Player.PERSISTED_NBT_TAG, Tag.TAG_COMPOUND)) {
+            persisted.put(Player.PERSISTED_NBT_TAG, new CompoundTag());
+        }
+        return persisted.getCompound(Player.PERSISTED_NBT_TAG);
     }
 }

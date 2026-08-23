@@ -56,6 +56,23 @@ public final class Config {
     /** 自话输出语言（TLM 官方模型设定多为英文，需要显式声明输出语言） */
     public static ForgeConfigSpec.ConfigValue<String> SELF_TALK_LANGUAGE;
 
+    // ===== 互聊 =====
+    /** 互聊总开关 */
+    public static ForgeConfigSpec.BooleanValue INTER_CHAT_ENABLED;
+    /** 互聊最小触发间隔（秒） */
+    public static ForgeConfigSpec.IntValue INTER_CHAT_MIN_INTERVAL;
+    /** 互聊最大触发间隔（秒） */
+    public static ForgeConfigSpec.IntValue INTER_CHAT_MAX_INTERVAL;
+    /** 互聊：半径多少格内有玩家时才触发 */
+    public static ForgeConfigSpec.DoubleValue INTER_CHAT_PLAYER_RANGE;
+    /** 互聊：自身多少格内有另一只女仆时才触发 */
+    public static ForgeConfigSpec.DoubleValue INTER_CHAT_MAID_RANGE;
+    /** 互聊保留轮数（问/答算一轮，单问也算一轮） */
+    public static ForgeConfigSpec.IntValue INTER_CHAT_KEEP_ROUNDS;
+    /** 互聊连续触发概率（0~1） */
+    public static ForgeConfigSpec.DoubleValue INTER_CHAT_CHAIN_PROBABILITY;
+    public static ForgeConfigSpec.IntValue INTER_CHAT_MAX_CHAIN_ROUNDS;
+
     public static final ForgeConfigSpec SPEC;
 
     static {
@@ -126,9 +143,43 @@ public final class Config {
                 .define("selfTalkLanguage", "zh_cn");
         builder.pop();
 
+        builder.push("inter_maid_chat");
+        INTER_CHAT_ENABLED = builder.comment("女仆互聊总开关，默认关闭。开启后满足玩家距离与女仆间距离的女仆才会发起互聊")
+                .define("enabled", false);
+        INTER_CHAT_MIN_INTERVAL = builder.comment("互聊最小触发间隔（秒）")
+                .defineInRange("minIntervalSeconds", 300, 10, 86400);
+        INTER_CHAT_MAX_INTERVAL = builder.comment("互聊最大触发间隔（秒）")
+                .defineInRange("maxIntervalSeconds", 600, 10, 86400);
+        INTER_CHAT_PLAYER_RANGE = builder.comment("互聊：半径多少格内有玩家时才触发（玩家距离）")
+                .defineInRange("playerRange", 16.0, 1.0, 512.0);
+        INTER_CHAT_MAID_RANGE = builder.comment("互聊：自身多少格内有另一只女仆时才触发（女仆间距离）")
+                .defineInRange("maidRange", 8.0, 1.0, 512.0);
+        INTER_CHAT_KEEP_ROUNDS = builder.comment("互聊保留轮数。问/答算一轮，单问无答也算一轮；达到该轮数时触发遗忘，仅保留最近一条消息")
+                .defineInRange("keepRounds", 5, 1, 50);
+        INTER_CHAT_CHAIN_PROBABILITY = builder.comment("互聊连续触发概率（0~1），每轮回答后按此概率决定是否让对方继续回应")
+                .defineInRange("chainProbability", 0.3, 0.0, 1.0);
+        INTER_CHAT_MAX_CHAIN_ROUNDS = builder.comment("一次互聊会话的最大消息条数（含发起者消息），达到后强制结束本次互聊。为连续概率配到 1.0 等极端配置兜底，防止无限链式往返消耗 token")
+                .defineInRange("maxChainRounds", 10, 1, 50);
+        builder.pop();
+
         SPEC = builder.build();
     }
 
     private Config() {
+    }
+
+    /**
+     * 秒区间随机转 tick：min/max 倒置时自动交换（配置项无跨字段校验，
+     * 管理员手改 toml 可能写出 min > max，交换后语义明确且区间恒正）。
+     */
+    public static int randomIntervalTicks(int minSeconds, int maxSeconds) {
+        if (maxSeconds < minSeconds) {
+            int temp = minSeconds;
+            minSeconds = maxSeconds;
+            maxSeconds = temp;
+        }
+        int minTicks = minSeconds * 20;
+        int maxTicks = maxSeconds * 20;
+        return minTicks + (int) (Math.random() * (maxTicks - minTicks + 1));
     }
 }

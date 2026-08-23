@@ -34,23 +34,49 @@ public final class SelfTalkState {
         return STATES.entrySet();
     }
 
+    /**
+     * 女仆死亡/卸载/移除时清理状态。
+     * 调用方：EntityLeaveLevelEvent 即时清理与 tick 中死亡兜底。
+     */
+    public static void cleanupIfDead(int maidId, boolean alive) {
+        if (!alive) {
+            STATES.remove(maidId);
+        }
+    }
+    /** 玩家登出：清除所有女仆对该玩家的欢迎标记，下次登录窗口内可再次欢迎 */
+    public static void removeWelcomeForPlayer(UUID playerUuid) {
+        for (State state : STATES.values()) {
+            state.welcomedPlayers.remove(playerUuid);
+        }
+    }
+
     public static final class State {
-        /** 下次可触发自话的服务器 tick（全局单调，与 {@code server.getTickCount()} 同基准） */
+        /** 下次可触发自话的服务器 tick（全局单调，与 server.getTickCount() 同基准） */
         public long nextTriggerTick = 0;
         /** 是否有自话正在进行（回复未返回） */
         public boolean selfTalkPending = false;
+        /** selfTalkPending 置位时的服务器 tick（-1 = 未置位），用于超时强制复位防卡死 */
+        public long selfTalkPendingSinceTick = -1;
         /**
          * 在途玩家 chat 数（TLM 无并发护栏，玩家可连发多条 chat；
          * 计数而非布尔，避免先完成的回复提前清掉标记导致自话与在途 chat 交错写历史）
          */
         public int playerChatCount = 0;
-        /** selfTalkPending 置位时的服务器 tick（-1 = 未置位），用于超时强制复位防卡死 */
-        public long selfTalkPendingSinceTick = -1;
         /** playerChatCount 最近一次自增时的服务器 tick（-1 = 未置位），用于超时强制复位防卡死 */
         public long playerChatSinceTick = -1;
         /** 当前自话窗口内已保留的自言自语 assistant 消息（按时间序） */
         public final List<LLMMessage> windowSelfTalkMsgs = new ArrayList<>();
         /** 本女仆已欢迎过的玩家 */
         public final java.util.Set<UUID> welcomedPlayers = new java.util.HashSet<>();
+
+        // ===== 互聊状态（与自话独立） =====
+        /** 下次可触发互聊的服务器 tick */
+        public long nextInterChatTriggerTick = 0;
+        /** 是否有互聊正在进行（回复未返回） */
+        public boolean interChatPending = false;
+        /** interChatPending 置位时的服务器 tick（-1 = 未置位） */
+        public long interChatPendingSinceTick = -1;
+        /** 当前互聊窗口内已保留的互聊 assistant 消息（按时间序，含发起与回答） */
+        public final List<LLMMessage> windowInterChatMsgs = new ArrayList<>();
     }
 }

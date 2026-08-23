@@ -95,6 +95,73 @@ public final class SelfTalkClothConfig {
                 .build());
         main.add(prompt.build());
 
+        // 子页：互聊（默认值与 Config 定义保持一致）
+        SubCategoryBuilder interChat = entryBuilder.startSubCategory(
+                        Component.translatable("config.maid_self_talk.inter_chat"))
+                .setExpanded(false);
+        interChat.add(entryBuilder.startBooleanToggle(
+                        Component.translatable("config.maid_self_talk.inter_chat.enabled"),
+                        Config.INTER_CHAT_ENABLED.get())
+                .setDefaultValue(false)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.enabled.tooltip"))
+                .setSaveConsumer(v -> saveBool(Config.INTER_CHAT_ENABLED, v))
+                .build());
+        interChat.add(entryBuilder.startIntField(
+                        Component.translatable("config.maid_self_talk.inter_chat.min_interval"),
+                        Config.INTER_CHAT_MIN_INTERVAL.get())
+                .setMin(10).setMax(86400)
+                .setDefaultValue(300)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.min_interval.tooltip"))
+                .setSaveConsumer(v -> saveInt(Config.INTER_CHAT_MIN_INTERVAL, v))
+                .build());
+        interChat.add(entryBuilder.startIntField(
+                        Component.translatable("config.maid_self_talk.inter_chat.max_interval"),
+                        Config.INTER_CHAT_MAX_INTERVAL.get())
+                .setMin(10).setMax(86400)
+                .setDefaultValue(600)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.max_interval.tooltip"))
+                .setSaveConsumer(v -> saveInt(Config.INTER_CHAT_MAX_INTERVAL, v))
+                .build());
+        interChat.add(entryBuilder.startDoubleField(
+                        Component.translatable("config.maid_self_talk.inter_chat.player_range"),
+                        Config.INTER_CHAT_PLAYER_RANGE.get())
+                .setMin(1.0).setMax(512.0)
+                .setDefaultValue(16.0)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.player_range.tooltip"))
+                .setSaveConsumer(v -> saveDouble(Config.INTER_CHAT_PLAYER_RANGE, v))
+                .build());
+        interChat.add(entryBuilder.startDoubleField(
+                        Component.translatable("config.maid_self_talk.inter_chat.maid_range"),
+                        Config.INTER_CHAT_MAID_RANGE.get())
+                .setMin(1.0).setMax(512.0)
+                .setDefaultValue(8.0)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.maid_range.tooltip"))
+                .setSaveConsumer(v -> saveDouble(Config.INTER_CHAT_MAID_RANGE, v))
+                .build());
+        interChat.add(entryBuilder.startIntSlider(
+                        Component.translatable("config.maid_self_talk.inter_chat.keep_rounds"),
+                        Config.INTER_CHAT_KEEP_ROUNDS.get(), 1, 50)
+                .setDefaultValue(5)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.keep_rounds.tooltip"))
+                .setSaveConsumer(v -> saveInt(Config.INTER_CHAT_KEEP_ROUNDS, v))
+                .build());
+        interChat.add(entryBuilder.startDoubleField(
+                        Component.translatable("config.maid_self_talk.inter_chat.chain_probability"),
+                        Config.INTER_CHAT_CHAIN_PROBABILITY.get())
+                .setMin(0.0).setMax(1.0)
+                .setDefaultValue(0.3)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.chain_probability.tooltip"))
+                .setSaveConsumer(v -> saveDouble(Config.INTER_CHAT_CHAIN_PROBABILITY, v))
+                .build());
+        interChat.add(entryBuilder.startIntSlider(
+                        Component.translatable("config.maid_self_talk.inter_chat.max_chain_rounds"),
+                        Config.INTER_CHAT_MAX_CHAIN_ROUNDS.get(), 1, 50)
+                .setDefaultValue(10)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.max_chain_rounds.tooltip"))
+                .setSaveConsumer(v -> saveInt(Config.INTER_CHAT_MAX_CHAIN_ROUNDS, v))
+                .build());
+        main.add(interChat.build());
+
         globalAi.addEntry(main.build());
     }
 

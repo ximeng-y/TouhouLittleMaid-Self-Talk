@@ -40,6 +40,8 @@ public class SelfTalkCallback extends LLMCallback {
     private final int keepSelfTalkCount;
     /** 聊天框广播半径（格）：范围内存活玩家可见自话内容 */
     private final double broadcastRange;
+    /** 本次回复的 assistant 消息（响应线程在父类写历史后立即捕获，供遗忘机制识别） */
+    private LLMMessage lastAssistantMessage;
 
     public SelfTalkCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
                             boolean welcome, int keepSelfTalkCount, double broadcastRange) {
@@ -55,14 +57,15 @@ public class SelfTalkCallback extends LLMCallback {
     public void onSuccess(ResponseChat responseChat) {
         // TLM 默认行为：写 assistant 历史（供聊天记录 UI 显示）、显示气泡并给主人发送聊天栏消息
         super.onSuccess(responseChat);
-        // 捕获本次写入历史的 assistant 消息实例：
-        // TLM CappedQueue.add 用 offerFirst（队头=最新），且必须在 super 返回后的同一线程
-        // （LLM 响应线程）立即读取，避免与服务端线程的玩家 chat 写入历史交错
-        LLMMessage assistantMsg = captureLatestAssistantMessage(responseChat);
-        if (assistantMsg == null) {
-            // 父类早退（空回复转 onFailure，未写历史）时无消息可捕获；
-            // 或捕获校验未过（罕见交错）——跳过事件/遗忘/广播，但要复位 pending
-            // 解锁自话闸门（父类早退路径已由 onFailure 复位，此处兜底交错场景）
+        // 捕获本次写入历史的 assistant 消息：三重校验（队头 + role + 内容）防并发响应线程交错抓取。
+        // 父类对空白回复内部转调 onFailure 不写历史，队头为旧消息/null，校验不通过返回 null。
+        this.lastAssistantMessage = captureLatestAssistantMessage(responseChat);
+        // 登记自话指纹（与历史写入同线程紧邻，供 wrap 区分自话/主人段；
+        // 先登记后判空：新老窗口消息都可能随后被 trim，指纹随消息同生同灭）
+        SelfTalkProvenance.registerSelfTalk(getMaid(), this.lastAssistantMessage);
+        if (this.lastAssistantMessage == null) {
+            // 无消息可捕获（空白回复）或校验未过（罕见交错）：
+            // 跳过事件/遗忘/广播，复位 pending 防卡死
             runOnServerThread(() -> {
                 SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
                 state.selfTalkPending = false;
@@ -73,7 +76,7 @@ public class SelfTalkCallback extends LLMCallback {
         EntityMaid maid = getMaid();
         Runnable finish = () -> {
             MinecraftForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, responseChat.getChatText(), welcome));
-            MaidSelfTalkService.onSelfTalkFinished(maid, this, assistantMsg);
+            MaidSelfTalkService.onSelfTalkFinished(maid, this);
             broadcastToNearby(maid, responseChat.getChatText());
         };
         if (isOnServerThread()) {
@@ -85,9 +88,9 @@ public class SelfTalkCallback extends LLMCallback {
     }
 
     /**
-     * 捕获父类刚写入历史的 assistant 消息（队头=最新）。
-     * 父类 {@code onSuccess} 写入的是 {@code responseChat.toString()}，据此校验队头消息，
-     * 避免与其他线程（玩家 chat 响应）写入的历史交错时抓错消息；校验不过则返回 null。
+     * 捕获父类刚写入历史的 assistant 消息（队头=最新，CappedQueue.offerFirst）。
+     * 三重校验（队头非空 + role 为 ASSISTANT + 内容与本次响应一致）防同女仆并发响应线程
+     * 在写入与捕获间交错时抓取到对方消息；校验不过返回 null。
      */
     private LLMMessage captureLatestAssistantMessage(ResponseChat responseChat) {
         Deque<LLMMessage> deque = getChatManager().getHistory().getDeque();
@@ -140,5 +143,10 @@ public class SelfTalkCallback extends LLMCallback {
 
     public int getKeepSelfTalkCount() {
         return keepSelfTalkCount;
+    }
+
+    /** 本次回复的 assistant 消息（可能为 null：空白回复等未写历史的路径） */
+    public LLMMessage getLastAssistantMessage() {
+        return lastAssistantMessage;
     }
 }
