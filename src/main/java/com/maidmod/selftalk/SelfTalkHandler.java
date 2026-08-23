@@ -59,6 +59,9 @@ public final class SelfTalkHandler {
     private static final int BACKOFF_MIN_TICKS = 8 * 20;
     private static final int BACKOFF_MAX_TICKS = 15 * 20;
 
+    /** 互聊候选均不可用（pending/无 AI）时的短退避（tick）：避免每 tick 重复 AABB 实体扫描 */
+    private static final int RESPONDER_RETRY_TICKS = 2 * 20;
+
     /** pending 超时阈值（tick）：5 分钟，回调永不返回时强制复位防卡死 */
     private static final long PENDING_TIMEOUT_TICKS = 5 * 60 * 20;
 
@@ -198,6 +201,9 @@ public final class SelfTalkHandler {
                                     return;
                                 }
                             }
+                        } else {
+                            // 候选全部在途/无 AI：短退避避免每 tick 重扫实体，pending 秒~分钟级后自然重试
+                            state.nextInterChatTriggerTick = serverTick + RESPONDER_RETRY_TICKS;
                         }
                     }
                 }

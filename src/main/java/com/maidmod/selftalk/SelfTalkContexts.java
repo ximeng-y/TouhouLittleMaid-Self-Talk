@@ -11,6 +11,7 @@ import com.maidmod.selftalk.mixin.MaidAIChatManagerAccessor;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Set;
 
@@ -146,11 +147,16 @@ public final class SelfTalkContexts {
         if (messages == null || messages.isEmpty()) {
             return;
         }
-        // 首次使用时把存量历史标记为 legacy（老版本会话段外，一次性）
-        SelfTalkProvenance.ensureLegacyInitialized(maid, maid.getAiChatManager().getHistory().getDeque());
+        // 首次使用时把存量历史标记为 legacy（老版本会话段外，一次性）；
+        // 顺带惰性剪枝：清理被 CappedQueue 容量逐出的死指纹（纯清理，不影响标签布局判定）
+        Deque<LLMMessage> historyDeque = maid.getAiChatManager().getHistory().getDeque();
+        SelfTalkProvenance.ensureLegacyInitialized(maid, historyDeque);
+        SelfTalkProvenance.pruneIfBloated(maid, historyDeque);
 
         int systemEnd = 0;
-        while (systemEnd < historyCount && messages.get(systemEnd).role() == Role.SYSTEM) {
+        // historyCount 是调用时快照，二次清洗可能收缩列表，访问须以 messages.size() 为界
+        while (systemEnd < historyCount && systemEnd < messages.size()
+                && messages.get(systemEnd).role() == Role.SYSTEM) {
             systemEnd++;
         }
         int segEnd = Math.min(historyCount + windowCount, messages.size());

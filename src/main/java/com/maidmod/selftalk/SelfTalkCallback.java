@@ -60,9 +60,11 @@ public class SelfTalkCallback extends LLMCallback {
         // 捕获本次写入历史的 assistant 消息：三重校验（队头 + role + 内容）防并发响应线程交错抓取。
         // 父类对空白回复内部转调 onFailure 不写历史，队头为旧消息/null，校验不通过返回 null。
         this.lastAssistantMessage = captureLatestAssistantMessage(responseChat);
-        // 登记自话指纹（与历史写入同线程紧邻，供 wrap 区分自话/主人段；
-        // 先登记后判空：新老窗口消息都可能随后被 trim，指纹随消息同生同灭）
-        SelfTalkProvenance.registerSelfTalk(getMaid(), this.lastAssistantMessage);
+        // 登记自话指纹（供 wrap 区分自话/主人段；先登记后判空：新老窗口消息都可能随后被 trim，
+        // 指纹随消息同生同灭）。投递到服务端主线程：附件容器（AttachmentHolder）的
+        // IdentityHashMap 非线程安全，响应线程直接 getData 会与主线程首次读取产生结构性竞争；
+        // submit 队列 FIFO，登记先于下方 pending 复位与 finish（含 trim 删指纹）执行
+        runOnServerThread(() -> SelfTalkProvenance.registerSelfTalk(getMaid(), this.lastAssistantMessage));
         if (this.lastAssistantMessage == null) {
             // 无消息可捕获（空白回复）或校验未过（罕见交错）：
             // 跳过事件/遗忘/广播，复位 pending 防卡死

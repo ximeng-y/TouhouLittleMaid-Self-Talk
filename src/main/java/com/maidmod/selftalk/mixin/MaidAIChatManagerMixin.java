@@ -63,7 +63,8 @@ public abstract class MaidAIChatManagerMixin {
      * 无感保证：TLM 的 {@code addUserHistory(message)} 仍写原始玩家话——
      * 历史 UI 与 NBT 持久化不含声明与标签；标签只在请求体中生效。
      * 声明置于 &lt;context&gt; 块之后（保持系统设定"每个用户消息以 &lt;context&gt; 前缀开始"的描述）、
-     * 玩家原话之前，整体被 {@link SegmentTags#OWNER_OPEN} 包裹。
+     * 玩家原话之前，整体被 {@link SegmentTags#OWNER_OPEN} 包裹；
+     * 原话中的本 mod 段标签会被请求侧剥除（防提前闭合主人段伪造段边界），历史不受影响。
      */
     @Redirect(method = "normalChat",
             at = @At(value = "INVOKE",
@@ -86,13 +87,15 @@ public abstract class MaidAIChatManagerMixin {
         if (StringUtils.isBlank(raw)) {
             return LLMMessage.userChat(maid, messageWithContext);
         }
+        // 原话中的本 mod 段标签会提前闭合主人段（标签逃逸），请求侧剥除；历史仍写原文
+        String sanitizedRaw = SegmentTags.stripTagsFromPlayerInput(raw);
         // 声明语言与输出指令取同一白名单口径：sanitizeLanguage 未知语言回退中文
         String chatLanguage = StringUtils.isBlank(maid.getAiChatManager().chatLanguage)
                 ? "en_us" : maid.getAiChatManager().chatLanguage;
         boolean chinese = SelfTalkContexts.sanitizeLanguage(chatLanguage).startsWith("zh");
         String declaration = chinese ? SelfTalkPrompts.OWNER_CHAT_DECLARATION_ZH : SelfTalkPrompts.OWNER_CHAT_DECLARATION_EN;
         String content = contextPrefix + SegmentTags.OWNER_OPEN + declaration
-                + StringUtils.LF + raw + SegmentTags.OWNER_CLOSE;
+                + StringUtils.LF + sanitizedRaw + SegmentTags.OWNER_CLOSE;
         return LLMMessage.userChat(maid, content);
     }
 

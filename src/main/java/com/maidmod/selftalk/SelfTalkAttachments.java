@@ -49,8 +49,9 @@ public final class SelfTalkAttachments {
      * 都是 ASSISTANT、形态相同（"Part1---Part2"），只有登记了指纹才能区分来源。
      * 互聊消息不进历史（仅内存窗口），无需指纹。
      * <p>
-     * 跨线程：自话回复在 LLM 响应线程登记，wrap 在服务端主线程读取——
-     * 解码/默认值均用并发集，避免与 TLM 异步压缩回调（同为响应线程删指纹）竞争。
+     * 跨线程：登记与删除已统一投递到服务端主线程（AttachmentHolder 内部的
+     * IdentityHashMap 非线程安全，不能从 LLM 响应线程直接读写附件）；
+     * 集合仍用并发集兜底（平台反序列化等潜在并发路径）。
      */
     public static final Supplier<AttachmentType<Set<String>>> SELF_TALK_FINGERPRINTS =
             ATTACHMENT_TYPES.register("self_talk_fingerprints",
