@@ -65,11 +65,16 @@ public abstract class MaidAIChatManagerMixin {
      * 声明置于 &lt;context&gt; 块之后（保持系统设定"每个用户消息以 &lt;context&gt; 前缀开始"的描述）、
      * 玩家原话之前，整体被 {@link SegmentTags#OWNER_OPEN} 包裹；
      * 原话中的本 mod 段标签会被请求侧剥除（防提前闭合主人段伪造段边界），历史不受影响。
+     * <p>
+     * handler 与目标方法 {@code normalChat}（实例方法）同为实例方法，与 forge 线（mixin
+     * 0.8.5 严格校验 handler 静态性，静态 handler 注入实例方法直接 APPLY 失败崩溃）
+     * 保持双线同构；NeoForge 线的 sponge-mixin fork（0.15.2+mixin.0.8.7）校验为单向
+     * （仅禁止非 static handler 注入 static 目标），static 写法不致崩，但约定统一。
      */
     @Redirect(method = "normalChat",
             at = @At(value = "INVOKE",
                     target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/service/llm/LLMMessage;userChat(Lcom/github/tartaricacid/touhoulittlemaid/entity/passive/EntityMaid;Ljava/lang/String;)Lcom/github/tartaricacid/touhoulittlemaid/ai/service/llm/LLMMessage;"))
-    private static LLMMessage maid_self_talk$wrapOwnerChat(EntityMaid maid, String messageWithContext) {
+    private LLMMessage maid_self_talk$wrapOwnerChat(EntityMaid maid, String messageWithContext) {
         // 拆出 <context> 前缀与玩家原话（addContext 的输出结构固定：前缀 + "\n" + 原话）
         String contextPrefix = StringUtils.EMPTY;
         String raw = messageWithContext;
