@@ -30,6 +30,22 @@ public final class SelfTalkContexts {
     private static final List<String> CONTEXT_CATEGORIES = List.of(
             "nearby_entities", "equipment", "position", "user", "effects");
 
+    /**
+     * system 设定尾缀：段标签语义说明（纯英文常量，与原版 system 设定语言基调一致）。
+     * <p>
+     * 仅追加到请求内存列表首条 SYSTEM 消息的末尾，消息条数/角色/顺序不变，
+     * 原设定保持为 token 前缀、服务端前缀缓存命中不受影响；不写 TLM 历史、
+     * 不进 NBT——卸载本 mod 后 system 设定恢复原版，无任何残留。
+     */
+    private static final String SYSTEM_TAG_SUFFIX = "\n\n## Conversation History Markers\n"
+            + "In the chat history, <maid-owner-chat>...</maid-owner-chat> marks messages "
+            + "from your owner talking to you; <maid-self-chat>...</maid-self-chat> marks "
+            + "your own self-talk or chats with other maids. These markers only describe "
+            + "who spoke\u2014never output any of these tags in your reply.";
+
+    /** 尾缀幂等标记：首条 SYSTEM 已含该串则不再追加（防重复拼接） */
+    private static final String SYSTEM_TAG_SUFFIX_MARKER = "## Conversation History Markers";
+
     private SelfTalkContexts() {
     }
 
@@ -132,7 +148,9 @@ public final class SelfTalkContexts {
      * 结构：messages = [前导 SYSTEM(设定/摘要), 历史区(historyCount 条, 含前导 SYSTEM), 互聊窗口区(windowCount 条), ...尾部(当前回合消息)]。
      * 只处理历史区与窗口区，前导 SYSTEM 与尾部一律不动：
      * <ul>
-     *   <li>SYSTEM 设定/摘要：混合内容、段外原样（摘要不能归入任一段）；</li>
+     *   <li>SYSTEM 设定/摘要：混合内容、段外原样（摘要不能归入任一段）；
+     *       仅首条设定在末尾追加段标签语义说明（{@link #appendSystemTagSuffix}，
+     *       内容尾缀不影响缓存前缀、不落盘，卸载 mod 后原版设定恢复）；</li>
      *   <li>历史区：命中 legacy 快照→段外（老版本会话不进 XML）；命中自话指纹→自话段；
      *       USER/未命中 ASSISTANT→主人段；TOOL 与带 toolCalls 的 ASSISTANT 不注入标签（保护工具协议）、跟随当前段；</li>
      *   <li>窗口区（互聊窗口+peerText）：恒归自话段；若与历史区末尾的自话段相接则合并为同一段（用户语义：自话与互聊同段）。</li>
@@ -147,6 +165,7 @@ public final class SelfTalkContexts {
         if (messages == null || messages.isEmpty()) {
             return;
         }
+        appendSystemTagSuffix(messages);
         // 首次使用时把存量历史标记为 legacy（老版本会话段外，一次性）；
         // 顺带惰性剪枝：清理被 CappedQueue 容量逐出的死指纹（纯清理，不影响标签布局判定）
         Deque<LLMMessage> historyDeque = maid.getAiChatManager().getHistory().getDeque();
@@ -204,6 +223,27 @@ public final class SelfTalkContexts {
 
         messages.clear();
         messages.addAll(wrapped);
+    }
+
+    /**
+     * 在首条 SYSTEM 设定末尾追加段标签语义说明（尾缀，保持原设定为缓存前缀）。
+     * <p>
+     * 仅就地重建首条消息（消息条数/角色/顺序不变），幂等：已含标记则跳过；
+     * 尾缀是纯英文常量、不随语言变化，前缀缓存命中与原版一致。
+     * 不写 TLM 历史/不落 NBT——卸载本 mod 后 system 设定原样恢复，无残留。
+     */
+    private static void appendSystemTagSuffix(List<LLMMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return;
+        }
+        LLMMessage first = messages.get(0);
+        if (first.role() != Role.SYSTEM || first.message() == null) {
+            return;
+        }
+        if (first.message().contains(SYSTEM_TAG_SUFFIX_MARKER)) {
+            return;
+        }
+        messages.set(0, withContent(first, first.message() + SYSTEM_TAG_SUFFIX));
     }
 
     /** 单条消息的段归属：legacy 优先（老自话也段外），其次自话指纹，其余主人段 */
