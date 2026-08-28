@@ -79,7 +79,13 @@ public class InterChatCallback extends LLMCallback {
                 double prob = Config.INTER_CHAT_CHAIN_PROBABILITY.get();
                 if (maid.getRandom().nextDouble() < prob) {
                     tryChain(peer, maid, chatText);
+                } else {
+                    // 概率抽签不续接：链自然结束，解除互聊对锁（tryChain 各提前返回路径也会解锁）
+                    unlockPair();
                 }
+            } else {
+                // 对方不可用（死亡/卸载/非服务端维度）：链终止，解除对锁
+                unlockPair();
             }
         };
         if (isOnServerThread()) {

@@ -169,7 +169,8 @@ public final class Config {
         INTER_CHAT_PAIR_LOCK_SECONDS = builder.comment("""
                 互聊对锁：A 对 C 发起互聊后，二者在「连续互聊结束」前互相对锁——
                 不能发起、也不能被发起互聊（其它女仆的随机候选池不再包含这对）。
-                链自然结束即提前解锁；该时长仅为链异常中断（女仆死亡/卸载等）时的超时兜底。""")
+                链自然结束/请求失败/女仆死亡卸载时均会提前解锁；该时长仅为
+                回调永不返回等无法感知的异常中断时的超时兜底。""")
                 .defineInRange("pairLockSeconds", 120, 10, 600);
         builder.pop();
 
