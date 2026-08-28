@@ -13,10 +13,12 @@ import org.apache.commons.lang3.StringUtils;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
- * 自话与互聊共用的上下文构建工具（语言白名单、随机情境、历史消息拉取与清洗、段标签包裹）。
+ * 自话与互聊共用的上下文构建工具（语言标签校验、随机情境、历史消息拉取与清洗、段标签包裹）。
  * 供 {@link MaidSelfTalkService} 与 {@link MaidInterChatService} 复用，避免清洗逻辑双处维护漏改。
  * 公共可见性：mixin 包（MaidAIChatManagerMixin 的玩家聊天路径）也需调用 wrapSegments。
  */
@@ -79,29 +81,47 @@ public final class SelfTalkContexts {
     }
 
     /**
-     * 自话/互聊语言白名单化：仅接受简体中文/英文，其余回退简体中文。
-     * chatManager.chatLanguage 来自玩家 chat 时记录的客户端语言（玩家可控），
-     * 未经校验直接进 invokeGetMessages 会经由 TLM 占位符替换路径，存在注入面。
+     * 自话/互聊语言标签格式校验：合法语言标签原样透传，其余回退 zh_cn。
+     * <p>
+     * 替代 1.0.4 的枚举白名单（非中英语言被强制回退，致自话/互聊锁死中文，Modrinth issue）。
+     * 防注入目标不变：语言标签形态（字母+下划线、总长受限、无空格标点）无法承载注入载荷；
+     * 透传值进 TLM 侧后只用于 {{chat_language}} 占位符——TLM 将其经 Locale.forLanguageTag
+     * 规范化为 Locale 数据库标准语言名（不回显原文），与其原生玩家聊天路径
+     * （clientInfo.language() 直通，无任何白名单）同一机制。
      */
     public static String sanitizeLanguage(String language) {
-        return switch (language) {
-            case "zh_cn", "zh", "en_us", "en" -> language;
-            default -> "zh_cn";
-        };
+        if (language != null && LANG_TAG_PATTERN.matcher(language).matches()) {
+            return language;
+        }
+        return "zh_cn";
     }
 
     /**
-     * 按配置语言生成输出语言指令，追加到提示词中。
+     * 语言标签形态：2~3 字母语言码 + 可选 2~4 字母地区码（zh_cn / ja_jp / zh / en）。
+     * 能匹配的字符串不含空格/标点/换行，拼入提示词无法构成注入载荷。
+     */
+    private static final Pattern LANG_TAG_PATTERN = Pattern.compile("^[A-Za-z]{2,3}(_[A-Za-z]{2,4})?$");
+
+    /**
+     * 按语言生成输出语言指令，追加到提示词中。
      * TLM 官方模型人设设定多为英文，若不显式声明语言，模型可能跟随英文设定输出英文。
      * <p>
-     * 语言标签白名单化：语言可能来自玩家 chat 时记录的客户端语言（玩家可控），
-     * 未知标签一律回退中文指令，不把原文本拼入提示词（防提示词注入）。
+     * 中英走固定指令（长期实测有效）；其余语言与 TLM 同构（PapiReplacer.language）：
+     * 经 Locale 规范化为标准语言名（英文显示，格式"语言 (地区)"）生成英文指令——
+     * 任意语言可表达，注入串无法通过 Locale 规范化回显。
+     * 入参须先经 {@link #sanitizeLanguage}（本方法不重复校验，name 为空时兜底泛指令）。
      */
     static String languageInstruction(String language) {
         return switch (language) {
             case "zh_cn", "zh" -> "\n\n请始终用简体中文说话。";
             case "en_us", "en" -> "\n\nPlease always speak in English.";
-            default -> "\n\n请始终用简体中文说话。";
+            default -> {
+                Locale locale = Locale.forLanguageTag(language.replace('_', '-'));
+                String name = locale.getDisplayLanguage(Locale.ENGLISH);
+                String country = locale.getDisplayCountry(Locale.ENGLISH);
+                yield name.isEmpty() ? "\n\nPlease speak the language specified in the system settings."
+                        : "\n\nPlease always speak in " + name + (country.isEmpty() ? "" : " (" + country + ")") + ".";
+            }
         };
     }
 

@@ -135,7 +135,7 @@ public final class Config {
 
         builder.push("prompt");
         SELF_TALK_LANGUAGE = builder.comment("""
-                自话输出语言（语言标签，如 zh_cn / en_us）。
+                自话输出语言（语言标签，如 zh_cn / en_us / ja_jp，支持任意合法语言标签，非法值回退 zh_cn）。
                 注意：TLM 官方模型的人设设定多为英文，若不显式声明语言，女仆自话可能输出英文。
                 此配置会：1) 作为设定占位符的替换语言；2) 向自话提示词注入对应语言的输出指令。
                 自话/欢迎提示词本身已硬编码在 SelfTalkPrompts 中（1.0.1 起不再从本配置读取），
