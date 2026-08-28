@@ -49,6 +49,8 @@ public final class Config {
     public static ModConfigSpec.IntValue SELF_TALK_MIN_INTERVAL;
     /** 自话放行随机间隔区间上限（秒） */
     public static ModConfigSpec.IntValue SELF_TALK_MAX_INTERVAL;
+    /** 顺延队列上限：每只女仆忙时积压的自话/互聊请求数上限，超出即吞（默认顺延，队列过多才吞） */
+    public static ModConfigSpec.IntValue DEFER_QUEUE_MAX;
 
     /** 自话输出语言（TLM 官方模型设定多为英文，需要显式声明输出语言） */
     public static ModConfigSpec.ConfigValue<String> SELF_TALK_LANGUAGE;
@@ -69,6 +71,8 @@ public final class Config {
     /** 互聊连续触发概率（0~1） */
     public static ModConfigSpec.DoubleValue INTER_CHAT_CHAIN_PROBABILITY;
     public static ModConfigSpec.IntValue INTER_CHAT_MAX_CHAIN_ROUNDS;
+    /** 互聊对锁时长（秒）：A 对 C 发起互聊后，二者在连续互聊结束前互相对锁，超时兜底自动解除 */
+    public static ModConfigSpec.IntValue INTER_CHAT_PAIR_LOCK_SECONDS;
 
     public static final ModConfigSpec SPEC;
 
@@ -128,6 +132,11 @@ public final class Config {
                 .defineInRange("selfTalkMinIntervalSeconds", 5, 1, 3600);
         SELF_TALK_MAX_INTERVAL = builder.comment("自话限流：放行随机间隔区间上限（秒），在区间内随机")
                 .defineInRange("selfTalkMaxIntervalSeconds", 8, 1, 3600);
+        DEFER_QUEUE_MAX = builder.comment("""
+                顺延限流：每只女仆忙时积压的自话/互聊请求数上限（默认顺延）。
+                顺延请求会在女仆空闲后按序派发（派发时才构建消息，保证上下文稳定）；
+                积压超出该上限时才吞掉新请求（队列过多才吞，避免挤压自然触发队列）。""")
+                .defineInRange("deferQueueMax", 2, 1, 10);
         builder.pop();
 
         builder.push("prompt");
@@ -157,6 +166,11 @@ public final class Config {
                 .defineInRange("chainProbability", 0.3, 0.0, 1.0);
         INTER_CHAT_MAX_CHAIN_ROUNDS = builder.comment("一次互聊会话的最大消息条数（含发起者消息），达到后强制结束本次互聊。为连续概率配到 1.0 等极端配置兜底，防止无限链式往返消耗 token")
                 .defineInRange("maxChainRounds", 10, 1, 50);
+        INTER_CHAT_PAIR_LOCK_SECONDS = builder.comment("""
+                互聊对锁：A 对 C 发起互聊后，二者在「连续互聊结束」前互相对锁——
+                不能发起、也不能被发起互聊（其它女仆的随机候选池不再包含这对）。
+                链自然结束即提前解锁；该时长仅为链异常中断（女仆死亡/卸载等）时的超时兜底。""")
+                .defineInRange("pairLockSeconds", 120, 10, 600);
         builder.pop();
 
         SPEC = builder.build();
