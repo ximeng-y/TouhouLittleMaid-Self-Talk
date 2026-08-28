@@ -66,7 +66,6 @@ public final class SelfTalkState {
             RequestKind kind,
             EntityMaid peer,
             String peerText,
-            boolean welcome,
             int keep,
             double broadcastRange,
             int chainRound) {

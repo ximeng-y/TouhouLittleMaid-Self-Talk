@@ -244,8 +244,9 @@ public final class SelfTalkHandler {
                         + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
                 return;
             }
-            // 空闲立即派发、忙则顺延/吞（dispatcher 内部处理），随后设置自话冷却
-            SelfTalkDispatcher.requestSelfTalk(maid, false,
+            // 空闲立即派发、忙则顺延、冲突/满则吞（dispatcher 内部处理）；无论何种结果都施加冷却，
+            // 避免被吞/派发失败时每 tick 重试形成风暴
+            SelfTalkDispatcher.requestSelfTalk(maid,
                     Config.STATE1_KEEP_SELF_TALK_COUNT.get(), Config.STATE1_PLAYER_RANGE.get());
             applyCooldown(state, serverTick,
                     Config.STATE1_MIN_INTERVAL.get(), Config.STATE1_MAX_INTERVAL.get());
@@ -263,7 +264,7 @@ public final class SelfTalkHandler {
                         + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
                 return;
             }
-            SelfTalkDispatcher.requestSelfTalk(maid, false,
+            SelfTalkDispatcher.requestSelfTalk(maid,
                     Config.STATE2_KEEP_SELF_TALK_COUNT.get(), Config.STATE2_PLAYER_RANGE.get());
             applyCooldown(state, serverTick,
                     Config.STATE2_MIN_INTERVAL.get(), Config.STATE2_MAX_INTERVAL.get());

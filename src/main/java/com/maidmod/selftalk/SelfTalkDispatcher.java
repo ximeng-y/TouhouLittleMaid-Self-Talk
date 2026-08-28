@@ -27,29 +27,31 @@ public final class SelfTalkDispatcher {
 
     /** 互聊对锁：女仆实体 ID -> 锁定截止 tick（仅服务端主线程访问；链自然结束即提前解除） */
     private static final Map<Integer, Long> INTER_CHAT_LOCK_UNTIL = Maps.newHashMap();
+    /** 互聊对锁的配对关系：女仆实体 ID -> 对方实体 ID（用于死亡/卸载时对称释放） */
+    private static final Map<Integer, Integer> INTER_CHAT_PAIR_PARTNER = Maps.newHashMap();
 
     private SelfTalkDispatcher() {
     }
 
     // ===== 派发入口 =====
 
-    /** 自话（含欢迎语）派发请求：空闲立即派发，忙则顺延，冲突/满则吞 */
-    public static void requestSelfTalk(EntityMaid maid, boolean welcome, int keep, double broadcastRange) {
+    /** 自话派发请求：空闲立即派发，忙则顺延，冲突/满则吞（欢迎语为一次性、不走本闸门，见 SelfTalkHandler） */
+    public static void requestSelfTalk(EntityMaid maid, int keep, double broadcastRange) {
         submit(maid, new SelfTalkState.DeferredRequest(
-                SelfTalkState.RequestKind.SELF_TALK, null, null, welcome, keep, broadcastRange, 0));
+                SelfTalkState.RequestKind.SELF_TALK, null, null, keep, broadcastRange, 0));
     }
 
     /** 互聊发起者派发请求 */
     public static void requestInterChatInitiator(EntityMaid initiator, EntityMaid responder, double broadcastRange) {
         submit(initiator, new SelfTalkState.DeferredRequest(
-                SelfTalkState.RequestKind.INTER_CHAT_INITIATOR, responder, null, false, 0, broadcastRange, 1));
+                SelfTalkState.RequestKind.INTER_CHAT_INITIATOR, responder, null, 0, broadcastRange, 1));
     }
 
     /** 互聊回答者（链式续接）派发请求 */
     public static void requestInterChatResponder(EntityMaid responder, EntityMaid initiator,
                                                  String peerText, double broadcastRange, int chainRound) {
         submit(responder, new SelfTalkState.DeferredRequest(
-                SelfTalkState.RequestKind.INTER_CHAT_RESPONDER, initiator, peerText, false, 0, broadcastRange, chainRound));
+                SelfTalkState.RequestKind.INTER_CHAT_RESPONDER, initiator, peerText, 0, broadcastRange, chainRound));
     }
 
     // ===== 入队与派发 =====
@@ -109,11 +111,21 @@ public final class SelfTalkDispatcher {
         }
         switch (req.kind()) {
             case SELF_TALK -> {
-                return MaidSelfTalkService.triggerSelfTalk(maid, req.welcome(), req.keep(), req.broadcastRange());
+                return MaidSelfTalkService.triggerSelfTalk(maid, false, req.keep(), req.broadcastRange());
             }
             case INTER_CHAT_INITIATOR, INTER_CHAT_RESPONDER -> {
                 if (req.peer() == null || !req.peer().isAlive()) {
+                    unlockPair(maid, req.peer());
                     return false;
+                }
+                // 发起者顺延期间，对方可能已被他人锁定/进入在途：派发前复核，避免交叉两条链写同一窗口
+                if (req.kind() == SelfTalkState.RequestKind.INTER_CHAT_INITIATOR) {
+                    SelfTalkState.State peerState = SelfTalkState.get(req.peer().getId());
+                    long nowTick = maid.level().getServer().getTickCount();
+                    if (peerState.selfTalkPending || peerState.interChatPending || peerState.playerChatCount > 0
+                            || isMaidInterChatLocked(req.peer(), nowTick)) {
+                        return false;
+                    }
                 }
                 boolean ok;
                 if (req.kind() == SelfTalkState.RequestKind.INTER_CHAT_INITIATOR) {
@@ -123,6 +135,9 @@ public final class SelfTalkDispatcher {
                 }
                 if (ok) {
                     lockPair(maid, req.peer(), maid.level().getServer().getTickCount());
+                } else {
+                    // 派发失败（AI 中途失效等）：链已断，解除本对旧锁
+                    unlockPair(maid, req.peer());
                 }
                 return ok;
             }
@@ -136,29 +151,54 @@ public final class SelfTalkDispatcher {
 
     /** 锁定一对女仆的互聊（发起者首次派发与链上每跳续接都调用，持续顺延/延长锁定时长） */
     public static void lockPair(EntityMaid a, EntityMaid b, long nowTick) {
+        clearPairFor(a.getId());
+        clearPairFor(b.getId());
         long until = nowTick + Config.INTER_CHAT_PAIR_LOCK_SECONDS.get() * 20L;
         INTER_CHAT_LOCK_UNTIL.put(a.getId(), until);
         INTER_CHAT_LOCK_UNTIL.put(b.getId(), until);
+        INTER_CHAT_PAIR_PARTNER.put(a.getId(), b.getId());
+        INTER_CHAT_PAIR_PARTNER.put(b.getId(), a.getId());
     }
 
-    /** 解除一对女仆的互聊锁（链自然结束时调用） */
+    /** 解除一对女仆的互聊锁（链自然结束/请求失败时调用） */
     public static void unlockPair(EntityMaid a, EntityMaid b) {
         if (a != null) {
-            INTER_CHAT_LOCK_UNTIL.remove(a.getId());
+            clearPairFor(a.getId());
         }
         if (b != null) {
-            INTER_CHAT_LOCK_UNTIL.remove(b.getId());
+            clearPairFor(b.getId());
         }
     }
 
     /** 女仆是否处于互聊对锁中（锁定期内不能发起/被发起互聊） */
     public static boolean isMaidInterChatLocked(EntityMaid maid, long nowTick) {
         Long until = INTER_CHAT_LOCK_UNTIL.get(maid.getId());
-        return until != null && until > nowTick;
+        if (until == null) {
+            return false;
+        }
+        if (until > nowTick) {
+            return true;
+        }
+        // 锁已过期：顺带清理自身及配对条目，防长期运行残留
+        clearPairFor(maid.getId());
+        return false;
     }
 
-    /** 女仆死亡/卸载时清理其互聊锁 */
+    /** 女仆死亡/卸载时清理其互聊锁（连同配对者对称释放） */
     public static void onMaidRemoved(int maidId) {
+        clearPairFor(maidId);
+    }
+
+    /**
+     * 清理某女仆的对锁及其配对者。
+     * 幂等：校验对方仍反指本女仆，避免陈旧反向映射误删对方后来的新锁。
+     */
+    private static void clearPairFor(int maidId) {
+        Integer partner = INTER_CHAT_PAIR_PARTNER.remove(maidId);
         INTER_CHAT_LOCK_UNTIL.remove(maidId);
+        if (partner != null && Integer.valueOf(maidId).equals(INTER_CHAT_PAIR_PARTNER.get(partner))) {
+            INTER_CHAT_LOCK_UNTIL.remove(partner);
+            INTER_CHAT_PAIR_PARTNER.remove(partner);
+        }
     }
 }
