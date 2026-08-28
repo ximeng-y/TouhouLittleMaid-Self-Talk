@@ -1,9 +1,12 @@
 package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
+import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.google.common.collect.Maps;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -50,6 +53,25 @@ public final class SelfTalkState {
         }
     }
 
+    /** 待派发请求的种类（顺延队列条目） */
+    public enum RequestKind { SELF_TALK, INTER_CHAT_INITIATOR, INTER_CHAT_RESPONDER }
+
+    /**
+     * 顺延队列中的待派发请求描述（仅存意图，不预构建消息）。
+     * <p>
+     * 派发时才由 {@link MaidSelfTalkService} / {@link MaidInterChatService} 现构建消息，
+     * 确保历史/互聊窗口/情境等上下文按派发时刻的最新状态生成，不被积压期间的交叉所打乱。
+     */
+    public record DeferredRequest(
+            RequestKind kind,
+            EntityMaid peer,
+            String peerText,
+            boolean welcome,
+            int keep,
+            double broadcastRange,
+            int chainRound) {
+    }
+
     public static final class State {
         /** 下次可触发自话的服务器 tick（全局单调，与 server.getTickCount() 同基准） */
         public long nextTriggerTick = 0;
@@ -78,5 +100,7 @@ public final class SelfTalkState {
         public long interChatPendingSinceTick = -1;
         /** 当前互聊窗口内已保留的互聊 assistant 消息（按时间序，含发起与回答） */
         public final List<LLMMessage> windowInterChatMsgs = new ArrayList<>();
+        /** 顺延队列：忙时积压的自话/互聊请求，空闲时按序派发（派发时现构建消息） */
+        public final Deque<DeferredRequest> deferredRequests = new ArrayDeque<>();
     }
 }

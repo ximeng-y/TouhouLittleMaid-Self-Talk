@@ -101,6 +101,7 @@ public final class SelfTalkHandler {
         }
         if (!maid.isAlive()) {
             SelfTalkState.cleanupIfDead(maid.getId(), false);
+            SelfTalkDispatcher.onMaidRemoved(maid.getId());
             return;
         }
 
@@ -124,10 +125,6 @@ public final class SelfTalkHandler {
             state.playerChatCount = 0;
             state.playerChatSinceTick = -1;
         }
-        // 有进行中的自话/互聊或玩家 chat 时，跳过本次触发
-        if (state.selfTalkPending || state.interChatPending || state.playerChatCount > 0) {
-            return;
-        }
         // AI 前置门槛
         MaidAIChatManager chatManager = maid.getAiChatManager();
         if (chatManager == null) {
@@ -150,8 +147,10 @@ public final class SelfTalkHandler {
             return;
         }
 
-        // 欢迎检查（优先于自话）：主人登录窗口期内、未欢迎过该主人
-        if (Config.WELCOME_ENABLED.get() && !state.welcomedPlayers.contains(ownerUuid)) {
+        boolean busy = state.selfTalkPending || state.interChatPending || state.playerChatCount > 0;
+
+        // 欢迎检查（优先于自话，一次性、需空闲；忙时窗口期内每 tick 自然重试）
+        if (!busy && Config.WELCOME_ENABLED.get() && !state.welcomedPlayers.contains(ownerUuid)) {
             Long loginTick = PLAYER_LOGIN_TICKS.get(ownerUuid);
             // 主人必须仍在线：玩家已全部退出时不再触发欢迎（避免无玩家空耗 token）
             // 欢迎语同样受玩家设置约束：全局或单只关闭时跳过（不标记 welcomed，
@@ -177,12 +176,22 @@ public final class SelfTalkHandler {
             }
         }
 
+        // 空闲时先派发顺延队列里的请求（若有），派发后若变忙则本 tick 不再触发新请求
+        if (!busy) {
+            SelfTalkDispatcher.drainDeferred(maid);
+            if (state.selfTalkPending || state.interChatPending || state.playerChatCount > 0) {
+                return;
+            }
+        }
+
         // 互聊触发：独立于自话的冷却，但发起者派发与自话共用全局闸门（5~8s）
         if (Config.INTER_CHAT_ENABLED.get() && serverTick >= state.nextInterChatTriggerTick) {
             // 玩家独立设置：管理员允许玩家配置时，检查该女仆主人及其单只名单
             if (!(Config.PLAYER_OPTION_ENABLED.get() && !isInterChatEnabledForMaid(maid, level))) {
-                // 玩家在触发范围内，且自身范围内有至少一只可用女仆时才触发；否则静默跳过
-                if (hasPlayerNearby(maid, Config.INTER_CHAT_PLAYER_RANGE.get())) {
+                // 互聊对锁：本女仆正与他人连续互聊中，不能发起新互聊，短退避后重试
+                if (SelfTalkDispatcher.isMaidInterChatLocked(maid, serverTick)) {
+                    state.nextInterChatTriggerTick = serverTick + RESPONDER_RETRY_TICKS;
+                } else if (hasPlayerNearby(maid, Config.INTER_CHAT_PLAYER_RANGE.get())) {
                     List<EntityMaid> nearbyMaids = findNearbyMaids(maid, Config.INTER_CHAT_MAID_RANGE.get());
                     if (nearbyMaids.isEmpty()) {
                         // 附近无其他女仆：同样短退避，避免每 tick 空扫 AABB
@@ -195,16 +204,15 @@ public final class SelfTalkHandler {
                                 state.nextInterChatTriggerTick = serverTick + BACKOFF_MIN_TICKS
                                         + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
                             } else {
-                                boolean triggered = MaidInterChatService.triggerInitiator(maid, responder,
+                                // 空闲立即派发、忙则顺延（dispatcher 内部处理），随后设置互聊冷却
+                                SelfTalkDispatcher.requestInterChatInitiator(maid, responder,
                                         Config.INTER_CHAT_PLAYER_RANGE.get());
-                                if (triggered) {
-                                    applyInterChatCooldown(state, serverTick,
-                                            Config.INTER_CHAT_MIN_INTERVAL.get(), Config.INTER_CHAT_MAX_INTERVAL.get());
-                                    return;
-                                }
+                                applyInterChatCooldown(state, serverTick,
+                                        Config.INTER_CHAT_MIN_INTERVAL.get(), Config.INTER_CHAT_MAX_INTERVAL.get());
+                                return;
                             }
                         } else {
-                            // 候选全部在途/无 AI：短退避避免每 tick 重扫实体，pending 秒~分钟级后自然重试
+                            // 候选全部在途/无 AI/被对锁：短退避避免每 tick 重扫实体，pending 秒~分钟级后自然重试
                             state.nextInterChatTriggerTick = serverTick + RESPONDER_RETRY_TICKS;
                         }
                     }
@@ -236,12 +244,11 @@ public final class SelfTalkHandler {
                         + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
                 return;
             }
-            boolean triggered = MaidSelfTalkService.triggerSelfTalk(maid, false,
+            // 空闲立即派发、忙则顺延/吞（dispatcher 内部处理），随后设置自话冷却
+            SelfTalkDispatcher.requestSelfTalk(maid, false,
                     Config.STATE1_KEEP_SELF_TALK_COUNT.get(), Config.STATE1_PLAYER_RANGE.get());
-            if (triggered) {
-                applyCooldown(state, serverTick,
-                        Config.STATE1_MIN_INTERVAL.get(), Config.STATE1_MAX_INTERVAL.get());
-            }
+            applyCooldown(state, serverTick,
+                    Config.STATE1_MIN_INTERVAL.get(), Config.STATE1_MAX_INTERVAL.get());
         } else {
             if (!Config.STATE2_ENABLED.get()) {
                 return;
@@ -256,12 +263,10 @@ public final class SelfTalkHandler {
                         + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
                 return;
             }
-            boolean triggered = MaidSelfTalkService.triggerSelfTalk(maid, false,
+            SelfTalkDispatcher.requestSelfTalk(maid, false,
                     Config.STATE2_KEEP_SELF_TALK_COUNT.get(), Config.STATE2_PLAYER_RANGE.get());
-            if (triggered) {
-                applyCooldown(state, serverTick,
-                        Config.STATE2_MIN_INTERVAL.get(), Config.STATE2_MAX_INTERVAL.get());
-            }
+            applyCooldown(state, serverTick,
+                    Config.STATE2_MIN_INTERVAL.get(), Config.STATE2_MAX_INTERVAL.get());
         }
     }
 
@@ -302,15 +307,20 @@ public final class SelfTalkHandler {
     }
 
     /**
-     * 从候选中随机挑一只可用回答者：过滤在途（pending）/无 AI/开关关闭的女仆。
+     * 从候选中随机挑一只可用回答者：过滤在途（pending）/无 AI/开关关闭/互聊对锁中的女仆。
      * 同 tick 双发起者选中同一回答者的竞态已被两点规避：发起者派发走 5~8s 全局节流（一次只放行一个发起者），
      * 且此处按 pending 过滤掉已在途女仆，故无需为回答者单独加「预留」标记。
      */
     private static EntityMaid pickAvailableResponder(List<EntityMaid> candidates, ServerLevel level) {
         List<EntityMaid> available = new ArrayList<>();
+        long nowTick = level.getServer().getTickCount();
         for (EntityMaid m : candidates) {
             SelfTalkState.State s = SelfTalkState.get(m.getId());
             if (s.selfTalkPending || s.interChatPending || s.playerChatCount > 0) {
+                continue;
+            }
+            // 互聊对锁：该女仆正与他人连续互聊中，不能被发起互聊
+            if (SelfTalkDispatcher.isMaidInterChatLocked(m, nowTick)) {
                 continue;
             }
             MaidAIChatManager cm = m.getAiChatManager();
@@ -384,6 +394,7 @@ public final class SelfTalkHandler {
                 && maid.isRemoved()
                 && maid.getRemovalReason() != Entity.RemovalReason.CHANGED_DIMENSION) {
             SelfTalkState.cleanupIfDead(maid.getId(), false);
+            SelfTalkDispatcher.onMaidRemoved(maid.getId());
         }
     }
 
@@ -398,6 +409,7 @@ public final class SelfTalkHandler {
         }
         for (int maidId : staleIds) {
             SelfTalkState.remove(maidId);
+            SelfTalkDispatcher.onMaidRemoved(maidId);
         }
     }
 

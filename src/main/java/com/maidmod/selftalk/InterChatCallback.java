@@ -90,20 +90,26 @@ public class InterChatCallback extends LLMCallback {
     }
 
     private void tryChain(EntityMaid nextSpeaker, EntityMaid lastSpeaker, String lastText) {
-        if (!(nextSpeaker.level() instanceof ServerLevel level)) return;
+        if (!(nextSpeaker.level() instanceof ServerLevel level)) { unlockPair(); return; }
         // 热重载下中途关闭互聊时立即终止在途链
-        if (!Config.INTER_CHAT_ENABLED.get()) return;
+        if (!Config.INTER_CHAT_ENABLED.get()) { unlockPair(); return; }
         // 链长护栏：本条消息已是链上第 chainRound 条，达到上限即结束本次互聊，
         // 防止连续概率配到 1.0 等极端配置下无限往返消耗 token
-        if (chainRound >= Config.INTER_CHAT_MAX_CHAIN_ROUNDS.get()) return;
-        SelfTalkState.State nextState = SelfTalkState.get(nextSpeaker.getId());
-        if (nextState.selfTalkPending || nextState.interChatPending || nextState.playerChatCount > 0) return;
-        if (!SelfTalkHandler.hasPlayerNearby(nextSpeaker, Config.INTER_CHAT_PLAYER_RANGE.get())) return;
-        if (!isMaidNearby(nextSpeaker, lastSpeaker, Config.INTER_CHAT_MAID_RANGE.get())) return;
-        if (Config.PLAYER_OPTION_ENABLED.get() && !SelfTalkHandler.isInterChatEnabledForMaid(nextSpeaker, level)) return;
+        if (chainRound >= Config.INTER_CHAT_MAX_CHAIN_ROUNDS.get()) { unlockPair(); return; }
+        if (!SelfTalkHandler.hasPlayerNearby(nextSpeaker, Config.INTER_CHAT_PLAYER_RANGE.get())) { unlockPair(); return; }
+        if (!isMaidNearby(nextSpeaker, lastSpeaker, Config.INTER_CHAT_MAID_RANGE.get())) { unlockPair(); return; }
+        if (Config.PLAYER_OPTION_ENABLED.get() && !SelfTalkHandler.isInterChatEnabledForMaid(nextSpeaker, level)) { unlockPair(); return; }
         // 链式续接是发起者回复后的单条连续请求，天然串行、每轮隔一次 LLM 往返，
         // 不走 5~8s 全局节流桶（发起者派发已占用该桶），否则 responder 路径永远被退避。
-        MaidInterChatService.triggerResponder(nextSpeaker, lastSpeaker, lastText, broadcastRange, chainRound + 1);
+        // 若对方忙（自话/玩家 chat 在途），dispatcher 会顺延本次回应；对锁保持，链仅暂停不终止。
+        SelfTalkDispatcher.requestInterChatResponder(nextSpeaker, lastSpeaker, lastText, broadcastRange, chainRound + 1);
+    }
+
+    /** 解除本回调双方（maid 与 peer）的互聊对锁 */
+    private void unlockPair() {
+        if (peer != null) {
+            SelfTalkDispatcher.unlockPair(getMaid(), peer);
+        }
     }
 
     private boolean isMaidNearby(EntityMaid a, EntityMaid b, double range) {
@@ -130,6 +136,10 @@ public class InterChatCallback extends LLMCallback {
             SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
             state.interChatPending = false;
             state.interChatPendingSinceTick = -1;
+            // 请求失败即链终止：解除互聊对锁
+            if (peer != null) {
+                SelfTalkDispatcher.unlockPair(getMaid(), peer);
+            }
         });
     }
 }
