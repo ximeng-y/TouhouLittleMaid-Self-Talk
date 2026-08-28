@@ -98,7 +98,7 @@ public final class SelfTalkPrompts {
     /**
      * 玩家聊天前的声明（随请求拼接，不写历史/持久化）。
      * 注入玩家消息内的主人段标签中，置于 &lt;context&gt; 块之后、玩家原话之前，
-     * 按 chatLanguage 白名单选择中/英版本。
+     * 按 chatLanguage 起始语言码选择中/英版本。
      */
     public static final String OWNER_CHAT_DECLARATION_ZH =
             "这是你的主人正在与你说话，请以你与主人的关系自然地回应主人，就像平时对话一样；"
