@@ -118,10 +118,12 @@ public class InterChatCallback extends LLMCallback {
         SelfTalkDispatcher.requestInterChatResponder(nextSpeaker, lastSpeaker, lastText, broadcastRange, chainRound + 1);
     }
 
-    /** 解除本回调双方（maid 与 peer）的互聊对锁 */
+    /** 解除本回调双方（maid 与 peer）的互聊对锁：仅当双方当前仍互为配对时才解除——
+     * 链过期后 peer 可能已被第三方锁定新链，无条件解锁会误拆无关在途链（与 dispatcher 失败路径同语义） */
     private void unlockPair() {
         if (peer != null) {
-            SelfTalkDispatcher.unlockPair(getMaid(), peer);
+            SelfTalkDispatcher.unlockPairIfPaired(getMaid(), peer,
+                    getMaid().level().getServer().getTickCount());
         }
     }
 

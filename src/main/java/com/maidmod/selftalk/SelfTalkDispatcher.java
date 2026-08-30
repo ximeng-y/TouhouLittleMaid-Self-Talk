@@ -215,10 +215,13 @@ public final class SelfTalkDispatcher {
         return INTER_CHAT_PAIR_PARTNER.get(maid.getId());
     }
 
-    /** 仅当双方当前仍互为配对时才解除对锁（陈旧请求失败路径：漂移后的新链锁不得触碰） */
-    private static void unlockPairIfPaired(EntityMaid maid, EntityMaid peer, long nowTick) {
+    /**
+     * 仅当双方当前仍互为配对时才解除对锁（陈旧请求/迟到回调的失败路径：
+     * 漂移后的新链锁不得触碰——无条件按当前配对清除会误拆第三方在途新链）。
+     * 无配对对象可校验时不动任何锁（残留由 onMaidRemoved 或锁超时兜底）。
+     */
+    static void unlockPairIfPaired(EntityMaid maid, EntityMaid peer, long nowTick) {
         if (peer == null) {
-            clearPairFor(maid.getId());
             return;
         }
         Integer maidPartner = currentPairPartner(maid, nowTick);
