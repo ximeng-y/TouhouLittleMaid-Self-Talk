@@ -19,7 +19,8 @@ import java.util.function.Supplier;
  *   <li>两种情况下都 removeData 剔除旧玩家实体附件（随玩家下次存档从 player.dat 消失）。</li>
  * </ul>
  * 迁移只处理自话/互聊两组（睡觉时安静为新增功能，无旧数据源，一律走缺省）。
- * 崩溃窗口：Level 与 player.dat 保存时机不同步最多造成"设置回落缺省"，下次登录重新迁移,无重复数据。
+ * 崩溃窗口：Level 附件与 player.dat 保存时机不同步——若旧附件剔除后、Level 落盘前崩溃，
+ * 设置将回落到缺省且旧数据不可恢复（窄窗口，可接受）；正常保存顺序下无重复数据。
  */
 public final class SelfTalkMigration {
 
