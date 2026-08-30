@@ -3,6 +3,7 @@ package com.maidmod.selftalk.network;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.Config;
 import com.maidmod.selftalk.MaidSelfTalkMod;
+import com.maidmod.selftalk.PlayerSettingsStore;
 import com.maidmod.selftalk.SelfTalkAttachments;
 import com.maidmod.selftalk.client.SelfTalkPlayerSettingsClient;
 import net.minecraft.server.level.ServerPlayer;
@@ -35,8 +36,9 @@ public final class SelfTalkPackets {
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {
-        // v3：新增互聊三个 payload，升版让不匹配版本在协商期被拒绝
-        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("3");
+        // v4：新增「睡觉时安静」三个 payload；NeoForge 按版本串强制协商，
+        // 不匹配版本互相拒绝进服，升级需全服同步
+        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("4");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,
                 SelfTalkPackets::handleConfigRequest);
         registrar.playToServer(SelfTalkConfigSetPayload.TYPE, SelfTalkConfigSetPayload.STREAM_CODEC,
@@ -49,20 +51,24 @@ public final class SelfTalkPackets {
                 SelfTalkPackets::handleInterChatSet);
         registrar.playToClient(InterChatConfigResponsePayload.TYPE, InterChatConfigResponsePayload.STREAM_CODEC,
                 SelfTalkPackets::handleInterChatResponse);
+        registrar.playToServer(SleepQuietConfigRequestPayload.TYPE, SleepQuietConfigRequestPayload.STREAM_CODEC,
+                SelfTalkPackets::handleSleepQuietRequest);
+        registrar.playToServer(SleepQuietConfigSetPayload.TYPE, SleepQuietConfigSetPayload.STREAM_CODEC,
+                SelfTalkPackets::handleSleepQuietSet);
+        registrar.playToClient(SleepQuietConfigResponsePayload.TYPE, SleepQuietConfigResponsePayload.STREAM_CODEC,
+                SelfTalkPackets::handleSleepQuietResponse);
     }
 
-    /** 服务端：响应玩家的自话设置查询（全局值 + 请求女仆的单只有效值） */
+    /** 服务端：响应玩家的自话设置查询（全局值 + 请求女仆的单只有效值；1.1.2 起读世界存档、离线亦可查） */
     private static void handleConfigRequest(SelfTalkConfigRequestPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             Player player = context.player();
             if (player instanceof ServerPlayer serverPlayer && payload.maidUuid() != null
                     && allowConfigPacket(serverPlayer.getUUID())) {
                 boolean adminEnabled = Config.PLAYER_OPTION_ENABLED.get();
-                boolean globalEnabled = serverPlayer.getData(SelfTalkAttachments.SELF_TALK_ENABLED);
-                boolean maidEnabled = globalEnabled && serverPlayer
-                        .getExistingData(SelfTalkAttachments.SELF_TALK_MAID_OVERRIDES)
-                        .map(overrides -> !overrides.containsKey(payload.maidUuid().toString()))
-                        .orElse(true);
+                boolean globalEnabled = PlayerSettingsStore.isSelfTalkEnabled(serverPlayer.server, serverPlayer.getUUID());
+                boolean maidEnabled = globalEnabled && !PlayerSettingsStore.isSelfTalkMaidDisabled(
+                        serverPlayer.server, serverPlayer.getUUID(), payload.maidUuid());
                 context.reply(new SelfTalkConfigResponsePayload(adminEnabled, globalEnabled, maidEnabled));
             }
         });
@@ -74,46 +80,39 @@ public final class SelfTalkPackets {
             Player player = context.player();
             if (player instanceof ServerPlayer serverPlayer && allowConfigPacket(serverPlayer.getUUID())) {
                 if (payload.maidUuid().isEmpty()) {
-                    serverPlayer.setData(SelfTalkAttachments.SELF_TALK_ENABLED, payload.enabled());
+                    PlayerSettingsStore.setSelfTalkEnabled(serverPlayer.server, serverPlayer.getUUID(), payload.enabled());
                 } else {
                     // 归属校验：仅允许主人操作自己拥有的女仆，防伪造 UUID 污染名单
                     if (!isOwnedMaid(serverPlayer, payload.maidUuid().get())) {
                         return;
                     }
-                    // 名单只存关闭项：关闭时 put false，重新开启时 remove，避免名单膨胀。
-                    // 拷贝后 setData 回写，而非原地修改（防未来加 networkSerialize 时漏同步）
-                    Map<String, Boolean> overrides = new HashMap<>(
-                            serverPlayer.getData(SelfTalkAttachments.SELF_TALK_MAID_OVERRIDES));
-                    String key = payload.maidUuid().get().toString();
-                    if (payload.enabled()) {
-                        overrides.remove(key);
-                    } else {
-                        // 容量上限：新增键时校验，防恶意客户端伪造任意 UUID 无限撑大名单
-                        if (!overrides.containsKey(key) && overrides.size() >= MAX_MAID_OVERRIDES) {
-                            MaidSelfTalkMod.LOGGER.warn("Player {} self-talk maid override list full ({}), ignored",
-                                    serverPlayer.getUUID(), MAX_MAID_OVERRIDES);
-                            return;
-                        }
-                        overrides.put(key, false);
+                    // 名单只存关闭项：关闭时新增条目，重新开启时移除，避免名单膨胀。
+                    // 容量上限：新增键时校验，防恶意客户端伪造任意 UUID 无限撑大世界存档
+                    if (!payload.enabled() && !PlayerSettingsStore.isSelfTalkMaidDisabled(
+                            serverPlayer.server, serverPlayer.getUUID(), payload.maidUuid().get())
+                            && PlayerSettingsStore.countMaidOverrides(serverPlayer.server,
+                            SelfTalkAttachments.LEVEL_SELF_TALK_MAID_OVERRIDES, serverPlayer.getUUID()) >= MAX_MAID_OVERRIDES) {
+                        MaidSelfTalkMod.LOGGER.warn("Player {} self-talk maid override list full ({}), ignored",
+                                serverPlayer.getUUID(), MAX_MAID_OVERRIDES);
+                        return;
                     }
-                    serverPlayer.setData(SelfTalkAttachments.SELF_TALK_MAID_OVERRIDES, overrides);
+                    PlayerSettingsStore.setSelfTalkMaidDisabled(serverPlayer.server,
+                            serverPlayer.getUUID(), payload.maidUuid().get(), !payload.enabled());
                 }
             }
         });
     }
 
-    /** 服务端：响应玩家的互聊设置查询（全局值 + 请求女仆的单只有效值） */
+    /** 服务端：响应玩家的互聊设置查询（全局值 + 请求女仆的单只有效值；1.1.2 起读世界存档、离线亦可查） */
     private static void handleInterChatRequest(InterChatConfigRequestPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             Player player = context.player();
             if (player instanceof ServerPlayer serverPlayer && payload.maidUuid() != null
                     && allowConfigPacket(serverPlayer.getUUID())) {
                 boolean adminEnabled = Config.PLAYER_OPTION_ENABLED.get();
-                boolean globalEnabled = serverPlayer.getData(SelfTalkAttachments.INTER_CHAT_ENABLED);
-                boolean maidEnabled = globalEnabled && serverPlayer
-                        .getExistingData(SelfTalkAttachments.INTER_CHAT_MAID_OVERRIDES)
-                        .map(overrides -> !overrides.containsKey(payload.maidUuid().toString()))
-                        .orElse(true);
+                boolean globalEnabled = PlayerSettingsStore.isInterChatEnabled(serverPlayer.server, serverPlayer.getUUID());
+                boolean maidEnabled = globalEnabled && !PlayerSettingsStore.isInterChatMaidDisabled(
+                        serverPlayer.server, serverPlayer.getUUID(), payload.maidUuid());
                 context.reply(new InterChatConfigResponsePayload(adminEnabled, globalEnabled, maidEnabled));
             }
         });
@@ -125,28 +124,69 @@ public final class SelfTalkPackets {
             Player player = context.player();
             if (player instanceof ServerPlayer serverPlayer && allowConfigPacket(serverPlayer.getUUID())) {
                 if (payload.maidUuid().isEmpty()) {
-                    serverPlayer.setData(SelfTalkAttachments.INTER_CHAT_ENABLED, payload.enabled());
+                    PlayerSettingsStore.setInterChatEnabled(serverPlayer.server, serverPlayer.getUUID(), payload.enabled());
                 } else {
                     // 归属校验：仅允许主人操作自己拥有的女仆，防伪造 UUID 污染名单
                     if (!isOwnedMaid(serverPlayer, payload.maidUuid().get())) {
                         return;
                     }
-                    // 名单只存关闭项：关闭时 put false，重新开启时 remove，避免名单膨胀
-                    Map<String, Boolean> overrides = new HashMap<>(
-                            serverPlayer.getData(SelfTalkAttachments.INTER_CHAT_MAID_OVERRIDES));
-                    String key = payload.maidUuid().get().toString();
-                    if (payload.enabled()) {
-                        overrides.remove(key);
-                    } else {
-                        // 容量上限：新增键时校验，防恶意客户端伪造任意 UUID 无限撑大名单
-                        if (!overrides.containsKey(key) && overrides.size() >= MAX_MAID_OVERRIDES) {
-                            MaidSelfTalkMod.LOGGER.warn("Player {} inter-chat maid override list full ({}), ignored",
-                                    serverPlayer.getUUID(), MAX_MAID_OVERRIDES);
-                            return;
-                        }
-                        overrides.put(key, false);
+                    // 名单只存关闭项：关闭时新增条目，重新开启时移除，避免名单膨胀
+                    if (!payload.enabled() && !PlayerSettingsStore.isInterChatMaidDisabled(
+                            serverPlayer.server, serverPlayer.getUUID(), payload.maidUuid().get())
+                            && PlayerSettingsStore.countMaidOverrides(serverPlayer.server,
+                            SelfTalkAttachments.LEVEL_INTER_CHAT_MAID_OVERRIDES, serverPlayer.getUUID()) >= MAX_MAID_OVERRIDES) {
+                        MaidSelfTalkMod.LOGGER.warn("Player {} inter-chat maid override list full ({}), ignored",
+                                serverPlayer.getUUID(), MAX_MAID_OVERRIDES);
+                        return;
                     }
-                    serverPlayer.setData(SelfTalkAttachments.INTER_CHAT_MAID_OVERRIDES, overrides);
+                    PlayerSettingsStore.setInterChatMaidDisabled(serverPlayer.server,
+                            serverPlayer.getUUID(), payload.maidUuid().get(), !payload.enabled());
+                }
+            }
+        });
+    }
+
+    /**
+     * 服务端：响应玩家的「睡觉时安静」设置查询。
+     * 该设置不受管理员 Config.PLAYER_OPTION_ENABLED 控制（response 无 admin 字段）。
+     * maidEnabled = 全局安静 或 单只名单含该女仆（全局 false 时名单才生效）。
+     */
+    private static void handleSleepQuietRequest(SleepQuietConfigRequestPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer && payload.maidUuid() != null
+                    && allowConfigPacket(serverPlayer.getUUID())) {
+                boolean globalEnabled = PlayerSettingsStore.isSleepQuietGlobal(serverPlayer.server, serverPlayer.getUUID());
+                boolean maidEnabled = globalEnabled || PlayerSettingsStore.isSleepQuietMaid(
+                        serverPlayer.server, serverPlayer.getUUID(), payload.maidUuid());
+                context.reply(new SleepQuietConfigResponsePayload(globalEnabled, maidEnabled));
+            }
+        });
+    }
+
+    /** 服务端：保存玩家「睡觉时安静」设置（maidUuid 为空 → 全局开关；非空 → 单只安静名单，仅全局 false 时生效） */
+    private static void handleSleepQuietSet(SleepQuietConfigSetPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer && allowConfigPacket(serverPlayer.getUUID())) {
+                if (payload.maidUuid().isEmpty()) {
+                    PlayerSettingsStore.setSleepQuietGlobal(serverPlayer.server, serverPlayer.getUUID(), payload.enabled());
+                } else {
+                    // 归属校验：仅允许主人操作自己拥有的女仆，防伪造 UUID 污染名单
+                    if (!isOwnedMaid(serverPlayer, payload.maidUuid().get())) {
+                        return;
+                    }
+                    // 新增安静条目时校验容量上限（防恶意客户端伪造任意 UUID 无限撑大世界存档）
+                    if (payload.enabled() && !PlayerSettingsStore.isSleepQuietMaid(
+                            serverPlayer.server, serverPlayer.getUUID(), payload.maidUuid().get())
+                            && PlayerSettingsStore.countMaidOverrides(serverPlayer.server,
+                            SelfTalkAttachments.LEVEL_SLEEP_QUIET_MAID_OVERRIDES, serverPlayer.getUUID()) >= MAX_MAID_OVERRIDES) {
+                        MaidSelfTalkMod.LOGGER.warn("Player {} sleep-quiet maid override list full ({}), ignored",
+                                serverPlayer.getUUID(), MAX_MAID_OVERRIDES);
+                        return;
+                    }
+                    PlayerSettingsStore.setSleepQuietMaid(serverPlayer.server,
+                            serverPlayer.getUUID(), payload.maidUuid().get(), payload.enabled());
                 }
             }
         });
@@ -192,5 +232,10 @@ public final class SelfTalkPackets {
     /** 客户端：收到互聊设置响应 */
     private static void handleInterChatResponse(InterChatConfigResponsePayload payload, IPayloadContext context) {
         context.enqueueWork(() -> SelfTalkPlayerSettingsClient.onInterChatConfigResponse(payload));
+    }
+
+    /** 客户端：收到「睡觉时安静」设置响应 */
+    private static void handleSleepQuietResponse(SleepQuietConfigResponsePayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> SelfTalkPlayerSettingsClient.onSleepQuietConfigResponse(payload));
     }
 }

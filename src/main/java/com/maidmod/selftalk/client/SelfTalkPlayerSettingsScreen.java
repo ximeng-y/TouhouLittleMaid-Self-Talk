@@ -5,6 +5,8 @@ import com.maidmod.selftalk.network.InterChatConfigRequestPayload;
 import com.maidmod.selftalk.network.InterChatConfigSetPayload;
 import com.maidmod.selftalk.network.SelfTalkConfigRequestPayload;
 import com.maidmod.selftalk.network.SelfTalkConfigSetPayload;
+import com.maidmod.selftalk.network.SleepQuietConfigRequestPayload;
+import com.maidmod.selftalk.network.SleepQuietConfigSetPayload;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -17,7 +19,10 @@ import java.util.Optional;
 
 /**
  * 玩家独立设置界面：挂在 AI 聊天输入界面上的按钮进入。
- * 包含自言自语与互聊两组开关，各自为全局+单只。
+ * 包含自言自语、互聊与睡觉时安静三组开关，各自为全局+单只。
+ * <p>
+ * 注意「睡觉时安静」与另外两组极性相反：true = 睡觉时安静（不说话，缺省值），
+ * 且全局安静时单只不可配置（单只 active = 全局 false）；该组不受管理员开关控制。
  */
 @OnlyIn(Dist.CLIENT)
 public class SelfTalkPlayerSettingsScreen extends Screen {
@@ -28,15 +33,21 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private boolean maidEnabled = true;
     private boolean interGlobalEnabled = true;
     private boolean interMaidEnabled = true;
+    private boolean sleepGlobalEnabled = true;
+    private boolean sleepMaidEnabled = true;
     private Button globalButton;
     private Button maidButton;
     private Button interGlobalButton;
     private Button interMaidButton;
+    private Button sleepGlobalButton;
+    private Button sleepMaidButton;
     private boolean dirtySelf = false;
     private boolean dirtyInter = false;
+    private boolean dirtySleep = false;
     /** 重开全局后主动请求刷新：该响应须穿透 dirty 守卫（单只值以服务端为准） */
     private boolean refreshSelfExpected = false;
     private boolean refreshInterExpected = false;
+    private boolean refreshSleepExpected = false;
 
     public SelfTalkPlayerSettingsScreen(EntityMaid maid) {
         super(Component.translatable("config.maid_self_talk.screen.player_settings.title"));
@@ -47,6 +58,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     protected void init() {
         PacketDistributor.sendToServer(new SelfTalkConfigRequestPayload(this.maid.getUUID()));
         PacketDistributor.sendToServer(new InterChatConfigRequestPayload(this.maid.getUUID()));
+        PacketDistributor.sendToServer(new SleepQuietConfigRequestPayload(this.maid.getUUID()));
         int cx = this.width / 2;
         int cy = this.height / 2 - 20;
         this.globalButton = this.addRenderableWidget(Button.builder(
@@ -61,6 +73,12 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         this.interMaidButton = this.addRenderableWidget(Button.builder(
                 Component.translatable("config.maid_self_talk.screen.player_settings.inter_maid_toggle", interMaidEnabled),
                 b -> toggleInterMaid()).bounds(cx - 100, cy + 70, 200, 20).build());
+        this.sleepGlobalButton = this.addRenderableWidget(Button.builder(
+                Component.translatable("config.maid_self_talk.screen.player_settings.sleep_global", sleepGlobalEnabled),
+                b -> toggleSleepGlobal()).bounds(cx - 100, cy + 96, 200, 20).build());
+        this.sleepMaidButton = this.addRenderableWidget(Button.builder(
+                Component.translatable("config.maid_self_talk.screen.player_settings.sleep_maid_toggle", sleepMaidEnabled),
+                b -> toggleSleepMaid()).bounds(cx - 100, cy + 118, 200, 20).build());
         refreshButtonState();
     }
 
@@ -108,6 +126,33 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         refreshButtonState();
     }
 
+    /**
+     * 「睡觉时安静」全局开关：true = 全局安静（单只随全局、不可配置）；
+     * false = 允许说话，此时刷新单只有效值（名单残留项由服务端裁决）。
+     * 注意极性：与自话/互聊的"全局 false 锁单只"相反。
+     */
+    private void toggleSleepGlobal() {
+        boolean next = !sleepGlobalEnabled;
+        PacketDistributor.sendToServer(new SleepQuietConfigSetPayload(Optional.empty(), next));
+        sleepGlobalEnabled = next;
+        dirtySleep = true;
+        if (next) {
+            sleepMaidEnabled = true;
+        } else {
+            PacketDistributor.sendToServer(new SleepQuietConfigRequestPayload(this.maid.getUUID()));
+            refreshSleepExpected = true;
+        }
+        refreshButtonState();
+    }
+
+    private void toggleSleepMaid() {
+        boolean next = !sleepMaidEnabled;
+        PacketDistributor.sendToServer(new SleepQuietConfigSetPayload(Optional.of(this.maid.getUUID()), next));
+        sleepMaidEnabled = next;
+        dirtySleep = true;
+        refreshButtonState();
+    }
+
     public void applyResponse(boolean adminEnabled, boolean globalEnabled, boolean maidEnabled) {
         this.adminEnabled = adminEnabled;
         // dirty 守卫丢弃的是打开界面时初始请求的迟到响应（防覆盖用户刚做的切换）；
@@ -134,14 +179,29 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         refreshButtonState();
     }
 
+    /** 「睡觉时安静」响应：全局安静时单只值恒 true（随全局），其余逻辑与互聊组同构 */
+    public void applySleepQuietResponse(boolean globalEnabled, boolean maidEnabled) {
+        boolean accept = !dirtySleep || (refreshSleepExpected && this.sleepGlobalEnabled == globalEnabled);
+        if (accept) {
+            this.sleepGlobalEnabled = globalEnabled;
+            this.sleepMaidEnabled = maidEnabled;
+            refreshSleepExpected = false;
+        }
+        refreshButtonState();
+    }
+
     private void refreshButtonState() {
-        if (this.globalButton == null || this.maidButton == null || this.interGlobalButton == null || this.interMaidButton == null) {
+        if (this.globalButton == null || this.maidButton == null || this.interGlobalButton == null
+                || this.interMaidButton == null || this.sleepGlobalButton == null || this.sleepMaidButton == null) {
             return;
         }
         this.globalButton.active = this.adminEnabled;
         this.maidButton.active = this.adminEnabled && this.globalEnabled;
         this.interGlobalButton.active = this.adminEnabled;
         this.interMaidButton.active = this.adminEnabled && this.interGlobalEnabled;
+        // 「睡觉时安静」不受管理员开关控制；单只仅全局允许说话（false）时可配置——与上两组激活逻辑相反
+        this.sleepGlobalButton.active = true;
+        this.sleepMaidButton.active = !this.sleepGlobalEnabled;
         this.globalButton.setMessage(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.global", globalEnabled));
         this.maidButton.setMessage(Component.translatable(
@@ -150,6 +210,10 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                 "config.maid_self_talk.screen.player_settings.inter_global", interGlobalEnabled));
         this.interMaidButton.setMessage(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.inter_maid_toggle", interMaidEnabled));
+        this.sleepGlobalButton.setMessage(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.sleep_global", sleepGlobalEnabled));
+        this.sleepMaidButton.setMessage(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.sleep_maid_toggle", sleepMaidEnabled));
     }
 
     @Override
@@ -167,6 +231,10 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
             String key = !this.globalEnabled ? "config.maid_self_talk.screen.player_settings.global_off_hint" : "config.maid_self_talk.screen.player_settings.inter_global_off_hint";
             graphics.drawCenteredString(this.font,
                     Component.translatable(key),
+                    this.width / 2, this.height / 2 + 80, 0xFFAA55);
+        } else if (this.sleepGlobalEnabled) {
+            graphics.drawCenteredString(this.font,
+                    Component.translatable("config.maid_self_talk.screen.player_settings.sleep_global_hint"),
                     this.width / 2, this.height / 2 + 80, 0xFFAA55);
         }
     }

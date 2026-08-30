@@ -21,7 +21,11 @@ public final class SelfTalkAttachments {
     public static final DeferredRegister<AttachmentType<?>> ATTACHMENT_TYPES =
             DeferredRegister.create(NeoForgeRegistries.ATTACHMENT_TYPES, MaidSelfTalkMod.MODID);
 
-    /** 玩家独立设置：自己的女仆是否触发自言自语（默认启用） */
+    // ===== 旧版玩家实体附件(1.1.1 及更早,1.1.2 起不再读写) =====
+    // 仅保留注册以兼容旧档玩家 NBT 反序列化;1.1.2 起玩家登录时经 SelfTalkMigration
+    // 一次性迁移到下方 Level 附件并 removeData,此后这些类型只有迁移读点使用。
+
+    /** 玩家独立设置：自己的女仆是否触发自言自语（默认启用）（旧版宿主=玩家实体，仅迁移读用） */
     public static final Supplier<AttachmentType<Boolean>> SELF_TALK_ENABLED =
             ATTACHMENT_TYPES.register("self_talk_enabled",
                     () -> AttachmentType.builder(() -> true).serialize(Codec.BOOL).build());
@@ -41,6 +45,43 @@ public final class SelfTalkAttachments {
     /** 互聊单只关闭名单 */
     public static final Supplier<AttachmentType<Map<String, Boolean>>> INTER_CHAT_MAID_OVERRIDES =
             ATTACHMENT_TYPES.register("inter_chat_maid_overrides", SelfTalkAttachments::buildMaidOverrides);
+
+    // ===== 服务器级玩家设置(挂 overworld Level 附件,1.1.2 起) =====
+    // 玩家设置宿主从玩家实体迁移到 overworld:主人离线(态 2)时设置同样生效,
+    // 且不再随玩家死亡克隆/玩家文件残留,数据随世界存档走。
+    // 当前读点全部经 PlayerSettingsStore,切勿直接 getData 本组附件。
+
+    /** 自话全局开关(Level):玩家 UUID -> 是否触发自言自语;缺失 = 启用 */
+    public static final Supplier<AttachmentType<Map<String, Boolean>>> LEVEL_SELF_TALK_ENABLED =
+            ATTACHMENT_TYPES.register("level_self_talk_enabled",
+                    () -> AttachmentType.builder((Supplier<Map<String, Boolean>>) HashMap::new)
+                            .serialize(Codec.unboundedMap(Codec.STRING, Codec.BOOL)).build());
+
+    /** 自话单只关闭名单(Level):玩家 UUID -> 女仆 UUID -> false(仅存关闭项) */
+    public static final Supplier<AttachmentType<Map<String, Map<String, Boolean>>>> LEVEL_SELF_TALK_MAID_OVERRIDES =
+            ATTACHMENT_TYPES.register("level_self_talk_maid_overrides", SelfTalkAttachments::buildLevelMaidOverrides);
+
+    /** 互聊全局开关(Level):玩家 UUID -> 是否触发互聊;缺失 = 启用 */
+    public static final Supplier<AttachmentType<Map<String, Boolean>>> LEVEL_INTER_CHAT_ENABLED =
+            ATTACHMENT_TYPES.register("level_inter_chat_enabled",
+                    () -> AttachmentType.builder((Supplier<Map<String, Boolean>>) HashMap::new)
+                            .serialize(Codec.unboundedMap(Codec.STRING, Codec.BOOL)).build());
+
+    /** 互聊单只关闭名单(Level):玩家 UUID -> 女仆 UUID -> false(仅存关闭项) */
+    public static final Supplier<AttachmentType<Map<String, Map<String, Boolean>>>> LEVEL_INTER_CHAT_MAID_OVERRIDES =
+            ATTACHMENT_TYPES.register("level_inter_chat_maid_overrides", SelfTalkAttachments::buildLevelMaidOverrides);
+
+    /** 睡觉时安静全局开关(Level):玩家 UUID -> 是否睡觉时安静;缺失 = 安静(true)。
+     *  注意与自话/互聊极性相反:true = 女仆睡觉时不说话,且此时单只名单不可配置。 */
+    public static final Supplier<AttachmentType<Map<String, Boolean>>> LEVEL_SLEEP_QUIET_ENABLED =
+            ATTACHMENT_TYPES.register("level_sleep_quiet_enabled",
+                    () -> AttachmentType.builder((Supplier<Map<String, Boolean>>) HashMap::new)
+                            .serialize(Codec.unboundedMap(Codec.STRING, Codec.BOOL)).build());
+
+    /** 睡觉时安静单只名单(Level):玩家 UUID -> 女仆 UUID -> true(仅存安静项,值恒 true)。
+     *  仅在全局开关为 false(允许说话)时生效:玩家为个别女仆单独开启「睡觉时安静」。 */
+    public static final Supplier<AttachmentType<Map<String, Map<String, Boolean>>>> LEVEL_SLEEP_QUIET_MAID_OVERRIDES =
+            ATTACHMENT_TYPES.register("level_sleep_quiet_maid_overrides", SelfTalkAttachments::buildLevelMaidOverrides);
 
     /**
      * 女仆自话回复指纹集（来源判定用，挂女仆实体）。
@@ -87,6 +128,14 @@ public final class SelfTalkAttachments {
     private static AttachmentType<Map<String, Boolean>> buildMaidOverrides() {
         return AttachmentType.builder((Supplier<Map<String, Boolean>>) HashMap::new)
                 .serialize(Codec.unboundedMap(Codec.STRING, Codec.BOOL))
+                .build();
+    }
+
+    /** Level 两级名单的 builder：外层玩家 UUID -> 内层女仆 UUID -> 布尔项 */
+    private static AttachmentType<Map<String, Map<String, Boolean>>> buildLevelMaidOverrides() {
+        return AttachmentType.builder((Supplier<Map<String, Map<String, Boolean>>>) HashMap::new)
+                .serialize(Codec.unboundedMap(Codec.STRING,
+                        Codec.unboundedMap(Codec.STRING, Codec.BOOL)))
                 .build();
     }
 

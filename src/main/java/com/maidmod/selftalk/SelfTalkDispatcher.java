@@ -72,7 +72,7 @@ public final class SelfTalkDispatcher {
             // 队列已满：吞请求
             return;
         }
-        if (isBusy(state)) {
+        if (isBusy(maid, state)) {
             state.deferredRequests.addLast(req);
         } else {
             dispatchNow(maid, req);
@@ -82,7 +82,7 @@ public final class SelfTalkDispatcher {
     /** 空闲时从顺延队列出队派发，直到忙或队列空 */
     public static void drainDeferred(EntityMaid maid) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
-        while (!isBusy(state) && !state.deferredRequests.isEmpty()) {
+        while (!isBusy(maid, state) && !state.deferredRequests.isEmpty()) {
             SelfTalkState.DeferredRequest req = state.deferredRequests.pollFirst();
             dispatchNow(maid, req);
         }
@@ -97,7 +97,16 @@ public final class SelfTalkDispatcher {
         return false;
     }
 
-    private static boolean isBusy(SelfTalkState.State state) {
+    /**
+     * 忙判定：pending/玩家 chat 在途，或女仆睡觉且玩家开启「睡觉时安静」。
+     * <p>
+     * 睡眠归入忙（而非派发失败）——顺延队列只出队不丢弃、submit 改为入队，
+     * 睡眠期间"已获批的发言"保留到醒后派发；与「玩家 chat 在途则顺延」同语义。
+     */
+    private static boolean isBusy(EntityMaid maid, SelfTalkState.State state) {
+        if (maid.isSleeping() && PlayerSettingsStore.isSleepQuietForMaid(maid.level().getServer(), maid)) {
+            return true;
+        }
         return state.selfTalkPending || state.interChatPending || state.playerChatCount > 0;
     }
 
@@ -118,12 +127,14 @@ public final class SelfTalkDispatcher {
                     unlockPair(maid, req.peer());
                     return false;
                 }
-                // 发起者顺延期间，对方可能已被他人锁定/进入在途：派发前复核，避免交叉两条链写同一窗口
+                // 发起者顺延期间，对方可能已被他人锁定/进入在途/入睡：派发前复核，避免交叉两条链写同一窗口
                 if (req.kind() == SelfTalkState.RequestKind.INTER_CHAT_INITIATOR) {
                     SelfTalkState.State peerState = SelfTalkState.get(req.peer().getId());
                     long nowTick = maid.level().getServer().getTickCount();
                     if (peerState.selfTalkPending || peerState.interChatPending || peerState.playerChatCount > 0
-                            || isMaidInterChatLocked(req.peer(), nowTick)) {
+                            || isMaidInterChatLocked(req.peer(), nowTick)
+                            || (req.peer().isSleeping()
+                            && PlayerSettingsStore.isSleepQuietForMaid(req.peer().level().getServer(), req.peer()))) {
                         return false;
                     }
                 }
