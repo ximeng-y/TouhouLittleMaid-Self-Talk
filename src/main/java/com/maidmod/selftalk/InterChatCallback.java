@@ -151,10 +151,8 @@ public class InterChatCallback extends LLMCallback {
             SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
             state.interChatPending = false;
             state.interChatPendingSinceTick = -1;
-            // 请求失败即链终止：解除互聊对锁
-            if (peer != null) {
-                SelfTalkDispatcher.unlockPair(getMaid(), peer);
-            }
+            // 请求失败即链终止：解除互聊对锁（仅当双方仍互为配对才解锁,防误拆第三方新链锁）
+            unlockPair();
         });
     }
 }
