@@ -58,7 +58,10 @@
   "config.maid_self_talk.screen.player_settings.inter_maid_toggle": "这只女仆触发互聊：%s",
   "config.maid_self_talk.screen.player_settings.global_off_hint": "已随你的全局设置关闭，需先开启全局",
   "config.maid_self_talk.screen.player_settings.inter_global_off_hint": "已随你的互聊全局设置关闭，需先开启",
-  "config.maid_self_talk.screen.player_settings.admin_disabled": "管理员已关闭玩家设置",
+  "config.maid_self_talk.screen.player_settings.admin_disabled": "管理员已关闭玩家设置（睡觉时安静不受影响）",
   "config.maid_self_talk.prompt.language": "自话输出语言",
-  "config.maid_self_talk.prompt.language.tooltip": "自话输出语言（语言标签，如 zh_cn / en_us / ja_jp，支持任意合法语言标签，非法值回退 zh_cn）。TLM 官方模型人设多为英文，若不显式声明语言，女仆自话可能输出英文。"
+  "config.maid_self_talk.prompt.language.tooltip": "自话输出语言（语言标签，如 zh_cn / en_us / ja_jp，支持任意合法语言标签，非法值回退 zh_cn）。TLM 官方模型人设多为英文，若不显式声明语言，女仆自话可能输出英文。",
+  "config.maid_self_talk.screen.player_settings.sleep_global": "我的所有女仆睡觉时安静：%s",
+  "config.maid_self_talk.screen.player_settings.sleep_maid_toggle": "这只女仆睡觉时安静：%s",
+  "config.maid_self_talk.screen.player_settings.sleep_global_hint": "睡觉时安静已对全部女仆生效，需先关闭全局才能单独配置"
 }

@@ -104,7 +104,14 @@ public class InterChatCallback extends LLMCallback {
         if (chainRound >= Config.INTER_CHAT_MAX_CHAIN_ROUNDS.get()) { unlockPair(); return; }
         if (!SelfTalkHandler.hasPlayerNearby(nextSpeaker, Config.INTER_CHAT_PLAYER_RANGE.get())) { unlockPair(); return; }
         if (!isMaidNearby(nextSpeaker, lastSpeaker, Config.INTER_CHAT_MAID_RANGE.get())) { unlockPair(); return; }
-        if (Config.PLAYER_OPTION_ENABLED.get() && !SelfTalkHandler.isInterChatEnabledForMaid(nextSpeaker, level)) { unlockPair(); return; }
+        // 1.1.2 睡眠 gate：对方睡觉且玩家开启「睡觉时安静」→ 链自然结束（下一跳由 dispatchNow 顺延会挂锁
+        // 到超时兜底，此处显式终止并解锁，与对方死亡/卸载同语义）
+        if (nextSpeaker.isSleeping()
+                && PlayerSettingsStore.isSleepQuietForMaid(nextSpeaker.level().getServer(), nextSpeaker)) {
+            unlockPair();
+            return;
+        }
+        if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), nextSpeaker)) { unlockPair(); return; }
         // 链式续接是发起者回复后的单条连续请求，天然串行、每轮隔一次 LLM 往返，
         // 不走 5~8s 全局节流桶（发起者派发已占用该桶），否则 responder 路径永远被退避。
         // 若对方忙（自话/玩家 chat 在途），dispatcher 会顺延本次回应；对锁保持，链仅暂停不终止。

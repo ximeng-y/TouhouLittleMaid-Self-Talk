@@ -146,6 +146,11 @@ public final class SelfTalkHandler {
         if (ownerUuid == null) {
             return;
         }
+        // 睡眠 gate(置顶,先于一切槽位获取):女仆睡觉且玩家开启「睡觉时安静」→ 本 tick 不触发
+        // 自话/互聊/欢迎;醒来后自然重试(欢迎语窗口期内醒来自动补,过期则错过,与现有窗口语义一致)
+        if (maid.isSleeping() && PlayerSettingsStore.isSleepQuietForMaid(level.getServer(), maid)) {
+            return;
+        }
 
         boolean busy = state.selfTalkPending || state.interChatPending || state.playerChatCount > 0;
 
@@ -157,7 +162,7 @@ public final class SelfTalkHandler {
             // 窗口期内每 tick 自然重试，窗口过期放弃），与自话语义一致
             if (loginTick != null && maid.getOwner() != null
                     && serverTick - loginTick <= Config.WELCOME_WINDOW_TICKS.get()) {
-                if (Config.PLAYER_OPTION_ENABLED.get() && !isSelfTalkEnabledForMaid(maid, level)) {
+                if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
                     return;
                 }
                 // 欢迎语闸门未放行则不标记、不发请求，窗口期内每 tick 自然重试
@@ -186,8 +191,8 @@ public final class SelfTalkHandler {
 
         // 互聊触发：独立于自话的冷却，但发起者派发与自话共用全局闸门（5~8s）
         if (Config.INTER_CHAT_ENABLED.get() && serverTick >= state.nextInterChatTriggerTick) {
-            // 玩家独立设置：管理员允许玩家配置时，检查该女仆主人及其单只名单
-            if (!(Config.PLAYER_OPTION_ENABLED.get() && !isInterChatEnabledForMaid(maid, level))) {
+            // 玩家独立设置：管理员允许玩家配置时，检查该女仆主人及其单只名单（1.1.2 起离线亦可读）
+            if (!(Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), maid))) {
                 // 互聊对锁：本女仆正与他人连续互聊中，不能发起新互聊，短退避后重试
                 if (SelfTalkDispatcher.isMaidInterChatLocked(maid, serverTick)) {
                     state.nextInterChatTriggerTick = serverTick + RESPONDER_RETRY_TICKS;
@@ -231,8 +236,8 @@ public final class SelfTalkHandler {
             if (!Config.STATE1_ENABLED.get()) {
                 return;
             }
-            // 玩家独立设置：管理员允许玩家配置时，检查该女仆主人及其单只名单
-            if (Config.PLAYER_OPTION_ENABLED.get() && !isSelfTalkEnabledForMaid(maid, level)) {
+            // 玩家独立设置：管理员允许玩家配置时，检查该女仆主人及其单只名单（1.1.2 起离线亦可读）
+            if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
                 return;
             }
             if (!hasPlayerNearby(maid, Config.STATE1_PLAYER_RANGE.get())) {
@@ -254,7 +259,10 @@ public final class SelfTalkHandler {
             if (!Config.STATE2_ENABLED.get()) {
                 return;
             }
-            // 主人离线，无玩家独立设置可查，直接按管理员配置
+            // 1.1.2 起玩家设置随世界存档（overworld），主人离线（态 2）同样检查玩家设置并生效
+            if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
+                return;
+            }
             if (!hasPlayerNearby(maid, Config.STATE2_PLAYER_RANGE.get())) {
                 return;
             }
@@ -274,6 +282,9 @@ public final class SelfTalkHandler {
     @SubscribeEvent
     public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer serverPlayer) {
+            // 1.1.2：旧版 persistentData 玩家设置 → overworld SavedData 迁移（幂等；登录时同步完成，
+            // 客户端在迁移后才进入可发设置包的 PLAY 阶段，无竞态）
+            SelfTalkMigration.migrate(serverPlayer);
             // 记录服务器全局 tick，与欢迎窗口判定的计时基准一致（跨维度统一）
             PLAYER_LOGIN_TICKS.put(serverPlayer.getUUID(), (long) serverPlayer.server.getTickCount());
         }
@@ -289,8 +300,7 @@ public final class SelfTalkHandler {
         SelfTalkPackets.removeRateEntry(uuid);
     }
 
-    // 玩家死亡重生无需 clone 钩子：Forge 的 ServerPlayer.restoreFrom 会复制
-    // PERSISTED_NBT_TAG 子标签，独立设置（自话/互聊两级）天然跨死亡保留。
+    // 1.1.2 起玩家设置在 overworld SavedData，天然跨玩家死亡重生/维度传送保留，无需任何 clone 钩子。
 
     /** 半径内是否存在存活、非旁观模式的玩家 */
     static boolean hasPlayerNearby(EntityMaid maid, double range) {
@@ -338,7 +348,11 @@ public final class SelfTalkHandler {
             if (cm.customSetting.isBlank() && cm.getSetting().isEmpty()) {
                 continue;
             }
-            if (Config.PLAYER_OPTION_ENABLED.get() && !isInterChatEnabledForMaid(m, level)) {
+            // 睡眠中的女仆不可被邀请当回答者（玩家开启睡觉时安静时，与本女仆自话 gate 同语义）
+            if (m.isSleeping() && PlayerSettingsStore.isSleepQuietForMaid(level.getServer(), m)) {
+                continue;
+            }
+            if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), m)) {
                 continue;
             }
             available.add(m);
@@ -347,39 +361,6 @@ public final class SelfTalkHandler {
             return null;
         }
         return available.get((int) (Math.random() * available.size()));
-    }
-
-    /**
-     * 读取女仆自话有效值：全局开关 && 单只关闭名单不包含该女仆。
-     * 仅态 1（主人在线）与欢迎语使用；态 2 主人离线查不到设置，按管理员配置。
-     */
-    private static boolean isSelfTalkEnabledForMaid(EntityMaid maid, ServerLevel level) {
-        UUID ownerUuid = maid.getOwnerUUID();
-        ServerPlayer owner = level.getServer().getPlayerList().getPlayer(ownerUuid);
-        if (owner == null) {
-            // 主人在线判定刚通过但此处查不到（极端时序），按启用处理
-            return true;
-        }
-        if (!PlayerSettingsStorage.isEnabled(owner)) {
-            return false;
-        }
-        return !PlayerSettingsStorage.isMaidDisabled(owner, maid.getUUID());
-    }
-
-    /** 读取女仆互聊有效值（与自话同构，仅存储键不同） */
-    static boolean isInterChatEnabledForMaid(EntityMaid maid, ServerLevel level) {
-        UUID ownerUuid = maid.getOwnerUUID();
-        if (ownerUuid == null) {
-            return true;
-        }
-        ServerPlayer owner = level.getServer().getPlayerList().getPlayer(ownerUuid);
-        if (owner == null) {
-            return true;
-        }
-        if (!PlayerSettingsStorage.isInterChatEnabled(owner)) {
-            return false;
-        }
-        return !PlayerSettingsStorage.isInterChatMaidDisabled(owner, maid.getUUID());
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.maidmod.selftalk.network;
 
-import com.maidmod.selftalk.PlayerSettingsStorage;
+import com.maidmod.selftalk.MaidSelfTalkMod;
+import com.maidmod.selftalk.PlayerSettingsStore;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
@@ -41,13 +42,21 @@ public class InterChatConfigSetMessage {
             ServerPlayer serverPlayer = ctx.get().getSender();
             if (serverPlayer != null && SelfTalkPackets.allowConfigPacket(serverPlayer.getUUID())) {
                 if (msg.maidUuid.isEmpty()) {
-                    PlayerSettingsStorage.setInterChatEnabled(serverPlayer, msg.enabled);
+                    PlayerSettingsStore.setInterChatEnabled(serverPlayer.server, serverPlayer.getUUID(), msg.enabled);
                 } else {
                     UUID maidUuid = msg.maidUuid.get();
-                    // 只允许设置自己拥有的女仆：伪造 UUID 写入任意女仆会污染名单并撑爆玩家 NBT
+                    // 只允许设置自己拥有的女仆：伪造 UUID 写入任意女仆会污染名单并撑爆世界存档
                     //（设置界面只能对本人的女仆打开，正常玩家请求必然命中）
-                    if (SelfTalkPackets.isOwnedMaid(serverPlayer, maidUuid)) {
-                        PlayerSettingsStorage.setInterChatMaidDisabled(serverPlayer, maidUuid, !msg.enabled);
+                    if (SelfTalkPackets.isOwnedMaid(serverPlayer, maidUuid)
+                            && (msg.enabled || PlayerSettingsStore.isInterChatMaidDisabled(
+                            serverPlayer.server, serverPlayer.getUUID(), maidUuid)
+                            || PlayerSettingsStore.countInterChatMaidOverrides(
+                            serverPlayer.server, serverPlayer.getUUID()) < 256)) {
+                        PlayerSettingsStore.setInterChatMaidDisabled(serverPlayer.server,
+                                serverPlayer.getUUID(), maidUuid, !msg.enabled);
+                    } else if (!msg.enabled) {
+                        MaidSelfTalkMod.LOGGER.warn("Player {} inter-chat maid override list full, ignored",
+                                serverPlayer.getUUID());
                     }
                 }
             }

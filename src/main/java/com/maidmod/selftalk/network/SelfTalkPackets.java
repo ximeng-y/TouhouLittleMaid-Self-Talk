@@ -21,8 +21,8 @@ import java.util.UUID;
  */
 public final class SelfTalkPackets {
 
-    // v3：新增互聊三个消息，升版让不匹配版本在协商期被拒绝
-    private static final String PROTOCOL_VERSION = "3";
+    // v4：新增「睡觉时安静」三个消息，升版让不匹配版本在协商期被拒绝
+    private static final String PROTOCOL_VERSION = "4";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MaidSelfTalkMod.MODID, "main"),
@@ -57,6 +57,15 @@ public final class SelfTalkPackets {
         CHANNEL.registerMessage(nextId++, InterChatConfigResponseMessage.class,
                 InterChatConfigResponseMessage::encode, InterChatConfigResponseMessage::decode,
                 InterChatConfigResponseMessage::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(nextId++, SleepQuietConfigRequestMessage.class,
+                SleepQuietConfigRequestMessage::encode, SleepQuietConfigRequestMessage::decode,
+                SleepQuietConfigRequestMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, SleepQuietConfigSetMessage.class,
+                SleepQuietConfigSetMessage::encode, SleepQuietConfigSetMessage::decode,
+                SleepQuietConfigSetMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, SleepQuietConfigResponseMessage.class,
+                SleepQuietConfigResponseMessage::encode, SleepQuietConfigResponseMessage::decode,
+                SleepQuietConfigResponseMessage::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     /** 每玩家每秒限流：防恶意客户端包风暴（正常设置界面操作远低于该频率） */

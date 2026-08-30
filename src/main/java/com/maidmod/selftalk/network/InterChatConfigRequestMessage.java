@@ -1,7 +1,7 @@
 package com.maidmod.selftalk.network;
 
 import com.maidmod.selftalk.Config;
-import com.maidmod.selftalk.PlayerSettingsStorage;
+import com.maidmod.selftalk.PlayerSettingsStore;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
@@ -37,9 +37,9 @@ public class InterChatConfigRequestMessage {
             if (serverPlayer != null && msg.maidUuid != null
                     && SelfTalkPackets.allowConfigPacket(serverPlayer.getUUID())) {
                 boolean adminEnabled = Config.PLAYER_OPTION_ENABLED.get();
-                boolean globalEnabled = PlayerSettingsStorage.isInterChatEnabled(serverPlayer);
+                boolean globalEnabled = PlayerSettingsStore.isInterChatEnabled(serverPlayer.server, serverPlayer.getUUID());
                 boolean maidEnabled = globalEnabled
-                        && !PlayerSettingsStorage.isInterChatMaidDisabled(serverPlayer, msg.maidUuid);
+                        && !PlayerSettingsStore.isInterChatMaidDisabled(serverPlayer.server, serverPlayer.getUUID(), msg.maidUuid);
                 SelfTalkPackets.CHANNEL.send(PacketDistributor.PLAYER.with(() -> serverPlayer),
                         new InterChatConfigResponseMessage(adminEnabled, globalEnabled, maidEnabled));
             }
