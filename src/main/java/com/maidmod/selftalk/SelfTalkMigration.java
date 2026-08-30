@@ -22,11 +22,12 @@ import java.util.UUID;
  *   <li>两种情况下都删除 PlayerPersisted 子标签中的旧 key（随玩家下次存档从 player.dat 消失）。</li>
  * </ul>
  * 迁移只处理自话/互聊两组（睡觉时安静为新增功能，无旧数据源，一律走缺省）。
- * 崩溃窗口：SavedData 与 player.dat 保存时机不同步最多造成"设置回落缺省"，下次登录重新迁移，无重复数据。
+ * 崩溃窗口：SavedData 与 player.dat 保存时机不同步——若旧 key 剔除后、SavedData 落盘前崩溃，
+ * 设置将回落到缺省且旧数据不可恢复（窄窗口，可接受）；正常保存顺序下无重复数据。
  */
 public final class SelfTalkMigration {
 
-    /** 与 PlayerSettingsStorage 保持一致的旧 key（仅迁移读删用） */
+    /** 旧版（1.1.1 及更早）persistentData 中的设置 key（仅迁移读删用；旧类 PlayerSettingsStorage 已随迁移删除） */
     private static final String OLD_ENABLED = "maid_self_talk:enabled";
     private static final String OLD_DISABLED_MAIDS = "maid_self_talk:disabled_maids";
     private static final String OLD_INTER_CHAT_ENABLED = "maid_self_talk:inter_chat_enabled";

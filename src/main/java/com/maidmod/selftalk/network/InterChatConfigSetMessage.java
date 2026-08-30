@@ -47,17 +47,21 @@ public class InterChatConfigSetMessage {
                     UUID maidUuid = msg.maidUuid.get();
                     // 只允许设置自己拥有的女仆：伪造 UUID 写入任意女仆会污染名单并撑爆世界存档
                     //（设置界面只能对本人的女仆打开，正常玩家请求必然命中）
-                    if (SelfTalkPackets.isOwnedMaid(serverPlayer, maidUuid)
-                            && (msg.enabled || PlayerSettingsStore.isInterChatMaidDisabled(
-                            serverPlayer.server, serverPlayer.getUUID(), maidUuid)
-                            || PlayerSettingsStore.countInterChatMaidOverrides(
-                            serverPlayer.server, serverPlayer.getUUID()) < 256)) {
-                        PlayerSettingsStore.setInterChatMaidDisabled(serverPlayer.server,
-                                serverPlayer.getUUID(), maidUuid, !msg.enabled);
-                    } else if (!msg.enabled) {
-                        MaidSelfTalkMod.LOGGER.warn("Player {} inter-chat maid override list full, ignored",
-                                serverPlayer.getUUID());
+                    // 归属校验：仅允许主人操作自己拥有的女仆，防伪造 UUID 污染名单
+                    if (!SelfTalkPackets.isOwnedMaid(serverPlayer, maidUuid)) {
+                        return;
                     }
+                    // 名单只存关闭项：关闭时新增条目，重新开启时移除，避免名单膨胀。
+                    // 容量上限：新增键时校验，防恶意客户端伪造任意 UUID 无限撑大世界存档
+                    if (!msg.enabled
+                            && !PlayerSettingsStore.isInterChatMaidDisabled(serverPlayer.server, serverPlayer.getUUID(), maidUuid)
+                            && PlayerSettingsStore.countInterChatMaidOverrides(serverPlayer.server, serverPlayer.getUUID()) >= 256) {
+                        MaidSelfTalkMod.LOGGER.warn("Player {} inter-chat maid override list full ({}), ignored",
+                                serverPlayer.getUUID(), 256);
+                        return;
+                    }
+                    PlayerSettingsStore.setInterChatMaidDisabled(serverPlayer.server,
+                            serverPlayer.getUUID(), maidUuid, !msg.enabled);
                 }
             }
         });

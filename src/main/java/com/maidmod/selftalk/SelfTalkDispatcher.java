@@ -127,16 +127,22 @@ public final class SelfTalkDispatcher {
                     unlockPair(maid, req.peer());
                     return false;
                 }
-                // 发起者顺延期间，对方可能已被他人锁定/进入在途：派发前复核，避免交叉两条链写同一窗口
-                if (req.kind() == SelfTalkState.RequestKind.INTER_CHAT_INITIATOR) {
-                    SelfTalkState.State peerState = SelfTalkState.get(req.peer().getId());
-                    long nowTick = maid.level().getServer().getTickCount();
-                    if (peerState.selfTalkPending || peerState.interChatPending || peerState.playerChatCount > 0
-                            || isMaidInterChatLocked(req.peer(), nowTick)
-                            || (req.peer().isSleeping()
-                            && PlayerSettingsStore.isSleepQuietForMaid(req.peer().level().getServer(), req.peer()))) {
-                        return false;
-                    }
+                // 派发前双方复核(发起者/回答者路径对等):顺延期间 peer 可能已被他人锁定/进入
+                // 在途/入睡(睡眠归入忙后链续接请求可滞至整夜,对锁早到期,不能依赖锁兜底);
+                // 复核失败即断链并解锁,避免陈旧请求派发给已漂移的配对导致两条链交错写同一窗口
+                long nowTick = maid.level().getServer().getTickCount();
+                SelfTalkState.State peerState = SelfTalkState.get(req.peer().getId());
+                if (peerState.selfTalkPending || peerState.interChatPending || peerState.playerChatCount > 0
+                        || isMaidInterChatLocked(req.peer(), nowTick)
+                        || (req.peer().isSleeping()
+                        && PlayerSettingsStore.isSleepQuietForMaid(req.peer().level().getServer(), req.peer()))) {
+                    unlockPair(maid, req.peer());
+                    return false;
+                }
+                // 自身若已与他链配对(配对者不是当前 peer):放弃本请求,保留新链锁不动
+                Integer ownPartner = currentPairPartner(maid, nowTick);
+                if (ownPartner != null && !ownPartner.equals(req.peer().getId())) {
+                    return false;
                 }
                 boolean ok;
                 if (req.kind() == SelfTalkState.RequestKind.INTER_CHAT_INITIATOR) {
@@ -193,6 +199,16 @@ public final class SelfTalkDispatcher {
         // 锁已过期：顺带清理自身及配对条目，防长期运行残留
         clearPairFor(maid.getId());
         return false;
+    }
+
+    /** 女仆当前配对的对方实体 ID（无锁/已过期返回 null；过期时顺带清理配对条目） */
+    private static Integer currentPairPartner(EntityMaid maid, long nowTick) {
+        Long until = INTER_CHAT_LOCK_UNTIL.get(maid.getId());
+        if (until == null || until <= nowTick) {
+            clearPairFor(maid.getId());
+            return null;
+        }
+        return INTER_CHAT_PAIR_PARTNER.get(maid.getId());
     }
 
     /** 女仆死亡/卸载时清理其互聊锁（连同配对者对称释放） */
