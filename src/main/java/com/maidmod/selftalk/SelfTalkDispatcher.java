@@ -123,22 +123,24 @@ public final class SelfTalkDispatcher {
                 return MaidSelfTalkService.triggerSelfTalk(maid, false, req.keep(), req.broadcastRange());
             }
             case INTER_CHAT_INITIATOR, INTER_CHAT_RESPONDER -> {
+                long nowTick = maid.level().getServer().getTickCount();
                 if (req.peer() == null || !req.peer().isAlive()) {
-                    unlockPair(maid, req.peer());
+                    unlockPairIfPaired(maid, req.peer(), nowTick);
                     return false;
                 }
                 // 派发前双方复核(发起者/回答者路径对等):顺延期间 peer 可能已被他人锁定/进入
                 // 在途/入睡(睡眠归入忙后链续接请求可滞至整夜,对锁早到期,不能依赖锁兜底);
                 // 复核失败即断链并解锁,避免陈旧请求派发给已漂移的配对导致两条链交错写同一窗口。
                 // 注意锁语义:peer 与本人的配对锁=链进行中(放行);被他人锁定=漂移(断链)
-                long nowTick = maid.level().getServer().getTickCount();
                 SelfTalkState.State peerState = SelfTalkState.get(req.peer().getId());
                 Integer peerPartner = currentPairPartner(req.peer(), nowTick);
                 if (peerState.selfTalkPending || peerState.interChatPending || peerState.playerChatCount > 0
                         || (req.peer().isSleeping()
                         && PlayerSettingsStore.isSleepQuietForMaid(req.peer().level().getServer(), req.peer()))
                         || (peerPartner != null && !peerPartner.equals(maid.getId()))) {
-                    unlockPair(maid, req.peer());
+                    // 仅当双方当前仍互为配对才解锁:漂移后旧链对锁已被新链 lockPair 前置清理,
+                    // 无条件 unlockPair 会误拆第三方在途新链(不能触碰不属于本对的锁)
+                    unlockPairIfPaired(maid, req.peer(), nowTick);
                     return false;
                 }
                 // 自身若已与他链配对(配对者不是当前 peer):放弃本请求,保留新链锁不动
@@ -211,6 +213,20 @@ public final class SelfTalkDispatcher {
             return null;
         }
         return INTER_CHAT_PAIR_PARTNER.get(maid.getId());
+    }
+
+    /** 仅当双方当前仍互为配对时才解除对锁（陈旧请求失败路径：漂移后的新链锁不得触碰） */
+    private static void unlockPairIfPaired(EntityMaid maid, EntityMaid peer, long nowTick) {
+        if (peer == null) {
+            clearPairFor(maid.getId());
+            return;
+        }
+        Integer maidPartner = currentPairPartner(maid, nowTick);
+        Integer peerPartner = currentPairPartner(peer, nowTick);
+        if (maidPartner != null && maidPartner.equals(peer.getId())
+                && peerPartner != null && peerPartner.equals(maid.getId())) {
+            unlockPair(maid, peer);
+        }
     }
 
     /** 女仆死亡/卸载时清理其互聊锁（连同配对者对称释放） */
