@@ -129,13 +129,15 @@ public final class SelfTalkDispatcher {
                 }
                 // 派发前双方复核(发起者/回答者路径对等):顺延期间 peer 可能已被他人锁定/进入
                 // 在途/入睡(睡眠归入忙后链续接请求可滞至整夜,对锁早到期,不能依赖锁兜底);
-                // 复核失败即断链并解锁,避免陈旧请求派发给已漂移的配对导致两条链交错写同一窗口
+                // 复核失败即断链并解锁,避免陈旧请求派发给已漂移的配对导致两条链交错写同一窗口。
+                // 注意锁语义:peer 与本人的配对锁=链进行中(放行);被他人锁定=漂移(断链)
                 long nowTick = maid.level().getServer().getTickCount();
                 SelfTalkState.State peerState = SelfTalkState.get(req.peer().getId());
+                Integer peerPartner = currentPairPartner(req.peer(), nowTick);
                 if (peerState.selfTalkPending || peerState.interChatPending || peerState.playerChatCount > 0
-                        || isMaidInterChatLocked(req.peer(), nowTick)
                         || (req.peer().isSleeping()
-                        && PlayerSettingsStore.isSleepQuietForMaid(req.peer().level().getServer(), req.peer()))) {
+                        && PlayerSettingsStore.isSleepQuietForMaid(req.peer().level().getServer(), req.peer()))
+                        || (peerPartner != null && !peerPartner.equals(maid.getId()))) {
                     unlockPair(maid, req.peer());
                     return false;
                 }

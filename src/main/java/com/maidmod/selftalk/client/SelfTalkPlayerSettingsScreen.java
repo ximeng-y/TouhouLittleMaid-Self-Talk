@@ -226,16 +226,16 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         if (!this.adminEnabled) {
             graphics.drawCenteredString(this.font,
                     Component.translatable("config.maid_self_talk.screen.player_settings.admin_disabled"),
-                    this.width / 2, this.height / 2 + 80, 0xFF5555);
+                    this.width / 2, this.height / 2 + 144, 0xFF5555);
         } else if (!this.globalEnabled || !this.interGlobalEnabled) {
             String key = !this.globalEnabled ? "config.maid_self_talk.screen.player_settings.global_off_hint" : "config.maid_self_talk.screen.player_settings.inter_global_off_hint";
             graphics.drawCenteredString(this.font,
                     Component.translatable(key),
-                    this.width / 2, this.height / 2 + 80, 0xFFAA55);
+                    this.width / 2, this.height / 2 + 144, 0xFFAA55);
         } else if (this.sleepGlobalEnabled) {
             graphics.drawCenteredString(this.font,
                     Component.translatable("config.maid_self_talk.screen.player_settings.sleep_global_hint"),
-                    this.width / 2, this.height / 2 + 80, 0xFFAA55);
+                    this.width / 2, this.height / 2 + 144, 0xFFAA55);
         }
     }
 
