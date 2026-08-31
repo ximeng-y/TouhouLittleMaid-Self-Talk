@@ -60,6 +60,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         SelfTalkPackets.CHANNEL.sendToServer(new InterChatConfigRequestMessage(this.maid.getUUID()));
         SelfTalkPackets.CHANNEL.sendToServer(new SleepQuietConfigRequestMessage(this.maid.getUUID()));
         int cx = this.width / 2;
+        // 按钮两两分组：组内 0 间隙（步进 20）、组间 8px（步进 28）
         int cy = this.height / 2 - 26;
         this.globalButton = this.addRenderableWidget(Button.builder(
                 Component.translatable("config.maid_self_talk.screen.player_settings.global", globalEnabled),
