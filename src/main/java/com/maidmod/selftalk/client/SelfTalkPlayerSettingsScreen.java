@@ -60,7 +60,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         SelfTalkPackets.CHANNEL.sendToServer(new InterChatConfigRequestMessage(this.maid.getUUID()));
         SelfTalkPackets.CHANNEL.sendToServer(new SleepQuietConfigRequestMessage(this.maid.getUUID()));
         int cx = this.width / 2;
-        int cy = this.height / 2 - 24;
+        int cy = this.height / 2 - 26;
         this.globalButton = this.addRenderableWidget(Button.builder(
                 Component.translatable("config.maid_self_talk.screen.player_settings.global", globalEnabled),
                 b -> toggleGlobal()).bounds(cx - 100, cy, 200, 20).build());
@@ -69,16 +69,16 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                 b -> toggleMaid()).bounds(cx - 100, cy + 20, 200, 20).build());
         this.interGlobalButton = this.addRenderableWidget(Button.builder(
                 Component.translatable("config.maid_self_talk.screen.player_settings.inter_global", interGlobalEnabled),
-                b -> toggleInterGlobal()).bounds(cx - 100, cy + 40, 200, 20).build());
+                b -> toggleInterGlobal()).bounds(cx - 100, cy + 48, 200, 20).build());
         this.interMaidButton = this.addRenderableWidget(Button.builder(
                 Component.translatable("config.maid_self_talk.screen.player_settings.inter_maid_toggle", interMaidEnabled),
-                b -> toggleInterMaid()).bounds(cx - 100, cy + 60, 200, 20).build());
+                b -> toggleInterMaid()).bounds(cx - 100, cy + 68, 200, 20).build());
         this.sleepGlobalButton = this.addRenderableWidget(Button.builder(
                 Component.translatable("config.maid_self_talk.screen.player_settings.sleep_global", sleepGlobalEnabled),
-                b -> toggleSleepGlobal()).bounds(cx - 100, cy + 80, 200, 20).build());
+                b -> toggleSleepGlobal()).bounds(cx - 100, cy + 96, 200, 20).build());
         this.sleepMaidButton = this.addRenderableWidget(Button.builder(
                 Component.translatable("config.maid_self_talk.screen.player_settings.sleep_maid_toggle", sleepMaidEnabled),
-                b -> toggleSleepMaid()).bounds(cx - 100, cy + 100, 200, 20).build());
+                b -> toggleSleepMaid()).bounds(cx - 100, cy + 116, 200, 20).build());
         refreshButtonState();
     }
 
@@ -226,16 +226,16 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         if (!this.adminEnabled) {
             graphics.drawCenteredString(this.font,
                     Component.translatable("config.maid_self_talk.screen.player_settings.admin_disabled"),
-                    this.width / 2, this.height / 2 + 104, 0xFF5555);
+                    this.width / 2, this.height / 2 + 118, 0xFF5555);
         } else if (!this.globalEnabled || !this.interGlobalEnabled) {
             String key = !this.globalEnabled ? "config.maid_self_talk.screen.player_settings.global_off_hint" : "config.maid_self_talk.screen.player_settings.inter_global_off_hint";
             graphics.drawCenteredString(this.font,
                     Component.translatable(key),
-                    this.width / 2, this.height / 2 + 104, 0xFFAA55);
+                    this.width / 2, this.height / 2 + 118, 0xFFAA55);
         } else if (this.sleepGlobalEnabled) {
             graphics.drawCenteredString(this.font,
                     Component.translatable("config.maid_self_talk.screen.player_settings.sleep_global_hint"),
-                    this.width / 2, this.height / 2 + 104, 0xFFAA55);
+                    this.width / 2, this.height / 2 + 118, 0xFFAA55);
         }
     }
 
