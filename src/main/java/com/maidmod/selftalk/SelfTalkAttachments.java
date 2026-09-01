@@ -83,6 +83,33 @@ public final class SelfTalkAttachments {
     public static final Supplier<AttachmentType<Map<String, Map<String, Boolean>>>> LEVEL_SLEEP_QUIET_MAID_OVERRIDES =
             ATTACHMENT_TYPES.register("level_sleep_quiet_maid_overrides", SelfTalkAttachments::buildLevelMaidOverrides);
 
+    /** 自定义 Prompt 全局段(Level):玩家 UUID -> Prompt 文本;空串条目不落盘(缺失 = 未填写) */
+    public static final Supplier<AttachmentType<Map<String, String>>> LEVEL_CUSTOM_PROMPT_GLOBAL =
+            ATTACHMENT_TYPES.register("level_custom_prompt_global",
+                    () -> AttachmentType.builder((Supplier<Map<String, String>>) HashMap::new)
+                            .serialize(Codec.unboundedMap(Codec.STRING, Codec.STRING)).build());
+
+    /** 自定义 Prompt 单只段(Level):玩家 UUID -> 女仆 UUID -> Prompt 文本;空串条目不落盘 */
+    public static final Supplier<AttachmentType<Map<String, Map<String, String>>>> LEVEL_CUSTOM_PROMPT_MAID =
+            ATTACHMENT_TYPES.register("level_custom_prompt_maid",
+                    SelfTalkAttachments::buildLevelMaidStringMap);
+
+    /** 自定义 Prompt「全局覆盖单只」开关(Level):玩家 UUID -> true(仅存 true 项,缺失 = 关闭) */
+    public static final Supplier<AttachmentType<Map<String, Boolean>>> LEVEL_CUSTOM_PROMPT_OVERRIDE =
+            ATTACHMENT_TYPES.register("level_custom_prompt_override",
+                    () -> AttachmentType.builder((Supplier<Map<String, Boolean>>) HashMap::new)
+                            .serialize(Codec.unboundedMap(Codec.STRING, Codec.BOOL)).build());
+
+    /** Tool 调用玩家全局开关(Level):玩家 UUID -> true(仅存 true 项,缺失 = 关闭——Tool 玩家默认关闭) */
+    public static final Supplier<AttachmentType<Map<String, Boolean>>> LEVEL_TOOL_CALL_ENABLED =
+            ATTACHMENT_TYPES.register("level_tool_call_enabled",
+                    () -> AttachmentType.builder((Supplier<Map<String, Boolean>>) HashMap::new)
+                            .serialize(Codec.unboundedMap(Codec.STRING, Codec.BOOL)).build());
+
+    /** Tool 调用单只关闭名单(Level):玩家 UUID -> 女仆 UUID -> false(仅存关闭项,缺失 = 跟随全局) */
+    public static final Supplier<AttachmentType<Map<String, Map<String, Boolean>>>> LEVEL_TOOL_CALL_MAID_OVERRIDES =
+            ATTACHMENT_TYPES.register("level_tool_call_maid_overrides", SelfTalkAttachments::buildLevelMaidOverrides);
+
     /**
      * 女仆自话回复指纹集（来源判定用，挂女仆实体）。
      * <p>
@@ -136,6 +163,14 @@ public final class SelfTalkAttachments {
         return AttachmentType.builder((Supplier<Map<String, Map<String, Boolean>>>) HashMap::new)
                 .serialize(Codec.unboundedMap(Codec.STRING,
                         Codec.unboundedMap(Codec.STRING, Codec.BOOL)))
+                .build();
+    }
+
+    /** Level 两级名单的 builder(字符串版)：外层玩家 UUID -> 内层女仆 UUID -> Prompt 文本 */
+    private static AttachmentType<Map<String, Map<String, String>>> buildLevelMaidStringMap() {
+        return AttachmentType.builder((Supplier<Map<String, Map<String, String>>>) HashMap::new)
+                .serialize(Codec.unboundedMap(Codec.STRING,
+                        Codec.unboundedMap(Codec.STRING, Codec.STRING)))
                 .build();
     }
 

@@ -40,6 +40,12 @@ public final class SelfTalkClothConfig {
                 .setTooltip(Component.translatable("config.maid_self_talk.player_option_enabled.tooltip"))
                 .setSaveConsumer(v -> saveBool(Config.PLAYER_OPTION_ENABLED, v))
                 .build());
+        main.add(entryBuilder.startBooleanToggle(Component.translatable("config.maid_self_talk.tool_call_enabled"),
+                        Config.TOOL_CALL_ENABLED.get())
+                .setDefaultValue(false)
+                .setTooltip(Component.translatable("config.maid_self_talk.tool_call_enabled.tooltip"))
+                .setSaveConsumer(v -> saveBool(Config.TOOL_CALL_ENABLED, v))
+                .build());
 
         main.add(stateCategory(entryBuilder, "config.maid_self_talk.state_owner_online",
                 Config.STATE1_ENABLED, Config.STATE1_MIN_INTERVAL, Config.STATE1_MAX_INTERVAL,
