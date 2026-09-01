@@ -450,6 +450,10 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     @Override
     public void tick() {
         super.tick();
+        // 1.20.1 的 Screen.tick() 为空实现、不传播子控件，需手动驱动输入框 tick（推进光标闪烁）；
+        // 1.21.1 的 MultiLineEditBox 无 tick 方法，neo 线无此调用
+        this.globalPromptBox.tick();
+        this.maidPromptBox.tick();
         // 焦点从某个输入框切出时保存（界面关闭另有 onClose 兜底）
         AbstractWidget focused = this.getFocused() instanceof AbstractWidget w ? w : null;
         if (this.lastFocusedBox != null && this.lastFocusedBox != focused) {
@@ -564,7 +568,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
      * 可整体禁用编辑的多行输入框。
      * {@link MultiLineEditBox} 的 {@code active} 标志不拦截编辑——mouseClicked/keyPressed/charTyped
      * 均不检查 active，点击仍会夺焦并接受输入，因此置灰必须用显式编辑闸门实现。
-     * 滚动浏览不受影响（禁用后仍可查看已填内容）。
+     * 滚轮滚动不受影响（禁用后仍可查看已填内容；滚动条拖拽走 mouseDragged，会被闸门一并拦截）。
      */
     private static class GuardedMultiLineEditBox extends MultiLineEditBox {
 
