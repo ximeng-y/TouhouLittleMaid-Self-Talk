@@ -13,8 +13,10 @@ import net.neoforged.neoforge.common.ModConfigSpec;
 public final class Config {
     /** 总开关 */
     public static ModConfigSpec.BooleanValue ENABLED;
-    /** 是否允许玩家独立设置（关闭后玩家设置项置灰且视为启用） */
+    /** 是否允许玩家自定义配置（关闭后玩家设置项置灰，自话/互聊视为启用，自定义 Prompt 不注入、Tool 不开启） */
     public static ModConfigSpec.BooleanValue PLAYER_OPTION_ENABLED;
+    /** 是否允许女仆的自话/互聊真正调用工具（Tool 功能总闸，玩家层面开关在此基础上二次约束） */
+    public static ModConfigSpec.BooleanValue TOOL_CALL_ENABLED;
 
     /** 态 1：主人在线 */
     public static ModConfigSpec.BooleanValue STATE1_ENABLED;
@@ -82,8 +84,15 @@ public final class Config {
         builder.push("general");
         ENABLED = builder.comment("总开关，默认关闭。开启后女仆才会自言自语/欢迎/对话")
                 .define("enabled", false);
-        PLAYER_OPTION_ENABLED = builder.comment("是否允许玩家独立设置女仆是否触发自言自语。关闭后玩家设置项置灰，且视为启用")
+        PLAYER_OPTION_ENABLED = builder.comment("""
+                允许玩家自定义配置。玩家能否单独配置自己的女仆（自言自语、互聊、自定义 Prompt、Tool 调用）。
+                关闭后玩家设置项置灰，自话/互聊视为启用，自定义 Prompt 不注入、Tool 调用不开启。""")
                 .define("playerOptionEnabled", true);
+        TOOL_CALL_ENABLED = builder.comment("""
+                是否允许女仆的自言自语/互聊真正调用工具（切换工作任务、坐下、跟随等）。
+                开启后女仆可以在自话/互聊中改变游戏状态，并显著增加 token 消耗，默认关闭。
+                玩家层面的开关还需「允许玩家自定义配置」开启时才生效。""")
+                .define("toolCallEnabled", false);
         builder.pop();
 
         builder.push("state_owner_online");
