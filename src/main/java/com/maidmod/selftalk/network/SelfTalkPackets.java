@@ -21,8 +21,9 @@ import java.util.UUID;
  */
 public final class SelfTalkPackets {
 
-    // v4：新增「睡觉时安静」三个消息，升版让不匹配版本在协商期被拒绝
-    private static final String PROTOCOL_VERSION = "4";
+    // v5：新增「自定义 Prompt」与「Tool 调用」共 6 个消息；不做向后兼容（既定决策），
+    // 升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
+    private static final String PROTOCOL_VERSION = "5";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MaidSelfTalkMod.MODID, "main"),
@@ -30,6 +31,8 @@ public final class SelfTalkPackets {
 
     /** 每玩家每秒最多处理的设置包数（正常 UI 操作远低于此，仅防包风暴） */
     private static final int MAX_CONFIG_PACKETS_PER_SECOND = 20;
+    /** 自定义 Prompt 服务端存储上限（字符）：界面输入框同步限长，流侧另有 600 兜底 */
+    private static final int MAX_CUSTOM_PROMPT_LENGTH = 500;
     /** 玩家 UUID -> [上次处理的秒, 该秒内处理数]（仅服务端主线程访问；玩家登出时随 removeRateEntry 清理） */
     private static final Map<UUID, long[]> PACKET_RATE = new HashMap<>();
 
@@ -66,6 +69,24 @@ public final class SelfTalkPackets {
         CHANNEL.registerMessage(nextId++, SleepQuietConfigResponseMessage.class,
                 SleepQuietConfigResponseMessage::encode, SleepQuietConfigResponseMessage::decode,
                 SleepQuietConfigResponseMessage::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(nextId++, CustomPromptConfigRequestMessage.class,
+                CustomPromptConfigRequestMessage::encode, CustomPromptConfigRequestMessage::decode,
+                CustomPromptConfigRequestMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, CustomPromptConfigSetMessage.class,
+                CustomPromptConfigSetMessage::encode, CustomPromptConfigSetMessage::decode,
+                CustomPromptConfigSetMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, CustomPromptConfigResponseMessage.class,
+                CustomPromptConfigResponseMessage::encode, CustomPromptConfigResponseMessage::decode,
+                CustomPromptConfigResponseMessage::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(nextId++, ToolConfigRequestMessage.class,
+                ToolConfigRequestMessage::encode, ToolConfigRequestMessage::decode,
+                ToolConfigRequestMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, ToolConfigSetMessage.class,
+                ToolConfigSetMessage::encode, ToolConfigSetMessage::decode,
+                ToolConfigSetMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, ToolConfigResponseMessage.class,
+                ToolConfigResponseMessage::encode, ToolConfigResponseMessage::decode,
+                ToolConfigResponseMessage::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     /** 每玩家每秒限流：防恶意客户端包风暴（正常设置界面操作远低于该频率） */
@@ -92,6 +113,22 @@ public final class SelfTalkPackets {
     /** 玩家登出时清理限流条目，防长期多人服务端内存缓慢增长 */
     public static void removeRateEntry(UUID playerUuid) {
         PACKET_RATE.remove(playerUuid);
+    }
+
+    /**
+     * Prompt 写入清洗：长度截断 500、去除 NUL 与 CR（防超大包与控制字符污染存档）。
+     * 段标签/零宽字符的剥除不在此处——那是请求注入时的职责（SegmentTags.stripTagsFromPlayerInput），
+     * 界面与存档保留玩家原文。
+     */
+    static String sanitizePromptText(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String cleaned = raw.replace("\0", "").replace("\r", "");
+        if (cleaned.length() > MAX_CUSTOM_PROMPT_LENGTH) {
+            cleaned = cleaned.substring(0, MAX_CUSTOM_PROMPT_LENGTH);
+        }
+        return cleaned;
     }
 
     /**

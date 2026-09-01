@@ -1,8 +1,10 @@
 package com.maidmod.selftalk.client;
 
+import com.maidmod.selftalk.network.CustomPromptConfigResponseMessage;
 import com.maidmod.selftalk.network.InterChatConfigResponseMessage;
 import com.maidmod.selftalk.network.SelfTalkConfigResponseMessage;
 import com.maidmod.selftalk.network.SleepQuietConfigResponseMessage;
+import com.maidmod.selftalk.network.ToolConfigResponseMessage;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -37,6 +39,24 @@ public final class SelfTalkPlayerSettingsClient {
         Minecraft mc = Minecraft.getInstance();
         if (mc.screen instanceof SelfTalkPlayerSettingsScreen screen) {
             screen.applySleepQuietResponse(msg.isGlobalEnabled(), msg.isMaidEnabled());
+        }
+    }
+
+    /** 收到服务端自定义 Prompt 设置响应后，刷新界面 */
+    public static void onCustomPromptConfigResponse(CustomPromptConfigResponseMessage msg) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof SelfTalkPlayerSettingsScreen screen) {
+            screen.applyCustomPromptResponse(msg.isAdminEnabled(), msg.getGlobalPrompt(),
+                    msg.getMaidPrompt(), msg.isOverrideEnabled());
+        }
+    }
+
+    /** 收到服务端 Tool 调用设置响应后，刷新界面 */
+    public static void onToolConfigResponse(ToolConfigResponseMessage msg) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof SelfTalkPlayerSettingsScreen screen) {
+            screen.applyToolResponse(msg.isAdminEnabled(), msg.isToolAdminEnabled(),
+                    msg.isGlobalEnabled(), msg.isMaidEnabled());
         }
     }
 }
