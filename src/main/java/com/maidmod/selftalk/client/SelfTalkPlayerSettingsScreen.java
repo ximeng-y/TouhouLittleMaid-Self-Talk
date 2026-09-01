@@ -565,7 +565,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
      * 可整体禁用编辑的多行输入框。
      * {@link MultiLineEditBox} 的 {@code active} 标志不拦截编辑——mouseClicked/keyPressed/charTyped
      * 均不检查 active，点击仍会夺焦并接受输入，因此置灰必须用显式编辑闸门实现。
-     * 滚动浏览不受影响（禁用后仍可查看已填内容）。
+     * 滚轮滚动不受影响（禁用后仍可查看已填内容；滚动条拖拽走 mouseDragged，会被闸门一并拦截）。
      */
     private static class GuardedMultiLineEditBox extends MultiLineEditBox {
 
