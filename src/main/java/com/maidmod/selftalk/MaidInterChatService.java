@@ -46,7 +46,11 @@ public final class MaidInterChatService {
             }
         }
         String prompt = isResponder ? SelfTalkPrompts.INTER_CHAT_RESPONDER : SelfTalkPrompts.INTER_CHAT_INITIATOR;
-        prompt = prompt + SelfTalkContexts.languageInstruction(language) + SelfTalkContexts.buildRandomContext(maid);
+        // 拼装顺序与自话同构：硬编码提示词 + 语言指令 + Tool 策略段(互聊约束行) + 自定义 Prompt + 随机情境
+        prompt = prompt + SelfTalkContexts.languageInstruction(language)
+                + SelfTalkContexts.toolPolicyBlock(maid, language, true)
+                + SelfTalkContexts.customPromptBlock(maid, language)
+                + SelfTalkContexts.buildRandomContext(maid);
         String fullPrompt = UserPromptContexts.addContext(maid, prompt);
         messages.add(LLMMessage.userChat(maid, fullPrompt));
         try { HistoryMessagesCheck.checkMessages(messages); } catch (Throwable t) { MaidSelfTalkMod.LOGGER.warn("HistoryMessagesCheck after prompt failed for inter-chat, skipped", t); return false; }
@@ -55,7 +59,9 @@ public final class MaidInterChatService {
         state.interChatPending = true;
         state.interChatPendingSinceTick = maid.level().getServer().getTickCount();
         LLMClient client = site.client();
-        InterChatCallback callback = new InterChatCallback(chatManager, messages, peer, peerText, broadcastRange, isResponder, chainRound);
+        // Tool 判定在派发时取（dispatcher 顺延队列是延迟派发的，入队时不判定）
+        boolean toolEnabled = PlayerSettingsStore.isToolCallEnabledForMaid(maid.level().getServer(), maid);
+        InterChatCallback callback = new InterChatCallback(chatManager, messages, peer, peerText, broadcastRange, isResponder, chainRound, toolEnabled);
         try { client.chat(callback); } catch (Throwable t) { state.interChatPending = false; state.interChatPendingSinceTick = -1; MaidSelfTalkMod.LOGGER.warn("Failed to dispatch inter-chat request for maid {}", maid.getId(), t); return false; }
         return true;
     }
