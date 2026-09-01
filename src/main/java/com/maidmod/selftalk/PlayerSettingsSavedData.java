@@ -38,6 +38,16 @@ public final class PlayerSettingsSavedData extends SavedData {
     private final Map<String, Boolean> sleepQuietEnabled = new HashMap<>();
     /** 睡觉时安静单只名单（值恒 true 安静项，仅全局关闭时生效） */
     private final Map<String, Map<String, Boolean>> sleepQuietMaidOverrides = new HashMap<>();
+    /** 自定义 Prompt 全局段：玩家 UUID -> Prompt 文本（空串条目不落盘） */
+    private final Map<String, String> customPromptGlobal = new HashMap<>();
+    /** 自定义 Prompt 单只段：玩家 UUID -> 女仆 UUID -> Prompt 文本（空串条目不落盘） */
+    private final Map<String, Map<String, String>> customPromptMaid = new HashMap<>();
+    /** 自定义 Prompt「全局覆盖单只」开关（仅存 true 项，缺失 = 关闭） */
+    private final Map<String, Boolean> customPromptOverride = new HashMap<>();
+    /** Tool 调用玩家全局开关（仅存 true 项，缺失 = 关闭——Tool 玩家默认关闭） */
+    private final Map<String, Boolean> toolCallEnabled = new HashMap<>();
+    /** Tool 调用单只关闭名单（值恒 false 关闭项，缺失 = 跟随全局） */
+    private final Map<String, Map<String, Boolean>> toolCallMaidOverrides = new HashMap<>();
 
     private PlayerSettingsSavedData() {
     }
@@ -56,6 +66,11 @@ public final class PlayerSettingsSavedData extends SavedData {
         readMaidList(tag, "interChatMaidOverrides", data.interChatMaidOverrides);
         readGlobal(tag, "sleepQuietEnabled", data.sleepQuietEnabled);
         readMaidList(tag, "sleepQuietMaidOverrides", data.sleepQuietMaidOverrides);
+        readStringGlobal(tag, "customPromptGlobal", data.customPromptGlobal);
+        readMaidStringList(tag, "customPromptMaid", data.customPromptMaid);
+        readGlobal(tag, "customPromptOverride", data.customPromptOverride);
+        readGlobal(tag, "toolCallEnabled", data.toolCallEnabled);
+        readMaidList(tag, "toolCallMaidOverrides", data.toolCallMaidOverrides);
         return data;
     }
 
@@ -67,6 +82,11 @@ public final class PlayerSettingsSavedData extends SavedData {
         writeMaidList(tag, "interChatMaidOverrides", interChatMaidOverrides);
         writeGlobal(tag, "sleepQuietEnabled", sleepQuietEnabled);
         writeMaidList(tag, "sleepQuietMaidOverrides", sleepQuietMaidOverrides);
+        writeStringGlobal(tag, "customPromptGlobal", customPromptGlobal);
+        writeMaidStringList(tag, "customPromptMaid", customPromptMaid);
+        writeGlobal(tag, "customPromptOverride", customPromptOverride);
+        writeGlobal(tag, "toolCallEnabled", toolCallEnabled);
+        writeMaidList(tag, "toolCallMaidOverrides", toolCallMaidOverrides);
         return tag;
     }
 
@@ -123,6 +143,99 @@ public final class PlayerSettingsSavedData extends SavedData {
 
     public void setSleepQuietMaid(UUID playerUuid, UUID maidUuid, boolean quiet) {
         setMaidItem(sleepQuietMaidOverrides, playerUuid, maidUuid, quiet, true);
+    }
+
+    // ===== 自定义 Prompt =====
+
+    /** 玩家自定义 Prompt 全局段（缺失 = 空串，未填写） */
+    public String getCustomPromptGlobal(UUID playerUuid) {
+        return customPromptGlobal.getOrDefault(playerUuid.toString(), "");
+    }
+
+    /** 玩家自定义 Prompt 全局段：空白时移除键（回到缺省），非空才落盘 */
+    public void setCustomPromptGlobal(UUID playerUuid, String prompt) {
+        String key = playerUuid.toString();
+        if (prompt == null || prompt.isBlank()) {
+            customPromptGlobal.remove(key);
+        } else {
+            customPromptGlobal.put(key, prompt);
+        }
+        setDirty();
+    }
+
+    /** 单只自定义 Prompt（缺失 = 空串，未填写） */
+    public String getCustomPromptForMaid(UUID playerUuid, UUID maidUuid) {
+        Map<String, String> list = customPromptMaid.get(playerUuid.toString());
+        return list == null ? "" : list.getOrDefault(maidUuid.toString(), "");
+    }
+
+    /** 单只自定义 Prompt：空白时移除条目（内层空则移除外层键），非空才落盘 */
+    public void setCustomPromptForMaid(UUID playerUuid, UUID maidUuid, String prompt) {
+        String playerKey = playerUuid.toString();
+        String maidKey = maidUuid.toString();
+        Map<String, String> list = customPromptMaid.get(playerKey);
+        if (list == null) {
+            if (prompt == null || prompt.isBlank()) {
+                return;
+            }
+            list = new HashMap<>();
+        }
+        if (prompt == null || prompt.isBlank()) {
+            list.remove(maidKey);
+        } else {
+            list.put(maidKey, prompt);
+        }
+        // 内层空则移除外层键，避免残留空壳
+        if (list.isEmpty()) {
+            customPromptMaid.remove(playerKey);
+        } else {
+            customPromptMaid.put(playerKey, list);
+        }
+        setDirty();
+    }
+
+    /** 「全局配置覆盖单只」开关（缺失 = false，两段都注入） */
+    public boolean isCustomPromptOverrideEnabled(UUID playerUuid) {
+        return customPromptOverride.getOrDefault(playerUuid.toString(), false);
+    }
+
+    /** 「全局配置覆盖单只」开关：开启存 true，关闭移除键（仅存非默认项） */
+    public void setCustomPromptOverride(UUID playerUuid, boolean enabled) {
+        setGlobalBool(customPromptOverride, playerUuid, enabled, false);
+    }
+
+    // ===== Tool 调用 =====
+
+    /** 玩家 Tool 全局开关（缺失 = false——Tool 玩家默认关闭，与自话/互聊极性相反） */
+    public boolean isToolCallGlobal(UUID playerUuid) {
+        return toolCallEnabled.getOrDefault(playerUuid.toString(), false);
+    }
+
+    /** 玩家 Tool 全局开关：开启存 true，关闭移除键（仅存非默认项） */
+    public void setToolCallGlobal(UUID playerUuid, boolean enabled) {
+        setGlobalBool(toolCallEnabled, playerUuid, enabled, false);
+    }
+
+    /** 单只 Tool 关闭名单是否包含该女仆（缺失 = 未关闭，跟随全局） */
+    public boolean isToolCallMaidDisabled(UUID playerUuid, UUID maidUuid) {
+        return isMaidListed(toolCallMaidOverrides, playerUuid, maidUuid);
+    }
+
+    /** 单只 Tool 关闭名单：关闭时存 false，恢复时移除 */
+    public void setToolCallMaidDisabled(UUID playerUuid, UUID maidUuid, boolean disabled) {
+        setMaidItem(toolCallMaidOverrides, playerUuid, maidUuid, disabled, false);
+    }
+
+    /** 某玩家自定义 Prompt 单只条数（容量上限检查用） */
+    public int countCustomPromptMaidEntries(UUID playerUuid) {
+        Map<String, String> list = customPromptMaid.get(playerUuid.toString());
+        return list == null ? 0 : list.size();
+    }
+
+    /** 某玩家 Tool 单只关闭名单条数（容量上限检查用） */
+    public int countToolCallMaidOverrides(UUID playerUuid) {
+        Map<String, Boolean> list = toolCallMaidOverrides.get(playerUuid.toString());
+        return list == null ? 0 : list.size();
     }
 
     public int countMaidOverrides(Map<String, Map<String, Boolean>> table, UUID playerUuid) {
@@ -253,6 +366,51 @@ public final class PlayerSettingsSavedData extends SavedData {
             for (Tag t : list) {
                 CompoundTag entry = (CompoundTag) t;
                 inner.put(entry.getString("u"), entry.getBoolean("v"));
+            }
+            target.put(playerKey, inner);
+        }
+    }
+
+    /** 全局字符串表序列化（自定义 Prompt 全局段） */
+    private static void writeStringGlobal(CompoundTag tag, String key, Map<String, String> map) {
+        CompoundTag sub = new CompoundTag();
+        for (Map.Entry<String, String> e : map.entrySet()) {
+            sub.putString(e.getKey(), e.getValue());
+        }
+        tag.put(key, sub);
+    }
+
+    private static void readStringGlobal(CompoundTag tag, String key, Map<String, String> target) {
+        CompoundTag sub = tag.getCompound(key);
+        for (String k : sub.getAllKeys()) {
+            target.put(k, sub.getString(k));
+        }
+    }
+
+    /** 两级字符串表序列化（自定义 Prompt 单只段）：玩家 UUID -> 女仆 UUID -> Prompt 文本 */
+    private static void writeMaidStringList(CompoundTag tag, String key, Map<String, Map<String, String>> table) {
+        CompoundTag sub = new CompoundTag();
+        for (Map.Entry<String, Map<String, String>> e : table.entrySet()) {
+            ListTag list = new ListTag();
+            for (Map.Entry<String, String> item : e.getValue().entrySet()) {
+                CompoundTag entry = new CompoundTag();
+                entry.putString("u", item.getKey());
+                entry.putString("v", item.getValue());
+                list.add(entry);
+            }
+            sub.put(e.getKey(), list);
+        }
+        tag.put(key, sub);
+    }
+
+    private static void readMaidStringList(CompoundTag tag, String key, Map<String, Map<String, String>> target) {
+        CompoundTag sub = tag.getCompound(key);
+        for (String playerKey : sub.getAllKeys()) {
+            ListTag list = sub.getList(playerKey, Tag.TAG_COMPOUND);
+            Map<String, String> inner = new HashMap<>();
+            for (Tag t : list) {
+                CompoundTag entry = (CompoundTag) t;
+                inner.put(entry.getString("u"), entry.getString("v"));
             }
             target.put(playerKey, inner);
         }

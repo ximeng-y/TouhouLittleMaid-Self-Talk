@@ -16,7 +16,9 @@ import java.util.UUID;
  * <ul>
  *   <li>自话/互聊全局开关缺省 true（触发），玩家关闭时存 false；</li>
  *   <li>睡觉时安静全局开关缺省 true（安静）——<b>极性与上相反</b>，玩家允许说话时存 false；</li>
- *   <li>自话/互聊单只名单只存 false（关闭项）；睡觉时安静单只名单只存 true（安静项）。</li>
+ *   <li>自话/互聊单只名单只存 false（关闭项）；睡觉时安静单只名单只存 true（安静项）；</li>
+ *   <li>自定义 Prompt 全局/单只段空串不落盘（缺失 = 未填写）；覆盖开关与 Tool 全局开关仅存 true；</li>
+ *   <li>Tool 单只名单只存 false（关闭项），Tool 全局缺省 false——玩家默认不开启 Tool。</li>
  * </ul>
  */
 public final class PlayerSettingsStore {
@@ -133,6 +135,80 @@ public final class PlayerSettingsStore {
         return isSleepQuietMaid(server, ownerUuid, maid.getUUID());
     }
 
+    // ===== 自定义 Prompt =====
+
+    /** 玩家自定义 Prompt 全局段（缺省 = 空串，未填写） */
+    public static String getCustomPromptGlobal(MinecraftServer server, UUID playerUuid) {
+        return data(server).getCustomPromptGlobal(playerUuid);
+    }
+
+    /** 玩家自定义 Prompt 全局段：空白时移除键（回到缺省），非空才落盘 */
+    public static void setCustomPromptGlobal(MinecraftServer server, UUID playerUuid, String prompt) {
+        data(server).setCustomPromptGlobal(playerUuid, prompt);
+    }
+
+    /** 单只自定义 Prompt（缺省 = 空串，未填写） */
+    public static String getCustomPromptForMaid(MinecraftServer server, UUID playerUuid, UUID maidUuid) {
+        return data(server).getCustomPromptForMaid(playerUuid, maidUuid);
+    }
+
+    /** 单只自定义 Prompt：空白时移除条目（内层空则移除外层键），非空才落盘 */
+    public static void setCustomPromptForMaid(MinecraftServer server, UUID playerUuid, UUID maidUuid, String prompt) {
+        data(server).setCustomPromptForMaid(playerUuid, maidUuid, prompt);
+    }
+
+    /** 「全局配置覆盖单只」开关（缺省 = false，两段都注入） */
+    public static boolean isCustomPromptOverrideEnabled(MinecraftServer server, UUID playerUuid) {
+        return data(server).isCustomPromptOverrideEnabled(playerUuid);
+    }
+
+    /** 「全局配置覆盖单只」开关：开启存 true，关闭移除键（仅存非默认项） */
+    public static void setCustomPromptOverride(MinecraftServer server, UUID playerUuid, boolean enabled) {
+        data(server).setCustomPromptOverride(playerUuid, enabled);
+    }
+
+    // ===== Tool 调用 =====
+
+    /** 玩家 Tool 全局开关（缺省 = false——Tool 玩家默认关闭，与自话/互聊极性相反） */
+    public static boolean isToolCallGlobal(MinecraftServer server, UUID playerUuid) {
+        return data(server).isToolCallGlobal(playerUuid);
+    }
+
+    /** 玩家 Tool 全局开关：开启存 true，关闭移除键（仅存非默认项） */
+    public static void setToolCallGlobal(MinecraftServer server, UUID playerUuid, boolean enabled) {
+        data(server).setToolCallGlobal(playerUuid, enabled);
+    }
+
+    /** 单只 Tool 关闭名单是否包含该女仆（缺省 = 未关闭，跟随全局） */
+    public static boolean isToolCallMaidDisabled(MinecraftServer server, UUID playerUuid, UUID maidUuid) {
+        return data(server).isToolCallMaidDisabled(playerUuid, maidUuid);
+    }
+
+    /** 单只 Tool 关闭名单：关闭时存 false，恢复时移除 */
+    public static void setToolCallMaidDisabled(MinecraftServer server, UUID playerUuid, UUID maidUuid, boolean disabled) {
+        data(server).setToolCallMaidDisabled(playerUuid, maidUuid, disabled);
+    }
+
+    /**
+     * 女仆 Tool 调用有效值（触发侧统一判定口，须在派发时调用）。
+     * <p>
+     * 有效 = 管理员 Tool 总闸 && 管理员玩家配置开关 && 玩家全局开关（缺省 false）&& 单只未被关闭。
+     * 注意极性：管理员关闭「允许玩家自定义配置」时自话/互聊<b>视为启用</b>，
+     * Tool 恰恰相反<b>视为关闭</b>——Tool 玩家默认关闭，管理员禁用玩家配置时不应替玩家打开。
+     * 无主女仆同样不开启。
+     */
+    public static boolean isToolCallEnabledForMaid(MinecraftServer server, EntityMaid maid) {
+        if (!Config.TOOL_CALL_ENABLED.get() || !Config.PLAYER_OPTION_ENABLED.get()) {
+            return false;
+        }
+        UUID ownerUuid = maid.getOwnerUUID();
+        if (ownerUuid == null) {
+            return false;
+        }
+        return isToolCallGlobal(server, ownerUuid)
+                && !isToolCallMaidDisabled(server, ownerUuid, maid.getUUID());
+    }
+
     // ===== 迁移专用 =====
 
     /** 该玩家自话组是否已在 SavedData 有条目（已迁移过则迁移时以 SavedData 为准） */
@@ -173,5 +249,15 @@ public final class PlayerSettingsStore {
     /** 某玩家睡觉安静单只名单条数（上限检查用） */
     public static int countSleepQuietMaidOverrides(MinecraftServer server, UUID playerUuid) {
         return data(server).countSleepQuietMaidOverrides(playerUuid);
+    }
+
+    /** 某玩家自定义 Prompt 单只条数（上限检查用；与布尔名单各自计数，上限一致） */
+    public static int countCustomPromptMaidEntries(MinecraftServer server, UUID playerUuid) {
+        return data(server).countCustomPromptMaidEntries(playerUuid);
+    }
+
+    /** 某玩家 Tool 单只关闭名单条数（上限检查用） */
+    public static int countToolCallMaidOverrides(MinecraftServer server, UUID playerUuid) {
+        return data(server).countToolCallMaidOverrides(playerUuid);
     }
 }
