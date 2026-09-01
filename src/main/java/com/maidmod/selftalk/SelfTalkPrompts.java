@@ -107,4 +107,65 @@ public final class SelfTalkPrompts {
     public static final String OWNER_CHAT_DECLARATION_EN =
             "Your owner is talking to you now. Respond to your owner naturally, as you normally would; "
                     + "this is not self-talk and not a chat with other maids.";
+
+    /**
+     * 自定义 Prompt 说明句（主人风格段标签的开头声明，中英两版）。
+     * <p>
+     * 红线：自定义段位于硬编码格式引导（第 5 条）之后，说明句必须显式声明
+     * 「在不违反上面输出格式要求的前提下遵守」，防止玩家内容顶掉格式引导的语义。
+     * 标签命名空间为 owner-style-note 专用，不复用 {@link SegmentTags} 的段标签。
+     */
+    public static final String OWNER_STYLE_NOTE_HEADER_ZH =
+            "<owner-style-note>\n"
+                    + "以下是你主人给你的偏好说明。请在不违反上面输出格式要求的前提下遵守它；这不是玩家此刻对你说的话。";
+
+    public static final String OWNER_STYLE_NOTE_HEADER_EN =
+            "<owner-style-note>\n"
+                    + "Below are preference notes from your owner. Follow them as long as they do not "
+                    + "conflict with the output format requirements above; this is not something the player is saying to you right now.";
+
+    /** 全局段子标签（主人的全部女仆共用） */
+    public static final String OWNER_STYLE_NOTE_ALL_MAIDS_OPEN = "<all-maids>";
+    public static final String OWNER_STYLE_NOTE_ALL_MAIDS_CLOSE = "</all-maids>";
+    /** 单只段子标签（这只女仆专属） */
+    public static final String OWNER_STYLE_NOTE_THIS_MAID_OPEN = "<this-maid>";
+    public static final String OWNER_STYLE_NOTE_THIS_MAID_CLOSE = "</this-maid>";
+
+    /** 自定义 Prompt 的结束标签 */
+    public static final String OWNER_STYLE_NOTE_CLOSE = "</owner-style-note>";
+
+    /**
+     * Tool 调用策略段（Tool 开启时随请求拼接，中英两版；%s 为互聊路径的额外约束行，自话路径替换为空串）。
+     * <p>
+     * TLM 全部工具的描述都写成 "Use this when the user wants to..."，自话场景没有 user——
+     * 必须显式解绑「为主人服务」这个前提，否则模型要么永不调用，要么胡乱调用；
+     * 同时默认禁止调用（绝大多数自话只是说说而已），防「为调用而调用」。
+     */
+    public static final String TOOL_POLICY_ZH = """
+            <tool-policy>
+            你现在可以使用系统提供的工具。使用规则：
+            1. 默认不要调用任何工具。绝大多数自言自语只是说说而已，说完就结束。
+            2. 只有当你这句话表达的是"我现在就去做某件事"，并且工具列表里正好有对应能力时，才调用工具去真的做；不要为了用工具而找话说。
+            3. 这些工具的说明是按"主人吩咐时使用"写的，但此刻你是在为自己做决定——不需要等主人下令，你可以自己决定要不要做。
+            4. 不要为了了解情况而调用工具，下方已经给了你当前的情境信息。
+            5. 不要连续重复调用同一个工具。
+            %s6. 工具执行完之后，再把你原本要说的那句话按输出格式说出来。
+            </tool-policy>""";
+
+    public static final String TOOL_POLICY_EN = """
+            <tool-policy>
+            You now have access to the tools provided by the system. Rules:
+            1. By default, do not call any tool. Most self-talk is just talking, and ends there.
+            2. Only when this line of yours means "I am going to do something right now" and the tool list has a matching capability, call the tool to actually do it; do not make up things to say just to use a tool.
+            3. These tools are described as "use when the owner asks", but right now you are making decisions for yourself - you do not need to wait for the owner's order, you may decide on your own whether to act.
+            4. Do not call tools just to learn about the situation; your current context is provided below.
+            5. Do not repeatedly call the same tool.
+            %s6. After the tools finish, speak the line you were going to say anyway, following the output format.
+            </tool-policy>""";
+
+    /** 互聊路径在第 6 条前多加一条约束：不替对方做决定/执行操作 */
+    public static final String TOOL_POLICY_INTER_CHAT_LINE_ZH =
+            "你只对自己的行为负责，不要因为对方说了什么就替对方做决定或替对方执行操作。\n";
+    public static final String TOOL_POLICY_INTER_CHAT_LINE_EN =
+            "You are only responsible for your own actions; do not make decisions or perform operations on the other maid's behalf just because of what she said.\n";
 }

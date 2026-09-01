@@ -3,8 +3,10 @@ package com.maidmod.selftalk;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.response.ResponseChat;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.openai.response.Message;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
@@ -14,6 +16,7 @@ import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.common.NeoForge;
 
 import java.net.http.HttpRequest;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.UUID;
@@ -23,7 +26,9 @@ import java.util.UUID;
  * <p>
  * 与玩家 chat 的裸 {@link LLMCallback} 的区别：
  * <ul>
- *   <li>{@code needAddTools = false}：模型看不到任何工具定义，天然不会调用 tool（无需在提示词中禁止）；</li>
+ *   <li>{@code needAddTools} 由 Tool 开关判定决定（默认 false）：关闭时模型看不到任何工具定义，
+ *       天然不会调用 tool；开启时 TLM 原生工具循环接管（中间轮不上屏，仅思考气泡副文本），
+ *       最终 onSuccess 的回答才走本 mod 的广播；</li>
  *   <li>{@code shouldCacheTokenUsage} 保持默认 {@code true}：自话会更新女仆的 lastChatTokenUsage，
  *       从而占用上下文压缩额度——但压缩只在玩家 chat 时触发（tryCompressBeforeChat 仅由 chat() 调用），
  *       因此自话即使撑大上下文也不会立即触发压缩；</li>
@@ -42,15 +47,77 @@ public class SelfTalkCallback extends LLMCallback {
     private final double broadcastRange;
     /** 本次回复的 assistant 消息（响应线程在父类写历史后立即捕获，供遗忘机制识别） */
     private LLMMessage lastAssistantMessage;
+    /**
+     * 本轮工具过程写入 TLM 历史的消息引用（assistant(tool_calls) 与 tool 结果）。
+     * 响应线程写、主线程删（deque 为 LinkedBlockingDeque，跨线程安全）；
+     * 最终回答后成对全删——「本轮工具相关的全删」天然保证配对，绝不留下孤立的
+     * assistant(tool_calls) 或 tool（孤立记录会让后续请求被 LLM 服务端 400 拒绝）。
+     */
+    private final List<LLMMessage> toolHistoryMessages = new ArrayList<>();
 
     public SelfTalkCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
-                            boolean welcome, int keepSelfTalkCount, double broadcastRange) {
+                            boolean welcome, int keepSelfTalkCount, double broadcastRange, boolean toolEnabled) {
         super(chatManager, messages);
         this.welcome = welcome;
         this.keepSelfTalkCount = keepSelfTalkCount;
         this.broadcastRange = broadcastRange;
-        // 模型看不到工具定义，天然不会调用任何 tool
-        this.needAddTools = false;
+        // Tool 关闭时模型看不到工具定义；开启时由 TLM 工具循环接管
+        this.needAddTools = toolEnabled;
+    }
+
+    /**
+     * 工具轮次：父类写 assistant(tool_calls) 历史后捕获队头引用，供最终回答后成对删除。
+     * CappedQueue 新消息在队头（offerFirst）。
+     */
+    @Override
+    public void onFunctionCall(Message choice, LLMClient client) {
+        super.onFunctionCall(choice, client);
+        captureToolHistoryHead(Role.ASSISTANT);
+    }
+
+    /**
+     * 工具结果：父类写 tool 历史后捕获队头引用，并刷新 pending 心跳
+     * （语义从「请求发起后 5 分钟超时」变为「最后一次工具活动后 5 分钟超时」，
+     * 防止 16 轮工具链被 SelfTalkHandler 的超时兜底误判空闲而并发派发第二个请求）。
+     */
+    @Override
+    public LLMCallback addToolResult(String result, String toolId) {
+        LLMCallback cb = super.addToolResult(result, toolId);
+        captureToolHistoryHead(Role.TOOL);
+        refreshPendingHeartbeat();
+        return cb;
+    }
+
+    /** 捕获刚写入历史的工具相关消息（队头 + role 校验，防交错抓取） */
+    private void captureToolHistoryHead(Role expected) {
+        LLMMessage head = getChatManager().getHistory().getDeque().peekFirst();
+        if (head != null && head.role() == expected) {
+            toolHistoryMessages.add(head);
+        }
+    }
+
+    /** 最终回答（或失败）后删除本轮全部工具过程消息；删完历史等价于「没发生过」，前缀缓存不受损 */
+    private void discardToolHistory() {
+        if (toolHistoryMessages.isEmpty()) {
+            return;
+        }
+        getChatManager().getHistory().getDeque().removeAll(toolHistoryMessages);
+        toolHistoryMessages.clear();
+    }
+
+    /** 工具轮次心跳：刷新 pending 起始 tick（须在服务端主线程写状态） */
+    private void refreshPendingHeartbeat() {
+        Runnable beat = () -> {
+            SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
+            if (state.selfTalkPending) {
+                state.selfTalkPendingSinceTick = getMaid().level().getServer().getTickCount();
+            }
+        };
+        if (isOnServerThread()) {
+            beat.run();
+        } else {
+            runOnServerThread(beat);
+        }
     }
 
     @Override
@@ -69,8 +136,9 @@ public class SelfTalkCallback extends LLMCallback {
         runOnServerThread(() -> SelfTalkProvenance.registerSelfTalk(getMaid(), this.lastAssistantMessage));
         if (this.lastAssistantMessage == null) {
             // 无消息可捕获（空白回复）或校验未过（罕见交错）：
-            // 跳过事件/遗忘/广播，复位 pending 防卡死
+            // 跳过事件/遗忘/广播，复位 pending 防卡死；工具过程同样丢弃（可能留有半截记录）
             runOnServerThread(() -> {
+                discardToolHistory();
                 SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
                 state.selfTalkPending = false;
                 state.selfTalkPendingSinceTick = -1;
@@ -79,6 +147,8 @@ public class SelfTalkCallback extends LLMCallback {
         }
         EntityMaid maid = getMaid();
         Runnable finish = () -> {
+            // 工具过程从历史里全部丢掉（成对删除，先于遗忘 trim 执行）
+            discardToolHistory();
             NeoForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, responseChat.getChatText(), welcome));
             MaidSelfTalkService.onSelfTalkFinished(maid, this);
             broadcastToNearby(maid, responseChat.getChatText());
@@ -110,6 +180,8 @@ public class SelfTalkCallback extends LLMCallback {
     public void onFailure(HttpRequest request, Throwable throwable, int errorCode) {
         super.onFailure(request, throwable, errorCode);
         runOnServerThread(() -> {
+            // 失败链同样丢弃工具过程，否则历史里留下半截工具记录（孤立 tool_calls/tool → 后续 400）
+            discardToolHistory();
             SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
             state.selfTalkPending = false;
             state.selfTalkPendingSinceTick = -1;

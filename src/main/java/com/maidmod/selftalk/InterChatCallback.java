@@ -3,7 +3,10 @@ package com.maidmod.selftalk;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.response.ResponseChat;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.openai.response.Message;
 import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.ChatFormatting;
@@ -13,6 +16,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.AABB;
 
 import java.net.http.HttpRequest;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,17 +28,70 @@ public class InterChatCallback extends LLMCallback {
     private final boolean isResponder;
     /** 本条消息在互聊链上的序号（发起者消息为 1），用于链长护栏 */
     private final int chainRound;
+    /**
+     * 本轮工具过程写入 TLM 历史的消息引用（与 SelfTalkCallback 同构）。
+     * 最终回答后成对全删——assistant(tool_calls) 与 tool 结果必须配对删除，
+     * 孤立记录会让后续请求被 LLM 服务端 400 拒绝（HistoryMessagesCheck 不清洗孤立 tool_calls）。
+     */
+    private final List<LLMMessage> toolHistoryMessages = new ArrayList<>();
 
     public InterChatCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
                              EntityMaid peer, String peerText,
-                             double broadcastRange, boolean isResponder, int chainRound) {
+                             double broadcastRange, boolean isResponder, int chainRound, boolean toolEnabled) {
         super(chatManager, messages);
         this.peer = peer;
         this.peerText = peerText;
         this.broadcastRange = broadcastRange;
         this.isResponder = isResponder;
         this.chainRound = chainRound;
-        this.needAddTools = false;
+        this.needAddTools = toolEnabled;
+    }
+
+    /** 工具轮次：父类写 assistant(tool_calls) 历史后捕获队头引用（CappedQueue 新消息在队头） */
+    @Override
+    public void onFunctionCall(Message choice, LLMClient client) {
+        super.onFunctionCall(choice, client);
+        captureToolHistoryHead(Role.ASSISTANT);
+    }
+
+    /** 工具结果：捕获队头引用并刷新互聊 pending 心跳（超时语义改为「最后一次工具活动后 5 分钟」） */
+    @Override
+    public LLMCallback addToolResult(String result, String toolId) {
+        LLMCallback cb = super.addToolResult(result, toolId);
+        captureToolHistoryHead(Role.TOOL);
+        refreshPendingHeartbeat();
+        return cb;
+    }
+
+    private void captureToolHistoryHead(Role expected) {
+        LLMMessage head = getChatManager().getHistory().getDeque().peekFirst();
+        if (head != null && head.role() == expected) {
+            toolHistoryMessages.add(head);
+        }
+    }
+
+    /** 最终回答（或失败）后删除本轮全部工具过程消息（成对删除，绝不留下孤立半截记录） */
+    private void discardToolHistory() {
+        if (toolHistoryMessages.isEmpty()) {
+            return;
+        }
+        getChatManager().getHistory().getDeque().removeAll(toolHistoryMessages);
+        toolHistoryMessages.clear();
+    }
+
+    /** 工具轮次心跳：刷新互聊 pending 起始 tick（须在服务端主线程写状态） */
+    private void refreshPendingHeartbeat() {
+        Runnable beat = () -> {
+            SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
+            if (state.interChatPending) {
+                state.interChatPendingSinceTick = getMaid().level().getServer().getTickCount();
+            }
+        };
+        if (isOnServerThread()) {
+            beat.run();
+        } else {
+            runOnServerThread(beat);
+        }
     }
 
     @Override
@@ -57,6 +114,8 @@ public class InterChatCallback extends LLMCallback {
         }
         EntityMaid maid = getMaid();
         Runnable finish = () -> {
+            // 工具过程从历史里全部丢掉（成对删除，先于窗口同步执行）
+            discardToolHistory();
             SelfTalkState.State state = SelfTalkState.get(maid.getId());
             state.interChatPending = false;
             state.interChatPendingSinceTick = -1;
@@ -148,6 +207,8 @@ public class InterChatCallback extends LLMCallback {
     public void onFailure(HttpRequest request, Throwable throwable, int errorCode) {
         super.onFailure(request, throwable, errorCode);
         runOnServerThread(() -> {
+            // 失败链同样丢弃工具过程，否则历史里留下半截工具记录（孤立 tool_calls/tool → 后续 400）
+            discardToolHistory();
             SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
             state.interChatPending = false;
             state.interChatPendingSinceTick = -1;

@@ -8,6 +8,8 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.mixin.MaidAIChatManagerAccessor;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
@@ -15,6 +17,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -123,6 +126,78 @@ public final class SelfTalkContexts {
                         : "\n\nPlease always speak in " + name + (country.isEmpty() ? "" : " (" + country + ")") + ".";
             }
         };
+    }
+
+    /**
+     * 自定义 Prompt 注入块（功能 A）：主人全局段 + 单只段，置于语言指令之后、随机情境之前。
+     * <p>
+     * 语义（HANDOFF §3.1）：
+     * <ul>
+     *   <li>用女仆主人的设置（getOwnerUUID），无主女仆不注入；</li>
+     *   <li>「全局覆盖」开启且全局段非空时，跳过单只段（单只内容保留在存档，只是不注入）；</li>
+     *   <li>两段皆空返回空串——连外层标签都不出现，未使用该功能的玩家请求体逐字节不变；</li>
+     *   <li>注入前一律过 {@link SegmentTags#stripTagsFromPlayerInput}：玩家内容若含
+     *       &lt;/maid-self-chat&gt; 之类会提前闭合段标签、伪造段边界——这不是防提示词注入，
+     *       是防本 mod 的来源区分功能被破坏。</li>
+     * </ul>
+     * 该段位于 user 消息尾部、不进 system/历史，对前缀缓存只有尾部影响。
+     */
+    public static String customPromptBlock(EntityMaid maid, String language) {
+        UUID ownerUuid = maid.getOwnerUUID();
+        if (ownerUuid == null || !(maid.level() instanceof ServerLevel serverLevel)) {
+            return StringUtils.EMPTY;
+        }
+        MinecraftServer server = serverLevel.getServer();
+        String global = SegmentTags.stripTagsFromPlayerInput(
+                PlayerSettingsStore.getCustomPromptGlobal(server, ownerUuid));
+        String perMaid = SegmentTags.stripTagsFromPlayerInput(
+                PlayerSettingsStore.getCustomPromptForMaid(server, ownerUuid, maid.getUUID()));
+        boolean override = PlayerSettingsStore.isCustomPromptOverrideEnabled(server, ownerUuid);
+        if (override && !global.isBlank()) {
+            perMaid = StringUtils.EMPTY;
+        }
+        if (global.isBlank() && perMaid.isBlank()) {
+            return StringUtils.EMPTY;
+        }
+        StringBuilder sb = new StringBuilder("\n\n");
+        sb.append(isZh(language) ? SelfTalkPrompts.OWNER_STYLE_NOTE_HEADER_ZH
+                : SelfTalkPrompts.OWNER_STYLE_NOTE_HEADER_EN);
+        if (!global.isBlank()) {
+            sb.append('\n').append(SelfTalkPrompts.OWNER_STYLE_NOTE_ALL_MAIDS_OPEN)
+                    .append(global).append(SelfTalkPrompts.OWNER_STYLE_NOTE_ALL_MAIDS_CLOSE);
+        }
+        if (!perMaid.isBlank()) {
+            sb.append('\n').append(SelfTalkPrompts.OWNER_STYLE_NOTE_THIS_MAID_OPEN)
+                    .append(perMaid).append(SelfTalkPrompts.OWNER_STYLE_NOTE_THIS_MAID_CLOSE);
+        }
+        sb.append('\n').append(SelfTalkPrompts.OWNER_STYLE_NOTE_CLOSE);
+        return sb.toString();
+    }
+
+    /**
+     * Tool 调用策略注入块（功能 B）：仅在 Tool 有效开启时返回非空，置于自定义 Prompt 段之前。
+     * 判定口与回调的 needAddTools 同源（{@link PlayerSettingsStore#isToolCallEnabledForMaid}），
+     * 同一次派发内「带 tools 的请求必有策略段、不带 tools 的请求必无策略段」。
+     * 互聊路径追加「不替对方做决定」的约束行。
+     */
+    public static String toolPolicyBlock(EntityMaid maid, String language, boolean interChat) {
+        if (!(maid.level() instanceof ServerLevel serverLevel)) {
+            return StringUtils.EMPTY;
+        }
+        if (!PlayerSettingsStore.isToolCallEnabledForMaid(serverLevel.getServer(), maid)) {
+            return StringUtils.EMPTY;
+        }
+        String body = (isZh(language) ? SelfTalkPrompts.TOOL_POLICY_ZH : SelfTalkPrompts.TOOL_POLICY_EN)
+                .formatted(interChat
+                        ? (isZh(language) ? SelfTalkPrompts.TOOL_POLICY_INTER_CHAT_LINE_ZH
+                        : SelfTalkPrompts.TOOL_POLICY_INTER_CHAT_LINE_EN)
+                        : StringUtils.EMPTY);
+        return "\n\n" + body;
+    }
+
+    /** 说明句中英选择口径：与 OWNER_CHAT_DECLARATION 相同的语言起始码判定 */
+    private static boolean isZh(String language) {
+        return sanitizeLanguage(language).startsWith("zh");
     }
 
     /**

@@ -92,8 +92,13 @@ public final class MaidSelfTalkService {
         boolean ownerNearby = isOwnerNearby(maid);
         String prompt = welcome ? SelfTalkPrompts.WELCOME
                 : (ownerNearby ? SelfTalkPrompts.SELF_TALK_OWNER_NEARBY : SelfTalkPrompts.SELF_TALK);
-        // 随机纳入情境信息，让自话内容贴合当下、不同质化
-        prompt = prompt + SelfTalkContexts.languageInstruction(selfTalkLanguage) + SelfTalkContexts.buildRandomContext(maid);
+        // 拼装顺序：硬编码提示词 + 语言指令 + Tool 策略段(仅 Tool 开启时) + 自定义 Prompt(贴在指令主体后)
+        // + 随机情境(环境数据始终放最后)。自定义段不得进入 SelfTalkPrompts 常量、
+        // 也不得出现在格式引导(第 5 条)之前——见 SelfTalkPrompts 类注释红线
+        prompt = prompt + SelfTalkContexts.languageInstruction(selfTalkLanguage)
+                + SelfTalkContexts.toolPolicyBlock(maid, selfTalkLanguage, false)
+                + SelfTalkContexts.customPromptBlock(maid, selfTalkLanguage)
+                + SelfTalkContexts.buildRandomContext(maid);
 
         // 与玩家 chat 相同的 context 注入，保证消息结构与缓存前缀一致
         String message = UserPromptContexts.addContext(maid, prompt);
@@ -106,7 +111,9 @@ public final class MaidSelfTalkService {
 
         LLMClient client = site.client();
         try {
-            client.chat(new SelfTalkCallback(chatManager, messages, welcome, keep, broadcastRange));
+            // Tool 判定在派发时取（dispatcher 顺延队列是延迟派发的，入队时不判定）
+            boolean toolEnabled = PlayerSettingsStore.isToolCallEnabledForMaid(maid.level().getServer(), maid);
+            client.chat(new SelfTalkCallback(chatManager, messages, welcome, keep, broadcastRange, toolEnabled));
         } catch (Throwable t) {
             // client.chat 同步阶段可能抛异常（如 site.url 非法导致 URI.create 失败、header 构造异常）：
             // 清掉进行中标记避免该女仆自话永久卡死，绝不向上抛（调用方可能处于实体 tick 路径）
