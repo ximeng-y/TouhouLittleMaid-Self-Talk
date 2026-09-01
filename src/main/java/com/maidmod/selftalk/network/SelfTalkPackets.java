@@ -239,6 +239,11 @@ public final class SelfTalkPackets {
             if (!(player instanceof ServerPlayer serverPlayer && allowConfigPacket(serverPlayer.getUUID()))) {
                 return;
             }
+            // 管理员闸门（纵深防御）：关闭玩家自定义配置时拒绝写入，
+            // 注入侧另有同闸门兜底（已落盘的 Prompt 不会生效）
+            if (!Config.PLAYER_OPTION_ENABLED.get()) {
+                return;
+            }
             boolean hasPrompt = payload.prompt().isPresent();
             boolean hasOverride = payload.override().isPresent();
             // 意图互斥：prompt 与 override 恰有其一，否则拒绝
@@ -262,8 +267,11 @@ public final class SelfTalkPackets {
                 if (!isOwnedMaid(serverPlayer, payload.maidUuid().get())) {
                     return;
                 }
-                // Prompt 单只条目数上限（防恶意客户端伪造任意 UUID 无限撑大世界存档）
-                if (!prompt.isBlank() && PlayerSettingsStore.countMaidPromptEntries(
+                // Prompt 单只条目数上限（防恶意客户端伪造任意 UUID 无限撑大世界存档）；
+                // 已存在条目的改写不计数（与两个布尔名单 handler 的容量检查口径一致）
+                if (!prompt.isBlank() && PlayerSettingsStore.getCustomPromptForMaid(
+                        serverPlayer.server, serverPlayer.getUUID(), payload.maidUuid().get()).isBlank()
+                        && PlayerSettingsStore.countMaidPromptEntries(
                         serverPlayer.server, SelfTalkAttachments.LEVEL_CUSTOM_PROMPT_MAID,
                         serverPlayer.getUUID()) >= MAX_MAID_OVERRIDES) {
                     MaidSelfTalkMod.LOGGER.warn("Player {} custom prompt maid list full ({}), ignored",

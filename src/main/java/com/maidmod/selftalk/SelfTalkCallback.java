@@ -52,6 +52,12 @@ public class SelfTalkCallback extends LLMCallback {
      * 响应线程写、主线程删（deque 为 LinkedBlockingDeque，跨线程安全）；
      * 最终回答后成对全删——「本轮工具相关的全删」天然保证配对，绝不留下孤立的
      * assistant(tool_calls) 或 tool（孤立记录会让后续请求被 LLM 服务端 400 拒绝）。
+     * <p>
+     * 已知边界：TLM 的第三方 sub-agent 工具（EXTENSIONS.registerAITool 返回异体回调时）
+     * 在 {@code LLMCallback.executeSingleToolCall} 内直接 addToolHistory 占位结果，
+     * 不经过本类的 addToolResult 覆盖——该占位 tool 消息不会被捕获/删除，心跳也不刷新
+     * （TLM 自带 7 个工具全部经 addToolResult 返回同体回调，不触发此路径）。
+     * 残留记录天然构成完整 tool_calls+tool 对，无 400 风险；pending 由 5 分钟超时兜底复位。
      */
     private final List<LLMMessage> toolHistoryMessages = new ArrayList<>();
 

@@ -11,6 +11,7 @@ import com.maidmod.selftalk.network.SleepQuietConfigRequestPayload;
 import com.maidmod.selftalk.network.SleepQuietConfigSetPayload;
 import com.maidmod.selftalk.network.ToolConfigRequestPayload;
 import com.maidmod.selftalk.network.ToolConfigSetPayload;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -105,6 +106,11 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private MultiLineEditBox lastFocusedBox;
     /** 程序化 setValue 期间挂起 value listener（防误标 dirty） */
     private boolean suspendPromptListener = false;
+    // ===== 布局（init 计算，render 复用；resize 重建时刷新） =====
+    private int leftX;
+    private int rightX;
+    private int panelWidth;
+    private int colTop;
 
     public SelfTalkPlayerSettingsScreen(EntityMaid maid) {
         super(Component.translatable("config.maid_self_talk.screen.player_settings.title"));
@@ -125,13 +131,17 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
             panelW = 110;
         }
         // 左右两块（按钮列 + 间隔 + Prompt 面板）作为整体相对屏幕中线对称摆放
-        int leftX = this.width / 2 - (buttonW + COLUMN_GAP + panelW) / 2;
-        int rightX = leftX + buttonW + COLUMN_GAP;
+        this.leftX = this.width / 2 - (buttonW + COLUMN_GAP + panelW) / 2;
+        this.rightX = this.leftX + buttonW + COLUMN_GAP;
+        this.panelWidth = panelW;
 
         // 垂直：按钮列 8 枚（组内步进 20、组间步进 28）总高 184，矮屏时顶部钳制保证标题可见
-        int colTop = Math.max(this.height / 2 - 92, 30);
-        int titleY = colTop - 28;
-        int maidY = colTop - 16;
+        this.colTop = Math.max(this.height / 2 - 92, 30);
+        int titleY = this.colTop - 28;
+        int maidY = this.colTop - 16;
+        int leftX = this.leftX;
+        int rightX = this.rightX;
+        int colTop = this.colTop;
 
         // 组内 0 间隙（步进 20）、组间 8px（步进 28）；现有四组相对顺序不变，Tool 组追加在最后
         this.globalButton = addLeftButton(leftX, colTop, buttonW, 0, buttonW, 20,
@@ -185,6 +195,26 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                         "config.maid_self_talk.screen.player_settings.custom_prompt.override.tooltip")))
                 .build());
         refreshButtonState();
+    }
+
+    /**
+     * 窗口缩放：init 重建控件会清空输入框内容，先暂存当前值、重建后恢复。
+     * 否则关闭界面时 flush 会把「显示空 ≠ 基线」误判为用户清空，
+     * 静默发出空串 Set 包抹掉已保存的 Prompt（数据丢失路径）。
+     */
+    @Override
+    public void resize(Minecraft minecraft, int width, int height) {
+        String globalValue = this.globalPromptBox == null ? null : this.globalPromptBox.getValue();
+        String maidValue = this.maidPromptBox == null ? null : this.maidPromptBox.getValue();
+        super.resize(minecraft, width, height);
+        this.suspendPromptListener = true;
+        if (this.globalPromptBox != null && globalValue != null) {
+            this.globalPromptBox.setValue(globalValue);
+        }
+        if (this.maidPromptBox != null && maidValue != null) {
+            this.maidPromptBox.setValue(maidValue);
+        }
+        this.suspendPromptListener = false;
     }
 
     private Button addLeftButton(int leftX, int colTop, int width, int yOffset, int w, int h,
@@ -480,11 +510,20 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
-        int colTop = Math.max(this.height / 2 - 92, 30);
+        int colTop = this.colTop;
         graphics.drawCenteredString(this.font, this.title, this.width / 2, colTop - 28, 0xFFFFFF);
         graphics.drawCenteredString(this.font,
                 Component.translatable("config.maid_self_talk.screen.player_settings.maid", this.maid.getName()),
                 this.width / 2, colTop - 16, 0xAAAAAA);
+        // 两个输入框的区分标题（右面板顶部与单只段输入框上方）
+        if (this.globalPromptBox != null && this.maidPromptBox != null) {
+            graphics.drawString(this.font,
+                    Component.translatable("config.maid_self_talk.screen.player_settings.custom_prompt.global_title"),
+                    this.rightX, colTop, 0xFFFFFF);
+            graphics.drawString(this.font,
+                    Component.translatable("config.maid_self_talk.screen.player_settings.custom_prompt.maid_title"),
+                    this.rightX, colTop + 54, 0xFFFFFF);
+        }
         // 覆盖生效提示：全局段非空且覆盖开启时，单只段不会注入（输入框仍可编辑）
         if (this.overrideEnabled && this.globalPromptBox != null
                 && !this.globalPromptBox.getValue().isBlank()) {

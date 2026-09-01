@@ -143,6 +143,11 @@ public final class SelfTalkContexts {
      * 该段位于 user 消息尾部、不进 system/历史，对前缀缓存只有尾部影响。
      */
     public static String customPromptBlock(EntityMaid maid, String language) {
+        // 管理员闸门：关闭「允许玩家自定义配置」时不注入（存档里已保存的 Prompt 也不能生效），
+        // 与 Config 注释、lang 文案、界面置灰声明的语义一致
+        if (!Config.PLAYER_OPTION_ENABLED.get()) {
+            return StringUtils.EMPTY;
+        }
         UUID ownerUuid = maid.getOwnerUUID();
         if (ownerUuid == null || !(maid.level() instanceof ServerLevel serverLevel)) {
             return StringUtils.EMPTY;
