@@ -31,18 +31,19 @@ public final class SegmentTags {
     public static final String SELF_CLOSE = "</maid-self-chat>";
 
     // 自定义 Prompt 主人风格段（功能 A）与 Tool 策略段（功能 B）的标签。
-    // 与 SelfTalkPrompts 提示词文本内嵌的标签保持一致，改动须同步。
-    /** 主人风格段开启标签 */
+    // 能与 SelfTalkPrompts 公共常量对齐的引用之；仅嵌在提示词字符串内的
+    // <owner-style-note> 首标签与 <tool-policy> 开闭标签保留逐字重复（见下方同步注释）。
+    /** 主人风格段开启标签（与 SelfTalkPrompts.OWNER_STYLE_NOTE_HEADER_* 首行字面一致，改动须同步） */
     private static final String OWNER_STYLE_NOTE_OPEN = "<owner-style-note>";
     /** 主人风格段关闭标签 */
-    private static final String OWNER_STYLE_NOTE_CLOSE = "</owner-style-note>";
+    private static final String OWNER_STYLE_NOTE_CLOSE = SelfTalkPrompts.OWNER_STYLE_NOTE_CLOSE;
     /** 全局段子标签 */
-    private static final String ALL_MAIDS_OPEN = "<all-maids>";
-    private static final String ALL_MAIDS_CLOSE = "</all-maids>";
+    private static final String ALL_MAIDS_OPEN = SelfTalkPrompts.OWNER_STYLE_NOTE_ALL_MAIDS_OPEN;
+    private static final String ALL_MAIDS_CLOSE = SelfTalkPrompts.OWNER_STYLE_NOTE_ALL_MAIDS_CLOSE;
     /** 单只段子标签 */
-    private static final String THIS_MAID_OPEN = "<this-maid>";
-    private static final String THIS_MAID_CLOSE = "</this-maid>";
-    /** Tool 策略段标签 */
+    private static final String THIS_MAID_OPEN = SelfTalkPrompts.OWNER_STYLE_NOTE_THIS_MAID_OPEN;
+    private static final String THIS_MAID_CLOSE = SelfTalkPrompts.OWNER_STYLE_NOTE_THIS_MAID_CLOSE;
+    /** Tool 策略段标签（与 SelfTalkPrompts.TOOL_POLICY_* 文本块首尾行字面一致，改动须同步） */
     private static final String TOOL_POLICY_OPEN = "<tool-policy>";
     private static final String TOOL_POLICY_CLOSE = "</tool-policy>";
 
