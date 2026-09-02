@@ -55,7 +55,7 @@ public final class SelfTalkPlayerSettingsClient {
     public static void onToolConfigResponse(ToolConfigResponseMessage msg) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.screen instanceof SelfTalkPlayerSettingsScreen screen) {
-            screen.applyToolResponse(msg.isAdminEnabled(), msg.isToolAdminEnabled(),
+            screen.applyToolResponse(msg.isToolAdminEnabled(),
                     msg.isGlobalEnabled(), msg.isMaidEnabled());
         }
     }

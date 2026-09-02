@@ -404,8 +404,12 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         refreshButtonState();
     }
 
-    /** Tool 响应：两个管理员字段分开返回，界面据此区分「玩家配置被关」与「Tool 功能未开」 */
-    public void applyToolResponse(boolean adminEnabled, boolean toolAdminEnabled,
+    /**
+     * Tool 响应回填。PLAYER_OPTION_ENABLED 与自话组/自定义 Prompt 组同源，由各自的
+     * applyResponse/applyCustomPromptResponse 维护（Tool 按钮与提示链均读全局 adminEnabled），
+     * 此处只需 TOOL_CALL_ENABLED 与玩家两级开关。
+     */
+    public void applyToolResponse(boolean toolAdminEnabled,
                                   boolean globalEnabled, boolean maidEnabled) {
         this.toolFeatureEnabled = toolAdminEnabled;
         boolean accept = !dirtyTool || (refreshToolExpected && this.toolGlobalEnabled == globalEnabled);
