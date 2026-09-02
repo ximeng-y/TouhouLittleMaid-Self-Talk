@@ -1,5 +1,6 @@
 package com.maidmod.selftalk.network;
 
+import com.maidmod.selftalk.Config;
 import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.PlayerSettingsStore;
 import net.minecraft.network.FriendlyByteBuf;
@@ -41,6 +42,11 @@ public class ToolConfigSetMessage {
         ctx.get().enqueueWork(() -> {
             ServerPlayer serverPlayer = ctx.get().getSender();
             if (serverPlayer != null && SelfTalkPackets.allowConfigPacket(serverPlayer.getUUID())) {
+                // 管理员双闸（纵深防御，与 CustomPromptConfigSetMessage 对齐）：任一关闸期间拒绝写入，
+                // 防「预埋等开闸」；派发侧 isToolCallEnabledForMaid 另有同条件双闸兜底
+                if (!Config.PLAYER_OPTION_ENABLED.get() || !Config.TOOL_CALL_ENABLED.get()) {
+                    return;
+                }
                 if (msg.maidUuid.isEmpty()) {
                     PlayerSettingsStore.setToolCallGlobal(serverPlayer.server, serverPlayer.getUUID(), msg.enabled);
                 } else {

@@ -30,14 +30,35 @@ public final class SegmentTags {
     /** 自话/互聊段关闭标签 */
     public static final String SELF_CLOSE = "</maid-self-chat>";
 
-    /** 全部已知标签（精确剥除集合） */
-    private static final String[] KNOWN_TAGS = {OWNER_OPEN, OWNER_CLOSE, SELF_OPEN, SELF_CLOSE};
+    // 自定义 Prompt 主人风格段（功能 A）与 Tool 策略段（功能 B）的标签。
+    // 与 SelfTalkPrompts 提示词文本内嵌的标签保持一致，改动须同步。
+    /** 主人风格段开启标签 */
+    private static final String OWNER_STYLE_NOTE_OPEN = "<owner-style-note>";
+    /** 主人风格段关闭标签 */
+    private static final String OWNER_STYLE_NOTE_CLOSE = "</owner-style-note>";
+    /** 全局段子标签 */
+    private static final String ALL_MAIDS_OPEN = "<all-maids>";
+    private static final String ALL_MAIDS_CLOSE = "</all-maids>";
+    /** 单只段子标签 */
+    private static final String THIS_MAID_OPEN = "<this-maid>";
+    private static final String THIS_MAID_CLOSE = "</this-maid>";
+    /** Tool 策略段标签 */
+    private static final String TOOL_POLICY_OPEN = "<tool-policy>";
+    private static final String TOOL_POLICY_CLOSE = "</tool-policy>";
+
+    /** 全部已知标签（精确剥除集合）：旧段标签 + 自定义 Prompt/Tool 策略段标签 */
+    private static final String[] KNOWN_TAGS = {OWNER_OPEN, OWNER_CLOSE, SELF_OPEN, SELF_CLOSE,
+            OWNER_STYLE_NOTE_OPEN, OWNER_STYLE_NOTE_CLOSE,
+            ALL_MAIDS_OPEN, ALL_MAIDS_CLOSE,
+            THIS_MAID_OPEN, THIS_MAID_CLOSE,
+            TOOL_POLICY_OPEN, TOOL_POLICY_CLOSE};
 
     /**
      * 宽正则兜底：模型可能输出带空白/换行变体的标签（如 {@code <maid-owner-chat >}），
      * 精确替换漏网时兜底剔除并留痕。仅匹配本 mod 的标签命名空间，避免误伤正文。
      */
-    private static final Pattern VARIANT_REG = Pattern.compile("<\\s*/?\\s*maid-(owner|self)-chat\\s*>",
+    private static final Pattern VARIANT_REG = Pattern.compile(
+            "<\\s*/?\\s*(maid-(owner|self)-chat|owner-style-note|all-maids|this-maid|tool-policy)\\s*>",
             Pattern.CASE_INSENSITIVE);
 
     /** 零宽字符（玩家可用其拼接出变体正则不命中的伪标签，多数 LLM tokenizer 会归一化还原） */
