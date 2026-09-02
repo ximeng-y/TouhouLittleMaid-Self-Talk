@@ -31,7 +31,10 @@ public class InterChatCallback extends LLMCallback {
     /**
      * 本轮工具过程写入 TLM 历史的消息引用（与 SelfTalkCallback 同构）。
      * 最终回答后成对全删——assistant(tool_calls) 与 tool 结果必须配对删除，
-     * 孤立记录会让后续请求被 LLM 服务端 400 拒绝（HistoryMessagesCheck 不清洗孤立 tool_calls）。
+     * 孤立记录会让后续请求被 LLM 服务端 400 拒绝。
+     * 注：TLM 1.5.3 的 HistoryMessagesCheck 已含 removeUnpairedToolCalls（能剥离未配对 tool_calls
+     * 并删除其后孤儿 TOOL），但每次发送前的清洗依赖 TLM 实现细节，本 mod 直接成对删除更稳妥，
+     * 且能覆盖「窗口裁剪切对」这类 TLM 清洗不到的边界。
      */
     private final List<LLMMessage> toolHistoryMessages = new ArrayList<>();
 

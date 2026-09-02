@@ -12,12 +12,14 @@ import com.maidmod.selftalk.network.SleepQuietConfigSetPayload;
 import com.maidmod.selftalk.network.ToolConfigRequestPayload;
 import com.maidmod.selftalk.network.ToolConfigSetPayload;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.ComponentPath;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.navigation.FocusNavigationEvent;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
@@ -74,7 +76,6 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private boolean overrideEnabled = false;
     private boolean dirtyOverride = false;
     // ===== Tool 组状态 =====
-    private boolean toolAdminEnabled = true;
     private boolean toolFeatureEnabled = true;
     private boolean toolGlobalEnabled = false;
     private boolean toolMaidEnabled = false;
@@ -137,31 +138,29 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
 
         // 垂直：按钮列 8 枚（组内步进 20、组间步进 28）总高 184，矮屏时顶部钳制保证标题可见
         this.colTop = Math.max(this.height / 2 - 92, 30);
-        int titleY = this.colTop - 28;
-        int maidY = this.colTop - 16;
         int leftX = this.leftX;
         int rightX = this.rightX;
         int colTop = this.colTop;
 
         // 组内 0 间隙（步进 20）、组间 8px（步进 28）；现有四组相对顺序不变，Tool 组追加在最后
-        this.globalButton = addLeftButton(leftX, colTop, buttonW, 0, buttonW, 20,
+        this.globalButton = addLeftButton(leftX, colTop, 0, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.global", globalEnabled, b -> toggleGlobal());
-        this.maidButton = addLeftButton(leftX, colTop, buttonW, 20, buttonW, 20,
+        this.maidButton = addLeftButton(leftX, colTop, 20, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.maid_toggle", maidEnabled, b -> toggleMaid());
-        this.interGlobalButton = addLeftButton(leftX, colTop, buttonW, 48, buttonW, 20,
+        this.interGlobalButton = addLeftButton(leftX, colTop, 48, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.inter_global", interGlobalEnabled, b -> toggleInterGlobal());
-        this.interMaidButton = addLeftButton(leftX, colTop, buttonW, 68, buttonW, 20,
+        this.interMaidButton = addLeftButton(leftX, colTop, 68, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.inter_maid_toggle", interMaidEnabled, b -> toggleInterMaid());
-        this.sleepGlobalButton = addLeftButton(leftX, colTop, buttonW, 96, buttonW, 20,
+        this.sleepGlobalButton = addLeftButton(leftX, colTop, 96, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.sleep_global", sleepGlobalEnabled, b -> toggleSleepGlobal());
-        this.sleepMaidButton = addLeftButton(leftX, colTop, buttonW, 116, buttonW, 20,
+        this.sleepMaidButton = addLeftButton(leftX, colTop, 116, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.sleep_maid_toggle", sleepMaidEnabled, b -> toggleSleepMaid());
         Tooltip toolTooltip = Tooltip.create(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.tool_cache_tooltip"));
-        this.toolGlobalButton = addLeftButton(leftX, colTop, buttonW, 144, buttonW, 20,
+        this.toolGlobalButton = addLeftButton(leftX, colTop, 144, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.tool_global", toolGlobalEnabled, b -> toggleToolGlobal());
         this.toolGlobalButton.setTooltip(toolTooltip);
-        this.toolMaidButton = addLeftButton(leftX, colTop, buttonW, 164, buttonW, 20,
+        this.toolMaidButton = addLeftButton(leftX, colTop, 164, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.tool_maid_toggle", toolMaidEnabled, b -> toggleToolMaid());
         this.toolMaidButton.setTooltip(toolTooltip);
 
@@ -217,7 +216,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         this.suspendPromptListener = false;
     }
 
-    private Button addLeftButton(int leftX, int colTop, int width, int yOffset, int w, int h,
+    private Button addLeftButton(int leftX, int colTop, int yOffset, int w, int h,
                                  String key, boolean value, Button.OnPress onPress) {
         Button button = this.addRenderableWidget(Button.builder(
                 Component.translatable(key, onOff(value)), onPress)
@@ -409,7 +408,6 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     /** Tool 响应：两个管理员字段分开返回，界面据此区分「玩家配置被关」与「Tool 功能未开」 */
     public void applyToolResponse(boolean adminEnabled, boolean toolAdminEnabled,
                                   boolean globalEnabled, boolean maidEnabled) {
-        this.toolAdminEnabled = adminEnabled;
         this.toolFeatureEnabled = toolAdminEnabled;
         boolean accept = !dirtyTool || (refreshToolExpected && this.toolGlobalEnabled == globalEnabled);
         if (accept) {
@@ -573,6 +571,16 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
 
         private GuardedMultiLineEditBox(Font font, int x, int y, int width, int height, Component placeholder) {
             super(font, x, y, width, height, placeholder, Component.empty());
+        }
+
+        /**
+         * 禁用时退出 Tab 焦点链。之所以不在禁用时设 {@code active=false}：active 同时被
+         * isMouseOver 检查（ContainerEventHandler 的滚轮分发经 getChildAt → isMouseOver），
+         * 关掉会连禁用态滚轮查看一起失能——这里只拦焦点，不动 active。
+         */
+        @Override
+        public ComponentPath nextFocusPath(FocusNavigationEvent event) {
+            return this.editable ? super.nextFocusPath(event) : null;
         }
 
         @Override

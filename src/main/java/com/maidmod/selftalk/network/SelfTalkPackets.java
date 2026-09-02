@@ -307,6 +307,11 @@ public final class SelfTalkPackets {
         context.enqueueWork(() -> {
             Player player = context.player();
             if (player instanceof ServerPlayer serverPlayer && allowConfigPacket(serverPlayer.getUUID())) {
+                // 管理员双闸（纵深防御，与 handleCustomPromptSet 对齐）：任一关闸期间拒绝写入，
+                // 防「预埋等开闸」；派发侧 isToolCallEnabledForMaid 另有同条件双闸兜底
+                if (!Config.PLAYER_OPTION_ENABLED.get() || !Config.TOOL_CALL_ENABLED.get()) {
+                    return;
+                }
                 if (payload.maidUuid().isEmpty()) {
                     PlayerSettingsStore.setToolCallGlobal(serverPlayer.server, serverPlayer.getUUID(), payload.enabled());
                 } else {
