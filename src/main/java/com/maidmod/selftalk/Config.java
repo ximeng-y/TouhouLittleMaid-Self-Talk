@@ -79,6 +79,18 @@ public final class Config {
     /** 互聊对锁时长（秒）：A 对 C 发起互聊后，二者在连续互聊结束前互相对锁，超时兜底自动解除 */
     public static ForgeConfigSpec.IntValue INTER_CHAT_PAIR_LOCK_SECONDS;
 
+    // ===== 环境事件 =====
+    /** 附近环境事件注入总开关（注入自话/互聊，欢迎语不受影响） */
+    public static ForgeConfigSpec.BooleanValue EVENT_CONTEXT_ENABLED;
+    /** 死亡与受伤事件共用的感知半径（格） */
+    public static ForgeConfigSpec.DoubleValue EVENT_CONTEXT_RANGE;
+    /** 每只女仆的事件缓冲容量（死亡/受伤共用，溢出丢最旧） */
+    public static ForgeConfigSpec.IntValue EVENT_CONTEXT_MAX_BUFFERED;
+    /** 玩家受伤事件开关（受伤频率远高于死亡，默认关闭） */
+    public static ForgeConfigSpec.BooleanValue EVENT_CONTEXT_HURT_ENABLED;
+    /** 玩家受伤事件的每只女仆独立冷却（秒） */
+    public static ForgeConfigSpec.IntValue EVENT_CONTEXT_HURT_COOLDOWN_SECONDS;
+
     public static final ForgeConfigSpec SPEC;
 
     static {
@@ -184,6 +196,30 @@ public final class Config {
                 链自然结束/请求失败/女仆死亡卸载时均会提前解锁；该时长仅为
                 回调永不返回等无法感知的异常中断时的超时兜底。""")
                 .defineInRange("pairLockSeconds", 120, 10, 600);
+        builder.pop();
+
+        builder.push("event_context");
+        EVENT_CONTEXT_ENABLED = builder.comment("""
+                附近环境事件注入总开关。关闭后下面的死亡与受伤事件均不注入。
+                女仆感知半径内发生死亡时，把死亡消息缓冲下来，注入该女仆下一次自言自语/互聊的提示词；
+                欢迎语不注入。过滤固定为玩家、有主人的动物、其他女仆，普通生物死亡不注入。
+                死亡文本取原版本地化消息：专用服务端为英文原文（如 "[Event] Steve was slain by Zombie"），
+                单人/局域网随客户端语言。""")
+                .define("enabled", true);
+        EVENT_CONTEXT_RANGE = builder.comment("事件感知半径（格），死亡与受伤共用")
+                .defineInRange("range", 32.0, 1.0, 512.0);
+        EVENT_CONTEXT_MAX_BUFFERED = builder.comment("""
+                每只女仆的事件缓冲容量（死亡/受伤共用，溢出丢弃最旧的一条）。
+                缓冲在下一次自言自语或互聊时被取用并清空（谁先派发谁消费）。""")
+                .defineInRange("maxBufferedEvents", 5, 1, 20);
+        EVENT_CONTEXT_HURT_ENABLED = builder.comment("""
+                玩家受伤事件注入开关，默认关闭。
+                受伤发生频率远高于死亡，开启后提示词噪音明显增多；同样受感知半径约束。
+                仅在玩家实际掉血时记录（格挡成功、无敌帧内被忽略的伤害不记），
+                文本为 "[Event] <玩家名> was hurt by <攻击者>" 形式的最小拼接（原版无受伤消息）。""")
+                .define("hurtEnabled", false);
+        EVENT_CONTEXT_HURT_COOLDOWN_SECONDS = builder.comment("每只女仆记录玩家受伤事件的最小间隔（秒），防止短时间内刷屏")
+                .defineInRange("hurtCooldownSeconds", 60, 10, 600);
         builder.pop();
 
         SPEC = builder.build();
