@@ -46,11 +46,12 @@ public final class MaidInterChatService {
             }
         }
         String prompt = isResponder ? SelfTalkPrompts.INTER_CHAT_RESPONDER : SelfTalkPrompts.INTER_CHAT_INITIATOR;
-        // 拼装顺序与自话同构：硬编码提示词 + 语言指令 + Tool 策略段(互聊约束行) + 自定义 Prompt + 随机情境
+        // 拼装顺序与自话同构：硬编码提示词 + 语言指令 + Tool 策略段(互聊约束行) + 自定义 Prompt + 随机情境 + 事件段
         prompt = prompt + SelfTalkContexts.languageInstruction(language)
                 + SelfTalkContexts.toolPolicyBlock(maid, language, true)
                 + SelfTalkContexts.customPromptBlock(maid, language)
-                + SelfTalkContexts.buildRandomContext(maid);
+                + SelfTalkContexts.buildRandomContext(maid)
+                + SelfTalkContexts.eventContextBlock(maid);
         String fullPrompt = UserPromptContexts.addContext(maid, prompt);
         messages.add(LLMMessage.userChat(maid, fullPrompt));
         try { HistoryMessagesCheck.checkMessages(messages); } catch (Throwable t) { MaidSelfTalkMod.LOGGER.warn("HistoryMessagesCheck after prompt failed for inter-chat, skipped", t); return false; }

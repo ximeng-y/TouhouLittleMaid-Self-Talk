@@ -145,6 +145,43 @@ public final class SelfTalkClothConfig {
                 .build());
         main.add(interChat.build());
 
+        SubCategoryBuilder eventContext = entryBuilder.startSubCategory(
+                        Component.translatable("config.maid_self_talk.event_context"))
+                .setExpanded(false);
+        eventContext.add(entryBuilder.startBooleanToggle(Component.translatable("config.maid_self_talk.event_context.enabled"),
+                        Config.EVENT_CONTEXT_ENABLED.get())
+                .setDefaultValue(true)
+                .setTooltip(Component.translatable("config.maid_self_talk.event_context.enabled.tooltip"))
+                .setSaveConsumer(v -> saveBool(Config.EVENT_CONTEXT_ENABLED, v))
+                .build());
+        eventContext.add(entryBuilder.startDoubleField(Component.translatable("config.maid_self_talk.event_context.range"),
+                        Config.EVENT_CONTEXT_RANGE.get())
+                .setMin(1.0).setMax(512.0)
+                .setDefaultValue(32.0)
+                .setTooltip(Component.translatable("config.maid_self_talk.event_context.range.tooltip"))
+                .setSaveConsumer(v -> saveDouble(Config.EVENT_CONTEXT_RANGE, v))
+                .build());
+        eventContext.add(entryBuilder.startIntSlider(Component.translatable("config.maid_self_talk.event_context.max_buffered"),
+                        Config.EVENT_CONTEXT_MAX_BUFFERED.get(), 1, 20)
+                .setDefaultValue(5)
+                .setTooltip(Component.translatable("config.maid_self_talk.event_context.max_buffered.tooltip"))
+                .setSaveConsumer(v -> saveInt(Config.EVENT_CONTEXT_MAX_BUFFERED, v))
+                .build());
+        eventContext.add(entryBuilder.startBooleanToggle(Component.translatable("config.maid_self_talk.event_context.hurt_enabled"),
+                        Config.EVENT_CONTEXT_HURT_ENABLED.get())
+                .setDefaultValue(false)
+                .setTooltip(Component.translatable("config.maid_self_talk.event_context.hurt_enabled.tooltip"))
+                .setSaveConsumer(v -> saveBool(Config.EVENT_CONTEXT_HURT_ENABLED, v))
+                .build());
+        eventContext.add(entryBuilder.startIntField(Component.translatable("config.maid_self_talk.event_context.hurt_cooldown"),
+                        Config.EVENT_CONTEXT_HURT_COOLDOWN_SECONDS.get())
+                .setMin(10).setMax(600)
+                .setDefaultValue(60)
+                .setTooltip(Component.translatable("config.maid_self_talk.event_context.hurt_cooldown.tooltip"))
+                .setSaveConsumer(v -> saveInt(Config.EVENT_CONTEXT_HURT_COOLDOWN_SECONDS, v))
+                .build());
+        main.add(eventContext.build());
+
         globalAi.addEntry(main.build());
     }
 

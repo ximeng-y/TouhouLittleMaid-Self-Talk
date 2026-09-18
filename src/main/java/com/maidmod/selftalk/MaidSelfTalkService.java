@@ -93,12 +93,13 @@ public final class MaidSelfTalkService {
         String prompt = welcome ? SelfTalkPrompts.WELCOME
                 : (ownerNearby ? SelfTalkPrompts.SELF_TALK_OWNER_NEARBY : SelfTalkPrompts.SELF_TALK);
         // 拼装顺序：硬编码提示词 + 语言指令 + Tool 策略段(仅 Tool 开启时) + 自定义 Prompt(贴在指令主体后)
-        // + 随机情境(环境数据始终放最后)。自定义段不得进入 SelfTalkPrompts 常量、
-        // 也不得出现在格式引导(第 5 条)之前——见 SelfTalkPrompts 类注释红线
+        // + 随机情境(环境数据始终放最后) + 事件段(仅自话，欢迎语不注入)。
+        // 自定义段不得进入 SelfTalkPrompts 常量、也不得出现在格式引导(第 5 条)之前——见 SelfTalkPrompts 类注释红线
         prompt = prompt + SelfTalkContexts.languageInstruction(selfTalkLanguage)
                 + SelfTalkContexts.toolPolicyBlock(maid, selfTalkLanguage, false)
                 + SelfTalkContexts.customPromptBlock(maid, selfTalkLanguage)
-                + SelfTalkContexts.buildRandomContext(maid);
+                + SelfTalkContexts.buildRandomContext(maid)
+                + (welcome ? StringUtils.EMPTY : SelfTalkContexts.eventContextBlock(maid));
 
         // 与玩家 chat 相同的 context 注入，保证消息结构与缓存前缀一致
         String message = UserPromptContexts.addContext(maid, prompt);

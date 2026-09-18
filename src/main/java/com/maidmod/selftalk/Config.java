@@ -76,6 +76,18 @@ public final class Config {
     /** 互聊对锁时长（秒）：A 对 C 发起互聊后，二者在连续互聊结束前互相对锁，超时兜底自动解除 */
     public static ModConfigSpec.IntValue INTER_CHAT_PAIR_LOCK_SECONDS;
 
+    // ===== 环境事件 =====
+    /** 附近死亡事件注入开关（注入自话/互聊，欢迎语不受影响） */
+    public static ModConfigSpec.BooleanValue EVENT_CONTEXT_ENABLED;
+    /** 死亡与受伤事件共用的感知半径（格） */
+    public static ModConfigSpec.DoubleValue EVENT_CONTEXT_RANGE;
+    /** 每只女仆的事件环形缓冲容量（死亡/受伤共用，溢出丢最旧） */
+    public static ModConfigSpec.IntValue EVENT_CONTEXT_MAX_BUFFERED;
+    /** 玩家受伤事件开关（受伤频率远高于死亡，默认关闭） */
+    public static ModConfigSpec.BooleanValue EVENT_CONTEXT_HURT_ENABLED;
+    /** 玩家受伤事件的每只女仆独立冷却（秒） */
+    public static ModConfigSpec.IntValue EVENT_CONTEXT_HURT_COOLDOWN_SECONDS;
+
     public static final ModConfigSpec SPEC;
 
     static {
@@ -181,6 +193,26 @@ public final class Config {
                 链自然结束/请求失败/女仆死亡卸载时均会提前解锁；该时长仅为
                 回调永不返回等无法感知的异常中断时的超时兜底。""")
                 .defineInRange("pairLockSeconds", 120, 10, 600);
+        builder.pop();
+
+        builder.push("event_context");
+        EVENT_CONTEXT_ENABLED = builder.comment("""
+                附近死亡事件注入开关。女仆感知半径内发生死亡时，把死亡消息原文缓冲下来，
+                注入该女仆下一次自言自语/互聊的提示词；欢迎语不注入。
+                过滤固定为玩家、有主人的已驯服动物、其他女仆，普通生物死亡不注入。
+                事件文本为游戏原生英文原文（如 "[Event] Steve was slain by Zombie"）。""")
+                .define("enabled", true);
+        EVENT_CONTEXT_RANGE = builder.comment("事件感知半径（格），死亡与受伤共用")
+                .defineInRange("range", 32.0, 1.0, 512.0);
+        EVENT_CONTEXT_MAX_BUFFERED = builder.comment("每只女仆的事件缓冲容量（死亡/受伤共用，溢出丢弃最旧的一条）")
+                .defineInRange("maxBufferedEvents", 5, 1, 20);
+        EVENT_CONTEXT_HURT_ENABLED = builder.comment("""
+                玩家受伤事件注入开关，默认关闭。
+                受伤发生频率远高于死亡，开启后提示词噪音明显增多；同样受感知半径约束。
+                事件文本为 "[Event] <玩家名> was hurt by <攻击者>" 形式的最小拼接（原版无受伤消息）。""")
+                .define("hurtEnabled", false);
+        EVENT_CONTEXT_HURT_COOLDOWN_SECONDS = builder.comment("每只女仆记录玩家受伤事件的最小间隔（秒），防止短时间内刷屏")
+                .defineInRange("hurtCooldownSeconds", 60, 10, 600);
         builder.pop();
 
         SPEC = builder.build();

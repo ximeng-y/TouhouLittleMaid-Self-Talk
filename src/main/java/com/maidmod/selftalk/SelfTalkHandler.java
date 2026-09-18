@@ -11,10 +11,14 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
+import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 
 import java.util.ArrayList;
@@ -298,6 +302,116 @@ public final class SelfTalkHandler {
         SelfTalkState.removeWelcomeForPlayer(uuid);
         // 清理网络限流条目，防长期多人服务端内存缓慢增长
         SelfTalkPackets.removeRateEntry(uuid);
+    }
+
+    /**
+     * 环境事件：感知半径内发生死亡时，把死亡消息原文缓冲进附近女仆的事件环形缓冲。
+     * <p>
+     * 订阅在事件总线（服务端主线程），行为纪律与 {@link #onMaidTick} 相同：整体 try-catch 兜底，
+     * 绝不向外抛异常。死亡消息直接取原版本地化文本（英文客户端/服务端下即英文原文），
+     * 换行替换为空格保证单行。
+     * <p>
+     * 过滤固定为玩家 / 有主人的已驯服动物 / 女仆，普通生物死亡不注入（避免噪音）。
+     * 死者自身也在感知范围内需显式排除：事件在 {@code LivingEntity#die} 顶部触发，
+     * 此刻死者 health 已为 0 但 {@code isAlive()} 仍可能为 true，扫描时会被当成存活女仆（女仆死亡场景）。
+     */
+    @SubscribeEvent
+    public static void onLivingDeath(LivingDeathEvent event) {
+        try {
+            if (!Config.ENABLED.get() || !Config.EVENT_CONTEXT_ENABLED.get()) {
+                return;
+            }
+            if (!(event.getEntity() instanceof LivingEntity dead)) {
+                return;
+            }
+            if (!(dead.level() instanceof ServerLevel level)) {
+                return;
+            }
+            if (!isEventWorthyDeath(dead)) {
+                return;
+            }
+            String line = "[Event] " + event.getSource().getLocalizedDeathMessage(dead).getString();
+            appendEventLineToNearbyMaids(level, dead.getBoundingBox(), dead.getId(), line, false);
+        } catch (Throwable t) {
+            MaidSelfTalkMod.LOGGER.error("Failed to handle living death event for event context", t);
+        }
+    }
+
+    /**
+     * 环境事件：玩家受伤时缓冲一行事件文本（默认关闭，见 {@code event_context.hurtEnabled}）。
+     * <p>
+     * 仅玩家受伤，且每只女仆独立冷却（{@code hurtCooldownSeconds}），防止受伤刷屏。
+     * 原版无受伤消息文本，此处做最小拼接：{@code [Event] <玩家名> was hurt by <攻击者>}。
+     */
+    @SubscribeEvent
+    public static void onLivingHurt(LivingIncomingDamageEvent event) {
+        try {
+            if (!Config.ENABLED.get() || !Config.EVENT_CONTEXT_ENABLED.get()
+                    || !Config.EVENT_CONTEXT_HURT_ENABLED.get()) {
+                return;
+            }
+            if (!(event.getEntity() instanceof Player player)) {
+                return;
+            }
+            if (!(player.level() instanceof ServerLevel level)) {
+                return;
+            }
+            Entity attacker = event.getSource().getEntity();
+            String line = "[Event] " + player.getName().getString() + " was hurt"
+                    + (attacker != null ? " by " + attacker.getName().getString() : "");
+            appendEventLineToNearbyMaids(level, player.getBoundingBox(), player.getId(), line, true);
+        } catch (Throwable t) {
+            MaidSelfTalkMod.LOGGER.error("Failed to handle living hurt event for event context", t);
+        }
+    }
+
+    /** 死亡事件过滤：玩家 / 有主人的已驯服动物 / 女仆，其余（普通生物）不注入 */
+    private static boolean isEventWorthyDeath(LivingEntity dead) {
+        if (dead instanceof Player || dead instanceof EntityMaid) {
+            return true;
+        }
+        return dead instanceof TamableAnimal tamable && tamable.getOwnerUUID() != null;
+    }
+
+    /**
+     * 把事件文本追加到半径内存活女仆的环形缓冲（死亡与受伤共用）。
+     * <p>
+     * {@code excludedEntityId} 用于排除死者自身（死亡事件触发时死者 isAlive 仍为 true，
+     * 见 {@link #onLivingDeath}）；受伤路径传玩家实体 ID（玩家不是女仆，等价于不排除）。
+     * {@code applyHurtCooldown} 为 true 时逐只女仆检查独立冷却，未过冷却的女仆跳过。
+     */
+    private static void appendEventLineToNearbyMaids(ServerLevel level, AABB eventBox,
+                                                     int excludedEntityId, String line, boolean applyHurtCooldown) {
+        AABB box = eventBox.inflate(Config.EVENT_CONTEXT_RANGE.get());
+        List<EntityMaid> maids = level.getEntitiesOfClass(EntityMaid.class, box,
+                m -> m.isAlive() && m.getId() != excludedEntityId);
+        if (maids.isEmpty()) {
+            return;
+        }
+        long serverTick = level.getServer().getTickCount();
+        long cooldownTicks = Config.EVENT_CONTEXT_HURT_COOLDOWN_SECONDS.get() * 20L;
+        int max = Config.EVENT_CONTEXT_MAX_BUFFERED.get();
+        for (EntityMaid maid : maids) {
+            SelfTalkState.State state = SelfTalkState.get(maid.getId());
+            if (applyHurtCooldown && state.lastHurtEventTick >= 0
+                    && serverTick - state.lastHurtEventTick < cooldownTicks) {
+                continue;
+            }
+            if (applyHurtCooldown) {
+                state.lastHurtEventTick = serverTick;
+            }
+            appendEventLine(state, line, max);
+        }
+    }
+
+    /** 追加一条事件文本到环形缓冲：容量满时丢最旧（热重载调小容量后在该处自然收敛） */
+    private static void appendEventLine(SelfTalkState.State state, String line, int max) {
+        // 换行替换为空格：事件段按单行拼接，含换行的事件文本（自定义死亡消息等）会破坏段落结构
+        String singleLine = line.replace('\n', ' ').replace('\r', ' ');
+        while (state.pendingEventLines.size() >= max) {
+            state.pendingEventLines.pollFirst();
+        }
+        state.pendingEventLines.addLast(singleLine);
     }
 
     /** 半径内是否存在存活、非旁观模式的玩家 */
