@@ -16,8 +16,8 @@ import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
+import net.minecraftforge.event.entity.living.LivingDamageEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
-import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
@@ -316,8 +316,9 @@ public final class SelfTalkHandler {
      * 单人/局域网集成服务端随客户端语言（可能与下方硬编码的受伤行语言不一致，可接受）。
      * <p>
      * 过滤固定为玩家 / 有主人的可驯服或可骑乘动物 / 女仆，普通生物死亡不注入（避免噪音）。
-     * 死者自身也在感知范围内需显式排除：事件在 {@code LivingEntity#die} 顶部触发，
-     * 此刻死者 health 已为 0 但 {@code isAlive()} 仍为 true，扫描时会被当成存活女仆（女仆死亡场景）。
+     * 死者自身需排除：常规路径下 {@code isAlive()} 已能排除死者（事件在 {@code die()} 顶部触发时
+     * health 已清零），显式排除 {@code excludedEntityId} 是防第三方直接调用 {@code die()}、
+     * 血量未清零时死者被扫描为「存活女仆」的兜底（女仆死亡场景）。
      */
     @SubscribeEvent
     public static void onLivingDeath(LivingDeathEvent event) {
@@ -343,15 +344,16 @@ public final class SelfTalkHandler {
     /**
      * 环境事件：玩家实际掉血时缓冲一行事件文本（默认关闭，见 {@code event_context.hurtEnabled}）。
      * <p>
-     * 1.20.1 的对应事件是 {@link LivingHurtEvent}（NeoForge 线为 LivingDamageEvent.Post）：
-     * 它投递于 {@code LivingEntity#actuallyHurt} 内、护甲与药水减免之后、扣血之前，
-     * 格挡成功的伤害已在 {@code hurt} 中提前排除，因此不会把未遂伤害记成受伤。
+     * 1.20.1 的对应事件是 {@link LivingDamageEvent}（NeoForge 线为 {@code LivingDamageEvent.Post}）：
+     * 它投递于 {@code LivingEntity#actuallyHurt} 内、护甲/药水/吸收减免全部结算之后、写入生命值之前，
+     * {@code getAmount()} 即本次实际掉血量；更早的 {@code LivingHurtEvent} 投递于减免之前，
+     * 护甲把伤害减到 0 时也会以正数触发，会把未遂伤害记成受伤，故不用。
      * <p>
      * 仅玩家，且每只女仆独立冷却（{@code hurtCooldownSeconds}），防止受伤刷屏。
      * 原版无受伤消息文本，此处做最小拼接：{@code [Event] <玩家名> was hurt by <攻击者>}。
      */
     @SubscribeEvent
-    public static void onLivingHurt(LivingHurtEvent event) {
+    public static void onLivingHurt(LivingDamageEvent event) {
         try {
             if (!Config.ENABLED.get() || !Config.EVENT_CONTEXT_ENABLED.get()
                     || !Config.EVENT_CONTEXT_HURT_ENABLED.get()) {
@@ -419,11 +421,11 @@ public final class SelfTalkHandler {
         }
     }
 
-    /** 追加一条事件文本到事件缓冲：容量满时丢最旧（无热重载，改配置容量需重启服务端） */
+    /** 追加一条事件文本到事件缓冲：容量满时丢最旧（容量被调小时在下一次追加时自然收敛） */
     private static void appendEventLine(SelfTalkState.State state, String line, int max, long serverTick) {
         if (max < 1) {
-            // 容量配置被手改成非法值时的兜底：清空而非死循环（defineInRange 正常情况下已钳制）
-            state.pendingEventLines.clear();
+            // 容量被第三方直接 set 成非法值时的兜底：跳过本次追加而非清空已有缓冲
+            // （defineInRange 正常情况下已把配置值钳制在 [1,20]，此分支不可达）
             return;
         }
         // 换行替换为空格：事件段按单行拼接，含换行的事件文本（自定义死亡消息等）会破坏段落结构。
