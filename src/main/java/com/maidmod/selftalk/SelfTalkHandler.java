@@ -393,8 +393,9 @@ public final class SelfTalkHandler {
     /**
      * 把事件文本追加到半径内存活女仆的事件缓冲（死亡与受伤共用）。
      * <p>
-     * {@code excludedEntityId} 用于排除死者自身（死亡事件触发时死者 isAlive 仍为 true，
-     * 见 {@link #onLivingDeath}）；受伤路径传玩家实体 ID（玩家不是女仆，等价于不排除）。
+     * {@code excludedEntityId} 用于排除死者自身（常规路径下 {@code isAlive()} 已能排除死者，
+     * 此处为防第三方直接调用 {@code die()}、血量未清零时的兜底，见 {@link #onLivingDeath}）；
+     * 受伤路径传玩家实体 ID（玩家不是女仆，等价于不排除）。
      * {@code applyHurtCooldown} 为 true 时逐只女仆检查独立冷却，未过冷却的女仆跳过。
      */
     private static void appendEventLineToNearbyMaids(ServerLevel level, AABB eventBox,
