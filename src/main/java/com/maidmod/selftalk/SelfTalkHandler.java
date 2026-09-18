@@ -314,8 +314,9 @@ public final class SelfTalkHandler {
      * 单人/局域网集成服务端随客户端语言（可能与下方硬编码的受伤行语言不一致，可接受）。
      * <p>
      * 过滤固定为玩家 / 有主人的可驯服或可骑乘动物 / 女仆，普通生物死亡不注入（避免噪音）。
-     * 死者自身也在感知范围内需显式排除：事件在 {@code LivingEntity#die} 顶部触发，
-     * 此刻死者 health 已为 0 但 {@code isAlive()} 仍为 true，扫描时会被当成存活女仆（女仆死亡场景）。
+     * 死者自身需排除：常规路径下 {@code isAlive()} 已能排除死者（事件在 {@code die()} 顶部触发时
+     * health 已清零），显式排除 {@code excludedEntityId} 是防第三方直接调用 {@code die()}、
+     * 血量未清零时死者被扫描为「存活女仆」的兜底（女仆死亡场景）。
      */
     @SubscribeEvent
     public static void onLivingDeath(LivingDeathEvent event) {
@@ -389,8 +390,9 @@ public final class SelfTalkHandler {
     /**
      * 把事件文本追加到半径内存活女仆的事件缓冲（死亡与受伤共用）。
      * <p>
-     * {@code excludedEntityId} 用于排除死者自身（死亡事件触发时死者 isAlive 仍为 true，
-     * 见 {@link #onLivingDeath}）；受伤路径传玩家实体 ID（玩家不是女仆，等价于不排除）。
+     * {@code excludedEntityId} 用于排除死者自身（常规路径下 {@code isAlive()} 已能排除死者，
+     * 此处为防第三方直接调用 {@code die()}、血量未清零时的兜底，见 {@link #onLivingDeath}）；
+     * 受伤路径传玩家实体 ID（玩家不是女仆，等价于不排除）。
      * {@code applyHurtCooldown} 为 true 时逐只女仆检查独立冷却，未过冷却的女仆跳过。
      */
     private static void appendEventLineToNearbyMaids(ServerLevel level, AABB eventBox,
@@ -420,8 +422,8 @@ public final class SelfTalkHandler {
     /** 追加一条事件文本到事件缓冲：容量满时丢最旧（热重载调小容量后在该处自然收敛） */
     private static void appendEventLine(SelfTalkState.State state, String line, int max, long serverTick) {
         if (max < 1) {
-            // 容量配置被手改成非法值时的兜底：清空而非死循环（defineInRange 正常情况下已钳制）
-            state.pendingEventLines.clear();
+            // 容量被第三方直接 set 成非法值时的兜底：跳过本次追加而非清空已有缓冲
+            // （defineInRange 正常情况下已把配置值钳制在 [1,20]，此分支不可达）
             return;
         }
         // 换行替换为空格：事件段按单行拼接，含换行的事件文本（自定义死亡消息等）会破坏段落结构。

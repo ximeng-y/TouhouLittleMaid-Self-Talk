@@ -81,7 +81,7 @@ public final class Config {
     public static ModConfigSpec.BooleanValue EVENT_CONTEXT_ENABLED;
     /** 死亡与受伤事件共用的感知半径（格） */
     public static ModConfigSpec.DoubleValue EVENT_CONTEXT_RANGE;
-    /** 每只女仆的事件环形缓冲容量（死亡/受伤共用，溢出丢最旧） */
+    /** 每只女仆的事件缓冲容量（死亡/受伤共用，溢出丢最旧） */
     public static ModConfigSpec.IntValue EVENT_CONTEXT_MAX_BUFFERED;
     /** 玩家受伤事件开关（受伤频率远高于死亡，默认关闭） */
     public static ModConfigSpec.BooleanValue EVENT_CONTEXT_HURT_ENABLED;
