@@ -104,11 +104,13 @@ public final class SelfTalkState {
 
         // ===== 环境事件（死亡/受伤） =====
         /**
-         * 事件环形缓冲：感知半径内发生的死亡/受伤事件文本（按时间序）。
+         * 事件缓冲：感知半径内发生的死亡/受伤事件文本（按时间序，容量上限见配置，溢出丢最旧）。
          * 由下一次派发的自话或互聊消费并清空（谁先派发谁消费，先派先得）。
          */
         public final Deque<String> pendingEventLines = new ArrayDeque<>();
         /** 上次记录受伤事件的服务器 tick（-1 = 从未记录，保证首次必过冷却检查） */
         public long lastHurtEventTick = -1;
+        /** 上次追加事件文本的服务器 tick（-1 = 从未追加），用于剔除同一事件的重复投递 */
+        public long lastEventAppendTick = -1;
     }
 }

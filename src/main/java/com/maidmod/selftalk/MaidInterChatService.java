@@ -50,11 +50,12 @@ public final class MaidInterChatService {
         prompt = prompt + SelfTalkContexts.languageInstruction(language)
                 + SelfTalkContexts.toolPolicyBlock(maid, language, true)
                 + SelfTalkContexts.customPromptBlock(maid, language)
-                + SelfTalkContexts.buildRandomContext(maid)
-                + SelfTalkContexts.eventContextBlock(maid);
+                + SelfTalkContexts.buildRandomContext(maid);
+        // 清洗先于事件段拼接：checkMessages 失败会放弃本次触发，事件段不能在此之前消费清空
+        try { HistoryMessagesCheck.checkMessages(messages); } catch (Throwable t) { MaidSelfTalkMod.LOGGER.warn("HistoryMessagesCheck after prompt failed for inter-chat, skipped", t); return false; }
+        prompt = prompt + SelfTalkContexts.eventContextBlock(maid);
         String fullPrompt = UserPromptContexts.addContext(maid, prompt);
         messages.add(LLMMessage.userChat(maid, fullPrompt));
-        try { HistoryMessagesCheck.checkMessages(messages); } catch (Throwable t) { MaidSelfTalkMod.LOGGER.warn("HistoryMessagesCheck after prompt failed for inter-chat, skipped", t); return false; }
         // 段标签包裹（历史+互聊窗口+peerText；prompt 消息为尾部、不参与包裹）
         SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowCount);
         state.interChatPending = true;

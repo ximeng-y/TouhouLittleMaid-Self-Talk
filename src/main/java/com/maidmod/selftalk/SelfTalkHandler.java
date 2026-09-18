@@ -12,13 +12,13 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
-import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 
 import java.util.ArrayList;
@@ -305,15 +305,17 @@ public final class SelfTalkHandler {
     }
 
     /**
-     * 环境事件：感知半径内发生死亡时，把死亡消息原文缓冲进附近女仆的事件环形缓冲。
+     * 环境事件：感知半径内发生死亡时，把死亡消息原文缓冲进附近女仆的事件缓冲。
      * <p>
      * 订阅在事件总线（服务端主线程），行为纪律与 {@link #onMaidTick} 相同：整体 try-catch 兜底，
-     * 绝不向外抛异常。死亡消息直接取原版本地化文本（英文客户端/服务端下即英文原文），
-     * 换行替换为空格保证单行。
+     * 绝不向外抛异常。
      * <p>
-     * 过滤固定为玩家 / 有主人的已驯服动物 / 女仆，普通生物死亡不注入（避免噪音）。
+     * 死亡消息取原版本地化文本：专用服务端未注入语言表、恒为英文原文，
+     * 单人/局域网集成服务端随客户端语言（可能与下方硬编码的受伤行语言不一致，可接受）。
+     * <p>
+     * 过滤固定为玩家 / 有主人的可驯服或可骑乘动物 / 女仆，普通生物死亡不注入（避免噪音）。
      * 死者自身也在感知范围内需显式排除：事件在 {@code LivingEntity#die} 顶部触发，
-     * 此刻死者 health 已为 0 但 {@code isAlive()} 仍可能为 true，扫描时会被当成存活女仆（女仆死亡场景）。
+     * 此刻死者 health 已为 0 但 {@code isAlive()} 仍为 true，扫描时会被当成存活女仆（女仆死亡场景）。
      */
     @SubscribeEvent
     public static void onLivingDeath(LivingDeathEvent event) {
@@ -338,19 +340,25 @@ public final class SelfTalkHandler {
     }
 
     /**
-     * 环境事件：玩家受伤时缓冲一行事件文本（默认关闭，见 {@code event_context.hurtEnabled}）。
+     * 环境事件：玩家实际掉血时缓冲一行事件文本（默认关闭，见 {@code event_context.hurtEnabled}）。
      * <p>
-     * 仅玩家受伤，且每只女仆独立冷却（{@code hurtCooldownSeconds}），防止受伤刷屏。
+     * 订阅伤害结算完成事件而非「即将受伤」事件：格挡成功、无敌帧内被忽略的伤害都不产生实际掉血，
+     * 用后者会把未遂伤害也记成受伤。此处再以 {@code getNewDamage() > 0} 兜底过滤零伤害。
+     * <p>
+     * 仅玩家，且每只女仆独立冷却（{@code hurtCooldownSeconds}），防止受伤刷屏。
      * 原版无受伤消息文本，此处做最小拼接：{@code [Event] <玩家名> was hurt by <攻击者>}。
      */
     @SubscribeEvent
-    public static void onLivingHurt(LivingIncomingDamageEvent event) {
+    public static void onLivingHurt(LivingDamageEvent.Post event) {
         try {
             if (!Config.ENABLED.get() || !Config.EVENT_CONTEXT_ENABLED.get()
                     || !Config.EVENT_CONTEXT_HURT_ENABLED.get()) {
                 return;
             }
             if (!(event.getEntity() instanceof Player player)) {
+                return;
+            }
+            if (event.getNewDamage() <= 0) {
                 return;
             }
             if (!(player.level() instanceof ServerLevel level)) {
@@ -365,16 +373,21 @@ public final class SelfTalkHandler {
         }
     }
 
-    /** 死亡事件过滤：玩家 / 有主人的已驯服动物 / 女仆，其余（普通生物）不注入 */
+    /**
+     * 死亡事件过滤：玩家 / 有主人的动物 / 女仆，其余（普通生物）不注入。
+     * <p>
+     * 有主动物按 {@link OwnableEntity} 判定而非 {@code TamableAnimal}：
+     * 马/驴/骡/骆驼等坐骑不继承 TamableAnimal，但驯服后同样有主人，按前者可一并覆盖。
+     */
     private static boolean isEventWorthyDeath(LivingEntity dead) {
         if (dead instanceof Player || dead instanceof EntityMaid) {
             return true;
         }
-        return dead instanceof TamableAnimal tamable && tamable.getOwnerUUID() != null;
+        return dead instanceof OwnableEntity ownable && ownable.getOwnerUUID() != null;
     }
 
     /**
-     * 把事件文本追加到半径内存活女仆的环形缓冲（死亡与受伤共用）。
+     * 把事件文本追加到半径内存活女仆的事件缓冲（死亡与受伤共用）。
      * <p>
      * {@code excludedEntityId} 用于排除死者自身（死亡事件触发时死者 isAlive 仍为 true，
      * 见 {@link #onLivingDeath}）；受伤路径传玩家实体 ID（玩家不是女仆，等价于不排除）。
@@ -400,14 +413,28 @@ public final class SelfTalkHandler {
             if (applyHurtCooldown) {
                 state.lastHurtEventTick = serverTick;
             }
-            appendEventLine(state, line, max);
+            appendEventLine(state, line, max, serverTick);
         }
     }
 
-    /** 追加一条事件文本到环形缓冲：容量满时丢最旧（热重载调小容量后在该处自然收敛） */
-    private static void appendEventLine(SelfTalkState.State state, String line, int max) {
-        // 换行替换为空格：事件段按单行拼接，含换行的事件文本（自定义死亡消息等）会破坏段落结构
-        String singleLine = line.replace('\n', ' ').replace('\r', ' ');
+    /** 追加一条事件文本到事件缓冲：容量满时丢最旧（热重载调小容量后在该处自然收敛） */
+    private static void appendEventLine(SelfTalkState.State state, String line, int max, long serverTick) {
+        if (max < 1) {
+            // 容量配置被手改成非法值时的兜底：清空而非死循环（defineInRange 正常情况下已钳制）
+            state.pendingEventLines.clear();
+            return;
+        }
+        // 换行替换为空格：事件段按单行拼接，含换行的事件文本（自定义死亡消息等）会破坏段落结构。
+        // 段标签剥离：实体名可能被玩家改成段标签形态（命名牌/玩家名），与自定义 Prompt 同口径清洗，
+        // 防止伪造段边界影响模型的来源区分（不是防提示词注入本身）
+        String singleLine = SegmentTags.stripTagsFromPlayerInput(
+                line.replace('\n', ' ').replace('\r', ' '));
+        // 同 tick 同文本去重：自造 Player 子类的 die() 会先后投递两次死亡事件（Player.die 与 super.die 各一次），
+        // 同一事件的两次投递落在同一 tick，去重避免重复占位与重复注入；跨 tick 的相同文本（同名宠物接连死亡）照常记录
+        if (serverTick == state.lastEventAppendTick && singleLine.equals(state.pendingEventLines.peekLast())) {
+            return;
+        }
+        state.lastEventAppendTick = serverTick;
         while (state.pendingEventLines.size() >= max) {
             state.pendingEventLines.pollFirst();
         }
