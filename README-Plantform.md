@@ -10,8 +10,11 @@
 - **无人设不说话**：无人设的女仆不触发、不自动生成，避免自动生成人设带来的 token 消耗
 - **历史有上限**：自话记录超过配置的条数上限时，自动遗忘旧的、只保留最近一次，防止上下文膨胀
 - **随机注入游戏情境**：随机注入位置 / 附近实体 / 装备等情境信息，提高自话随机性
+- **自定义 Prompt**：可为自己的女仆自定义触发自言自语/互聊时的提示词，支持全部女仆设置与单只女仆独立设置
+- **Tool 调用**：默认关闭，开启后，女仆可能在自言自语/互聊中自行切换状态、获取环境信息等。**会带来额外的token消耗**
 - **玩家单独开关**：每个玩家可单独开关女仆的自言自语与互聊；房主可控制总开关
 - **触发冷却**：可配置的随机触发间隔区间
+- **睡觉时安静**：允许让女仆睡觉时保持安静，不触发自言自语/互聊
 - **聊天可见**：自话与互聊对附近玩家可见
 
 ## 环境要求
@@ -24,7 +27,7 @@
 ## 安装
 
 1. 安装 mod：下载对应版本的 jar
-2. 打开总开关：女仆 AI 设置 → AI 全局设置 →「女仆自言自语」→ 启用；「女仆互聊」需在其子页单独启用；或直接改配置文件的 `enabled`
+2. 打开总开关：女仆 AI 设置 → AI 全局设置 →「女仆自言自语」→ 启用；「女仆互聊」需在其子页单独启用
 
 ## 使用
 
@@ -42,7 +45,12 @@
 
 ### 玩家独立设置
 
-对着女仆打开 AI 聊天输入界面（通常是按 T 键），点左侧 💬 按钮，单独开关这只女仆的自言自语/互聊。
+对着女仆打开 AI 聊天输入界面（通常是按 T 键），点左侧 💬 按钮打开女仆设置：
+
+- **自言自语 / 互聊**：支持单独关闭自言自语/互聊
+- **睡觉安静**：开启后，女仆睡觉时不再触发自言自语/互聊
+- **自定义 Prompt**：支持为「全部女仆」和「这只女仆」分别填写提示词
+- **Tool调用**：全局与单只开关，开启后这只女仆的自言自语/互聊可以调用工具
 
 ## 许可
 
@@ -62,8 +70,11 @@ A mod that adds **self-talk / welcome greetings / maid-to-maid chats** to Touhou
 - **No persona, no talking**: Maids without a persona never trigger and none is auto-generated, avoiding the token cost of auto-generating a persona
 - **Bounded history**: When self-talk history exceeds the configured limit, old entries are forgotten and only the latest one is kept, preventing context bloat
 - **Random in-game context**: Randomly injects context such as location / nearby entities / equipment to make self-talk more varied
+- **Custom Prompt**: Customize the prompts used for self-talk / maid-to-maid chats for your own maids; supports both an all-maids setting and independent per-maid settings
+- **Tool calls**: Off by default. When enabled, maids may switch states, fetch environment info, etc. on their own during self-talk / maid-to-maid chats. **Incurs extra token cost**
 - **Per-player switch**: Each player can toggle self-talk and maid-to-maid chat for individual maids; the host controls the master switch
 - **Trigger cooldown**: A configurable random interval range between triggers
+- **Quiet while sleeping**: Allows maids to stay quiet while sleeping — self-talk and inter-chat won't trigger while they sleep
 - **Visible in chat**: Self-talk and maid-to-maid chats are visible to nearby players
 
 ## Requirements
@@ -76,7 +87,7 @@ A mod that adds **self-talk / welcome greetings / maid-to-maid chats** to Touhou
 ## Installation
 
 1. Install the mod: download the jar for your version
-2. Enable the master switch: Maid AI settings → Global AI settings → "Maid Self-Talk" → Enable; Maid Inter-Chat needs to be enabled separately in its own sub-page; or set `enabled` in the config file directly
+2. Enable the master switch: Maid AI settings → Global AI settings → "Maid Self-Talk" → Enable; Maid Inter-Chat needs to be enabled separately in its own sub-page
 
 ## Usage
 
@@ -94,7 +105,12 @@ Maid AI chat settings → Global AI settings → "Maid Inter-Chat":
 
 ### Per-player settings
 
-Open the maid's AI chat input screen (usually by pressing T) and click the 💬 button on the left to toggle self-talk / maid-to-maid chat for that maid.
+Open the maid's AI chat input screen (usually by pressing T) and click the 💬 button on the left to open the Maid Settings:
+
+- **Self-talk / Inter-chat**: turn self-talk / inter-chat off individually
+- **Sleep Quiet**: when on, self-talk / inter-chat no longer trigger while the maid is sleeping
+- **Custom Prompt**: fill in separate prompts for all maids and for this maid
+- **Tool**: global and per-maid switches; when enabled, this maid's self-talk / inter-chat can call tools
 
 ## License
 
