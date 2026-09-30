@@ -38,7 +38,7 @@
 - 玩家设置（自话/互聊/睡觉安静/自定义 Prompt/Tool）双线均存于 **overworld 世界存档**（neoforge 走 Level 附件、forge 走 SavedData），不随玩家实体；任何维度读同一份
 - forge 线 mixin 注入点全部 `remap=false`（FG6 Mixin AP 按 searge 解析 deobf 依赖方法必然失败；TLM 类 prod 不混淆）；AIChatScreenMixin 继承 Screen 使 `this.addRenderableWidget(...)` 合法、随 reobf 重映射为 `m_142416_`
 - **HTTP 400 陷阱**：自话请求发送前必须调用 `HistoryMessagesCheck.checkMessages(messages)` 清洗未配对的 tool 消息（与 TLM `tryToChat` 同构），否则 OpenAI 兼容 API 拒绝请求；清洗失败时放弃本次触发，绝不向上抛
-- **Tool 历史清理红线**：带工具调用的一轮结束后，`assistant(tool_calls)` 与其 `tool` 结果必须**成对**整批删除。`checkMessages` 只清洗孤立 `tool` 消息、**不清洗**孤立 `assistant(tool_calls)`，留下会让后续所有请求被 400 拒绝；不可改成按 role 扫全表删除（会误删玩家聊天路径的记录）
+- **Tool 历史清理红线**：带工具调用的一轮结束后，`assistant(tool_calls)` 与其 `tool` 结果必须按本轮捕获的引用**成对**整批删除；不可改成按 role 扫全表删除（会误删玩家聊天路径的记录）。TLM 1.5.3 的 `checkMessages` 含 `removeUnpairedToolCalls`，会处理未配对的工具调用，但不能用发送前清洗代替本轮生命周期清理；无效配对仍可能导致 API 返回 400
 - 欢迎窗口计时必须用 `server.getTickCount()`（全局单调 tick）；各维度 `gameTime` 独立计数，跨维度比较会出现负差
 - **限流闸门**：欢迎语全局每秒最多 1 次（`rate_limit.maxTriggerPerSecond`）；自话全局每 5~8 秒（`rate_limit.selfTalkMinIntervalSeconds` / `selfTalkMaxIntervalSeconds`）放行 1 只，**互聊发起者派发共用同一自话闸门**（链式续接不走闸门）；被限流自话**不发请求**、随机退避 8~15 秒重试（玩家聊天框不会出现报错）；欢迎语无退避、窗口期内每 tick 重试，排队若在窗口期内未轮到会错过该次欢迎
 - **环境事件过滤**：死亡事件固定过滤为玩家、有主动物、其他女仆——「有主动物」必须按 `OwnableEntity` 判定（马/驴/骡等坐骑不继承 `TamableAnimal` 但同样有主人）；受伤事件必须用**实际掉血**事件（neo `LivingDamageEvent.Post` / forge `LivingDamageEvent`），更早的 incoming/hurt 事件在格挡成功或减免到 0 时仍会以正数触发
