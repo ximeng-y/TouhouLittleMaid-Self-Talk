@@ -94,6 +94,8 @@ public final class Config {
     // ===== 附近女仆身份 =====
     /** 附近女仆身份上下文注入开关（仅启动时读取，改动需重启） */
     public static ForgeConfigSpec.BooleanValue MAID_IDENTITY_ENABLED;
+    /** 附近女仆查询 Tool 开关（仅启动时读取，改动需重启） */
+    public static ForgeConfigSpec.BooleanValue MAID_IDENTITY_TOOL_ENABLED;
 
     public static final ForgeConfigSpec SPEC;
 
@@ -233,8 +235,17 @@ public final class Config {
                 不改动 system 人设，也不拦截模型输出。
                 是否注册此项在启动时读取一次，修改后需重启服务端；
                 女仆名称等数据每次查询时实时读取，改名后下一次查询即为新名称，UUID 不变。
-                专用服务器需修改服务端配置。默认关闭。""")
-                .define("enabled", false);
+                专用服务器需修改服务端配置。默认开启。""")
+                .define("enabled", true);
+        MAID_IDENTITY_TOOL_ENABLED = builder.comment("""
+                注册「查询附近女仆」Tool（query_nearby_maids），供模型自行决定是否调用：
+                返回半径固定 32 格内每只女仆的 UUID、当前命名牌名称与到调用者的距离。
+                与上面的上下文注入相互独立——注入是被动地随情境给出，本工具是模型主动取用，
+                两者都只降低模型照抄内部标识符的风险，不拦截输出。
+                工具一旦注册，玩家聊天与自言自语/互聊的请求都会看到它（是否带工具仍由
+                玩家级 Tool 开关决定）。是否注册在启动时读取一次，修改后需重启服务端。
+                默认开启。""")
+                .define("toolEnabled", true);
         builder.pop();
 
         SPEC = builder.build();
