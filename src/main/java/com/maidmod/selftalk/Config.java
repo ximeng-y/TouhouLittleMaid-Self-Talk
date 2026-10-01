@@ -91,6 +91,10 @@ public final class Config {
     /** 玩家受伤事件的每只女仆独立冷却（秒） */
     public static ForgeConfigSpec.IntValue EVENT_CONTEXT_HURT_COOLDOWN_SECONDS;
 
+    // ===== 附近女仆身份 =====
+    /** 附近女仆身份上下文注入开关（仅启动时读取，改动需重启） */
+    public static ForgeConfigSpec.BooleanValue MAID_IDENTITY_ENABLED;
+
     public static final ForgeConfigSpec SPEC;
 
     static {
@@ -220,6 +224,17 @@ public final class Config {
                 .define("hurtEnabled", false);
         EVENT_CONTEXT_HURT_COOLDOWN_SECONDS = builder.comment("每只女仆记录玩家受伤事件的最小间隔（秒），防止短时间内刷屏")
                 .defineInRange("hurtCooldownSeconds", 60, 10, 600);
+        builder.pop();
+
+        builder.push("maid_identity");
+        MAID_IDENTITY_ENABLED = builder.comment("""
+                向「附近实体」上下文补充附近女仆的 UUID 与当前命名牌名称，让模型能区分同名女仆、
+                识别改名前后的同一对象。仅影响随机的附近实体情境与 query_game_context 的查询结果，
+                不改动 system 人设，也不拦截模型输出。
+                是否注册此项在启动时读取一次，修改后需重启服务端；
+                女仆名称等数据每次查询时实时读取，改名后下一次查询即为新名称，UUID 不变。
+                专用服务器需修改服务端配置。默认关闭。""")
+                .define("enabled", false);
         builder.pop();
 
         SPEC = builder.build();
