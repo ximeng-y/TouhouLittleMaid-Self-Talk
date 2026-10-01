@@ -192,7 +192,7 @@ public final class Config {
                 不能发起、也不能被发起互聊（其它女仆的随机候选池不再包含这对）。
                 链自然结束/请求失败/女仆死亡卸载时均会提前解锁；该时长仅为
                 回调永不返回等无法感知的异常中断时的超时兜底。""")
-                .defineInRange("pairLockSeconds", 120, 10, 600);
+                .defineInRange("pairLockSeconds", 90, 10, 600);
         builder.pop();
 
         builder.push("event_context");

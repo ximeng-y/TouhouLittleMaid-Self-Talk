@@ -32,7 +32,7 @@ import java.util.UUID;
  * 自话触发条件（全部满足才触发一次自话）：
  * <ol>
  *   <li>总开关开启、TLM AI 开关开启、LLM site 可用、女仆有人设（无则跳过，不自动生成）；</li>
- *   <li>无正在进行的自话/互聊/玩家 chat（防止交错写历史）；</li>
+ *   <li>无正在进行的自话/互聊/玩家 chat，且本人不处于互聊对锁中（防止交错写历史）；</li>
  *   <li>冷却期已过（间隔在配置区间内随机，每次触发后重新随机）；</li>
  *   <li>无主人女仆不触发；有主人的按态判定：</li>
  * </ol>
@@ -231,6 +231,13 @@ public final class SelfTalkHandler {
 
         // 冷却期
         if (serverTick < state.nextTriggerTick) {
+            return;
+        }
+
+        // 互聊对锁：本人正在与他人连续互聊中（含链上交接的间隙——本人 pending 已清、队列已空，
+        // 但对方正在生成回复），本次自话直接放弃，不消耗共享闸门额度、不掷自话冷却。
+        // 必须置于上方互聊触发段之后（其本身也依赖对锁分支），且位于冷却检查之后（冷却未到先省下开销）
+        if (SelfTalkDispatcher.isMaidInterChatLocked(maid, serverTick)) {
             return;
         }
 
