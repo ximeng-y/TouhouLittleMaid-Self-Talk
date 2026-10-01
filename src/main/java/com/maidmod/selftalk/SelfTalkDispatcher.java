@@ -17,11 +17,11 @@ import java.util.Map;
  * 吞请求规则：
  * <ol>
  *   <li>顺延队列超出上限 → 丢弃本次请求（队列过多才吞，避免挤压自然触发队列）；</li>
- *   <li>自话与互聊冲突 → 互聊优先：入队自话时若已有互聊在途/在队则丢弃自话，
- *       入队互聊时清掉队内自话（「互相聊天顶掉自言自语」）。</li>
+ *   <li>自话与互聊冲突 → 互聊优先：入队自话时若已有互聊在途、已在队，或本人处于互聊对锁中
+ *       则丢弃自话，入队互聊时清掉队内自话（「互相聊天顶掉自言自语」）。</li>
  * </ol>
  * 多女仆互聊对锁：A 对 C 发起互聊后，二者在「连续互聊结束」前互相对锁——
- * 不能发起、也不能被发起互聊（其它女仆的随机候选池不再包含这对）。
+ * 不能发起、也不能被发起互聊（其它女仆的随机候选池不再包含这对），期间也不触发自话。
  */
 public final class SelfTalkDispatcher {
 
@@ -64,8 +64,11 @@ public final class SelfTalkDispatcher {
         if (isInterChat) {
             // 互聊优先：清掉队内自话（互相聊天顶掉自言自语）
             state.deferredRequests.removeIf(r -> r.kind() == SelfTalkState.RequestKind.SELF_TALK);
-        } else if (state.interChatPending || hasQueuedInterChat(state)) {
-            // 自话与互聊冲突（互聊在途或已在队）：吞掉自话
+        } else if (state.interChatPending || hasQueuedInterChat(state)
+                || isMaidInterChatLocked(maid, maid.level().getServer().getTickCount())) {
+            // 自话与互聊冲突（互聊在途/已在队/本人处于互聊对锁中）：吞掉自话。
+            // 对锁同样算「互聊进行中」——链上交接的间隙本人 pending 已清、队列已空，
+            // 但锁仍在（对方正在生成回复），此时放行自话即与互聊交替进行，故一并吞掉
             return;
         }
         if (state.deferredRequests.size() >= Config.DEFER_QUEUE_MAX.get()) {
@@ -120,6 +123,12 @@ public final class SelfTalkDispatcher {
         }
         switch (req.kind()) {
             case SELF_TALK -> {
+                // 对锁期间不派发自话：顺延队列里的自话可能在本人被锁定之后才轮到出队
+                // （锁由「对方发起互聊」的派发挂上，那一刻不会清理本人队内的自话），
+                // 此处兜底丢弃，与 submit 的冲突规则同语义
+                if (isMaidInterChatLocked(maid, maid.level().getServer().getTickCount())) {
+                    return false;
+                }
                 return MaidSelfTalkService.triggerSelfTalk(maid, false, req.keep(), req.broadcastRange());
             }
             case INTER_CHAT_INITIATOR, INTER_CHAT_RESPONDER -> {
