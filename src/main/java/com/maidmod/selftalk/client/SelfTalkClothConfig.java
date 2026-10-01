@@ -211,6 +211,18 @@ public final class SelfTalkClothConfig {
                 .build());
         main.add(eventContext.build());
 
+        SubCategoryBuilder maidIdentity = entryBuilder.startSubCategory(
+                        Component.translatable("config.maid_self_talk.maid_identity"))
+                .setExpanded(false);
+        maidIdentity.add(entryBuilder.startBooleanToggle(
+                        Component.translatable("config.maid_self_talk.maid_identity.enabled"),
+                        Config.MAID_IDENTITY_ENABLED.get())
+                .setDefaultValue(false)
+                .setTooltip(Component.translatable("config.maid_self_talk.maid_identity.enabled.tooltip"))
+                .setSaveConsumer(v -> saveBool(Config.MAID_IDENTITY_ENABLED, v))
+                .build());
+        main.add(maidIdentity.build());
+
         globalAi.addEntry(main.build());
     }
 
