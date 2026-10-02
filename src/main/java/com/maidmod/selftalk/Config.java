@@ -79,17 +79,19 @@ public final class Config {
     /** 互聊对锁时长（秒）：A 对 C 发起互聊后，二者在连续互聊结束前互相对锁，超时兜底自动解除 */
     public static ForgeConfigSpec.IntValue INTER_CHAT_PAIR_LOCK_SECONDS;
 
-    // ===== 环境事件 =====
-    /** 附近环境事件注入总开关（注入自话/互聊，欢迎语不受影响） */
+    // ===== 环境感知（附近事件与自身状态） =====
+    /** 环境感知总开关：附近死亡/玩家受伤与女仆自身感知的总闸（注入自话/互聊，欢迎语不受影响） */
     public static ForgeConfigSpec.BooleanValue EVENT_CONTEXT_ENABLED;
-    /** 死亡与受伤事件共用的感知半径（格） */
+    /** 附近死亡与玩家受伤的感知半径（格），不约束女仆自身感知 */
     public static ForgeConfigSpec.DoubleValue EVENT_CONTEXT_RANGE;
-    /** 每只女仆的事件缓冲容量（死亡/受伤共用，溢出丢最旧） */
+    /** 每只女仆的事件缓冲容量（死亡/玩家受伤/自身受伤共用，溢出丢最旧） */
     public static ForgeConfigSpec.IntValue EVENT_CONTEXT_MAX_BUFFERED;
-    /** 玩家受伤事件开关（受伤频率远高于死亡，默认关闭） */
+    /** 玩家受伤事件开关（受伤频率远高于死亡，默认关闭；不影响女仆自身感知） */
     public static ForgeConfigSpec.BooleanValue EVENT_CONTEXT_HURT_ENABLED;
-    /** 玩家受伤事件的每只女仆独立冷却（秒） */
-    public static ForgeConfigSpec.IntValue EVENT_CONTEXT_HURT_COOLDOWN_SECONDS;
+    /** 自身感知开关（自身着火/缺氧/受伤） */
+    public static ForgeConfigSpec.BooleanValue EVENT_CONTEXT_SELF_ENABLED;
+    /** 受伤事件有效期（秒）：玩家受伤与自身受伤记录共用的有效时长 */
+    public static ForgeConfigSpec.IntValue EVENT_CONTEXT_HURT_MAX_AGE_SECONDS;
 
     // ===== 附近女仆身份 =====
     /** 附近女仆身份上下文注入开关（仅启动时读取，改动需重启） */
@@ -206,26 +208,39 @@ public final class Config {
 
         builder.push("event_context");
         EVENT_CONTEXT_ENABLED = builder.comment("""
-                附近环境事件注入总开关。关闭后下面的死亡与受伤事件均不注入。
-                女仆感知半径内发生死亡时，把死亡消息缓冲下来，注入该女仆下一次自言自语/互聊的提示词；
-                欢迎语不注入。过滤固定为玩家、有主人的动物、其他女仆，普通生物死亡不注入。
-                死亡文本取原版本地化消息：专用服务端为英文原文（如 "[Event] Steve was slain by Zombie"），
-                单人/局域网随客户端语言。""")
+                环境感知总开关，默认开启。关闭后附近事件与女仆自身感知均不注入。
+                开启后，女仆感知半径内发生的死亡与玩家受伤会被记录，连同女仆自身的着火、
+                缺氧与自身受伤，一起整理成自然语言背景，注入该女仆下一次自言自语/互聊的提示词；
+                欢迎语不注入。死亡只记录玩家、有主人的动物与其他女仆，普通生物死亡不记录。
+                死亡文本取原版本地化消息：专用服务端为英文原文，单人/局域网随客户端语言。
+                这些记录只存在于服务端内存与当次请求，不写入世界存档。""")
                 .define("enabled", true);
-        EVENT_CONTEXT_RANGE = builder.comment("事件感知半径（格），死亡与受伤共用")
+        EVENT_CONTEXT_RANGE = builder.comment("附近死亡与玩家受伤的感知半径（格），不约束女仆自身感知")
                 .defineInRange("range", 32.0, 1.0, 512.0);
         EVENT_CONTEXT_MAX_BUFFERED = builder.comment("""
-                每只女仆的事件缓冲容量（死亡/受伤共用，溢出丢弃最旧的一条）。
+                每只女仆的事件缓冲容量，死亡、玩家受伤与自身受伤共用，溢出丢弃最旧的一条。
                 缓冲在下一次自言自语或互聊时被取用并清空（谁先派发谁消费）。""")
                 .defineInRange("maxBufferedEvents", 5, 1, 20);
         EVENT_CONTEXT_HURT_ENABLED = builder.comment("""
-                玩家受伤事件注入开关，默认关闭。
+                玩家受伤事件开关，默认关闭，不影响女仆自身感知。
                 受伤发生频率远高于死亡，开启后提示词噪音明显增多；同样受感知半径约束。
-                仅在玩家实际掉血时记录（格挡成功、无敌帧内被忽略的伤害不记），
-                文本为 "[Event] <玩家名> was hurt by <攻击者>" 形式的最小拼接（原版无受伤消息）。""")
+                只在玩家实际掉血时记录（格挡成功、无敌帧内被忽略的伤害不记）。
+                为控制积压，同一只女仆记录玩家受伤的最小间隔固定为 1 秒（不可配置），
+                因此记录条数不等于实际受击次数。""")
                 .define("hurtEnabled", false);
-        EVENT_CONTEXT_HURT_COOLDOWN_SECONDS = builder.comment("每只女仆记录玩家受伤事件的最小间隔（秒），防止短时间内刷屏")
-                .defineInRange("hurtCooldownSeconds", 60, 10, 600);
+        EVENT_CONTEXT_SELF_ENABLED = builder.comment("""
+                女仆自身感知开关，默认开启，与玩家受伤开关相互独立。
+                包含：自身着火、水下缺氧，以及自身实际掉血（含伤害来源）。
+                自身受伤不受感知半径约束，也不需要附近有玩家；只影响该女仆自己下一次
+                自言自语/互聊，不会告知附近其它女仆。""")
+                .define("selfEnabled", true);
+        EVENT_CONTEXT_HURT_MAX_AGE_SECONDS = builder.comment("""
+                受伤事件有效期（秒），玩家受伤与女仆自身受伤共用。
+                超过该时长的受伤记录在下一次记录或派发时被淘汰，不再注入提示词；
+                调小后已淘汰的记录不会因调大而恢复。死亡记录不设有效期。
+                为避免积压，同一只女仆记录受伤的最小间隔固定为 1 秒（不可配置），
+                短时间内多次受击只会保留其中一部分。""")
+                .defineInRange("hurtMaxAgeSeconds", 60, 1, 600);
         builder.pop();
 
         builder.push("maid_identity");
