@@ -20,8 +20,8 @@ import java.util.List;
  * 消息流与玩家 chat 完全同构，保证 LLM 提供商上下文前缀缓存一致：
  * <ol>
  *   <li>@Invoker 调 {@code MaidAIChatManager.getMessages} 拿到 [system 设定, 摘要, ...历史] 前缀；</li>
- *   <li>随机纳入 1~3 类游戏情境信息（位置/附近实体/装备/效果/用户/状态/世界）拼入提示词，防同质化；</li>
- *   <li>提示词经 {@link UserPromptContexts#addContext} 注入游戏状态后作为 user 消息追加；</li>
+ *   <li>拼入提示词：自话走 {@link SelfTalkContexts#buildConfiguredUserMessage}（按玩家三态偏好选择环境信息，
+ *       含固定上下文前缀与感知段）；欢迎语保留旧路径（分类级随机 + TLM 固定上下文，不读偏好、不消费事件）；</li>
  *   <li>user 消息<b>不写入</b> TLM 历史（系统内部消息，不出现在聊天记录 UI 中）；
  *       assistant 回复由 {@link SelfTalkCallback} 的父类逻辑写入历史，自动纳入原生聊天记录界面；</li>
  *   <li>发送 {@link SelfTalkCallback}，回复返回后执行遗忘检查。</li>
@@ -92,17 +92,22 @@ public final class MaidSelfTalkService {
         boolean ownerNearby = isOwnerNearby(maid);
         String prompt = welcome ? SelfTalkPrompts.WELCOME
                 : (ownerNearby ? SelfTalkPrompts.SELF_TALK_OWNER_NEARBY : SelfTalkPrompts.SELF_TALK);
-        // 拼装顺序：硬编码提示词 + 语言指令 + Tool 策略段(仅 Tool 开启时) + 自定义 Prompt(贴在指令主体后)
-        // + 随机情境(环境数据始终放最后) + 感知段(仅自话，欢迎语不注入也不消费)。
-        // 自定义段不得进入 SelfTalkPrompts 常量、也不得出现在格式引导(第 5 条)之前——见 SelfTalkPrompts 类注释红线
+        // 拼装顺序：硬编码提示词 + 语言指令 + Tool 策略段(仅 Tool 开启时) + 自定义 Prompt(贴在指令主体后)。
+        // 自定义段不得进入 SelfTalkPrompts 常量、也不得出现在格式引导(第 5 条)之前——见 SelfTalkPrompts 类注释红线。
         prompt = prompt + SelfTalkContexts.languageInstruction(selfTalkLanguage)
                 + SelfTalkContexts.toolPolicyBlock(maid, selfTalkLanguage, false)
-                + SelfTalkContexts.customPromptBlock(maid, selfTalkLanguage)
-                + SelfTalkContexts.buildRandomContext(maid)
-                + (welcome ? StringUtils.EMPTY : SelfTalkContexts.perceptionContextBlock(maid));
+                + SelfTalkContexts.customPromptBlock(maid, selfTalkLanguage);
 
-        // 与玩家 chat 相同的 context 注入，保证消息结构与缓存前缀一致
-        String message = UserPromptContexts.addContext(maid, prompt);
+        String message;
+        if (welcome) {
+            // 欢迎语保留旧路径：分类级随机 + TLM 固定上下文，不读三态偏好、不消费感知事件
+            // （感知事件段在 checkMessages 之后才 drain，此处必须先补回，见下方 self-talk 分支注释）
+            message = UserPromptContexts.addContext(maid, prompt + SelfTalkContexts.buildRandomContext(maid));
+        } else {
+            // 自话：三态偏好选出的环境信息 + 固定上下文前缀一次成文；本入口内部已含 <context> 包装，
+            // 不得再调 addContext（会套两层包装），也不在此后追加任何上下文段
+            message = SelfTalkContexts.buildConfiguredUserMessage(maid, prompt);
+        }
         messages.add(LLMMessage.userChat(maid, message));
 
         // 标记进行中（防重入）

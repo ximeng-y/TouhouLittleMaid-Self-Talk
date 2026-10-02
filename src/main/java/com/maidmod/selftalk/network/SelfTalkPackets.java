@@ -2,6 +2,9 @@ package com.maidmod.selftalk.network;
 
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.Config;
+import com.maidmod.selftalk.EnvironmentContextMode;
+import com.maidmod.selftalk.EnvironmentContextOption;
+import com.maidmod.selftalk.EnvironmentContextSettings;
 import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.PlayerSettingsStore;
 import com.maidmod.selftalk.SelfTalkAttachments;
@@ -38,9 +41,9 @@ public final class SelfTalkPackets {
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {
-        // v5：新增「自定义 Prompt」与「Tool 调用」共 6 个 payload；按 network-backward-compat
-        // 既定决策不做向后兼容——NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需全服同步
-        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("5");
+        // v6：新增「环境上下文三态偏好」的 3 个 payload（request/set/response）；同样不做向后兼容——
+        // NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
+        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("6");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,
                 SelfTalkPackets::handleConfigRequest);
         registrar.playToServer(SelfTalkConfigSetPayload.TYPE, SelfTalkConfigSetPayload.STREAM_CODEC,
@@ -71,6 +74,15 @@ public final class SelfTalkPackets {
                 SelfTalkPackets::handleToolSet);
         registrar.playToClient(ToolConfigResponsePayload.TYPE, ToolConfigResponsePayload.STREAM_CODEC,
                 SelfTalkPackets::handleToolResponse);
+        registrar.playToServer(EnvironmentContextConfigRequestPayload.TYPE,
+                EnvironmentContextConfigRequestPayload.STREAM_CODEC,
+                SelfTalkPackets::handleEnvironmentContextRequest);
+        registrar.playToServer(EnvironmentContextConfigSetPayload.TYPE,
+                EnvironmentContextConfigSetPayload.STREAM_CODEC,
+                SelfTalkPackets::handleEnvironmentContextSet);
+        registrar.playToClient(EnvironmentContextConfigResponsePayload.TYPE,
+                EnvironmentContextConfigResponsePayload.STREAM_CODEC,
+                SelfTalkPackets::handleEnvironmentContextResponse);
     }
 
     /** 服务端：响应玩家的自话设置查询（全局值 + 请求女仆的单只有效值；1.1.2 起读世界存档、离线亦可查） */
@@ -337,6 +349,51 @@ public final class SelfTalkPackets {
     }
 
     /**
+     * 服务端：响应玩家环境上下文设置查询（权威全量快照）。
+     * <p>
+     * 管理员不允许编辑时<b>照样返回完整快照</b>供查看（界面需显示已存偏好并说明为何不可改）；
+     * 被限流丢弃的请求不回包，不能借「回包」绕过限流扩大流量。
+     */
+    private static void handleEnvironmentContextRequest(EnvironmentContextConfigRequestPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer && payload.sessionId() != null
+                    && allowConfigPacket(serverPlayer.getUUID())) {
+                context.reply(EnvironmentContextConfigResponsePayload.snapshot(
+                        serverPlayer.server, serverPlayer.getUUID(), payload.sessionId(), payload.seq()));
+            }
+        });
+    }
+
+    /**
+     * 服务端：保存环境上下文单项模式（纵深防御，不信任客户端）。
+     * <p>
+     * 逐项复检管理权限、合法 key、合法 mode 与服务端功能可用性：任一条不过就只回快照、不改存档。
+     * 同值 Set 也回快照（客户端据此清掉「同步中」），但存储层删键/写键是幂等的，无额外标脏。
+     * <p>
+     * 这里刻意<b>不</b>把「管理员禁用／提供者未注册」当作非法 key：这些偏好必须保留，功能恢复后继续生效。
+     */
+    private static void handleEnvironmentContextSet(EnvironmentContextConfigSetPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (!(player instanceof ServerPlayer serverPlayer) || payload.sessionId() == null
+                    || !allowConfigPacket(serverPlayer.getUUID())) {
+                return;
+            }
+            EnvironmentContextOption option = EnvironmentContextOption.byKey(payload.contextKey());
+            EnvironmentContextMode mode = EnvironmentContextMode.fromId(payload.modeId());
+            if (option != null && mode != null
+                    && Config.PLAYER_OPTION_ENABLED.get()
+                    && EnvironmentContextSettings.availabilityOf(option).configurable()) {
+                PlayerSettingsStore.setEnvironmentContextMode(
+                        serverPlayer.server, serverPlayer.getUUID(), option, mode);
+            }
+            context.reply(EnvironmentContextConfigResponsePayload.snapshot(
+                    serverPlayer.server, serverPlayer.getUUID(), payload.sessionId(), payload.seq()));
+        });
+    }
+
+    /**
      * Prompt 写入清洗：长度截断 500、去除 NUL 与 CR（防超大包与控制字符污染存档）。
      * 段标签/零宽字符的剥除不在此处——那是请求注入时的职责（SegmentTags.stripTagsFromPlayerInput），
      * 界面与存档保留玩家原文。
@@ -407,5 +464,11 @@ public final class SelfTalkPackets {
     /** 客户端：收到 Tool 调用设置响应 */
     private static void handleToolResponse(ToolConfigResponsePayload payload, IPayloadContext context) {
         context.enqueueWork(() -> SelfTalkPlayerSettingsClient.onToolConfigResponse(payload));
+    }
+
+    /** 客户端：收到环境上下文设置响应（会话/序号校验在客户端浮层内完成） */
+    private static void handleEnvironmentContextResponse(EnvironmentContextConfigResponsePayload payload,
+                                                         IPayloadContext context) {
+        context.enqueueWork(() -> SelfTalkPlayerSettingsClient.onEnvironmentContextResponse(payload));
     }
 }
