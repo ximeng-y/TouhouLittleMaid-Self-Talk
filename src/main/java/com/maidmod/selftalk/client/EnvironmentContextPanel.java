@@ -412,26 +412,36 @@ public final class EnvironmentContextPanel {
         if (!open) {
             return;
         }
-        graphics.fill(0, 0, screenWidth, screenHeight, SCRIM);
-        graphics.fill(panelX, panelY, panelX + panelWidth, panelY + panelHeight, PANEL_BG);
-        // 1px 边框（无 shader 依赖，用四条 fill 拼）
-        graphics.fill(panelX, panelY, panelX + panelWidth, panelY + 1, BORDER_COLOR);
-        graphics.fill(panelX, panelY + panelHeight - 1, panelX + panelWidth, panelY + panelHeight, BORDER_COLOR);
-        graphics.fill(panelX, panelY, panelX + 1, panelY + panelHeight, BORDER_COLOR);
-        graphics.fill(panelX + panelWidth - 1, panelY, panelX + panelWidth, panelY + panelHeight, BORDER_COLOR);
+        // 分开提交底页与浮层；同 Z 下不透明填充仍盖不住底页文字，必须整体抬层。
+        graphics.flush();
+        graphics.pose().pushPose();
+        try {
+            // 高于底页内容，低于原版 tooltip 的 Z=400。
+            graphics.pose().translate(0.0F, 0.0F, 350.0F);
+            graphics.fill(0, 0, screenWidth, screenHeight, SCRIM);
+            graphics.fill(panelX, panelY, panelX + panelWidth, panelY + panelHeight, PANEL_BG);
+            // 1px 边框（无 shader 依赖，用四条 fill 拼）
+            graphics.fill(panelX, panelY, panelX + panelWidth, panelY + 1, BORDER_COLOR);
+            graphics.fill(panelX, panelY + panelHeight - 1, panelX + panelWidth, panelY + panelHeight, BORDER_COLOR);
+            graphics.fill(panelX, panelY, panelX + 1, panelY + panelHeight, BORDER_COLOR);
+            graphics.fill(panelX + panelWidth - 1, panelY, panelX + panelWidth, panelY + panelHeight, BORDER_COLOR);
 
-        graphics.drawString(font, Component.translatable(
-                        "config.maid_self_talk.screen.player_settings.context.title"),
-                panelX + NAME_MARGIN, panelY + 10, TITLE_COLOR, false);
-        graphics.drawString(font, Component.translatable(
-                        "config.maid_self_talk.screen.player_settings.context.scope"),
-                panelX + NAME_MARGIN, panelY + 24, SUBTITLE_COLOR, false);
+            graphics.drawString(font, Component.translatable(
+                            "config.maid_self_talk.screen.player_settings.context.title"),
+                    panelX + NAME_MARGIN, panelY + 10, TITLE_COLOR, false);
+            graphics.drawString(font, Component.translatable(
+                            "config.maid_self_talk.screen.player_settings.context.scope"),
+                    panelX + NAME_MARGIN, panelY + 24, SUBTITLE_COLOR, false);
 
-        renderList(graphics, mouseX, mouseY);
-        renderFooter(graphics);
-        renderCloseButton(graphics, mouseX, mouseY, partialTick);
+            renderList(graphics, mouseX, mouseY);
+            renderFooter(graphics);
+            renderCloseButton(graphics, mouseX, mouseY, partialTick);
+        } finally {
+            graphics.pose().popPose();
+        }
+        graphics.flush();
 
-        // 禁用原因 tooltip（最后绘制，压在浮层之上）
+        // 恢复姿态后再绘制原版 tooltip，保持在浮层之上。
         if (inRect(mouseX, mouseY, closeX(), closeY(), CLOSE_SIZE, CLOSE_SIZE)) {
             graphics.renderTooltip(font, wrap("config.maid_self_talk.screen.player_settings.context.close.tooltip"),
                     mouseX, mouseY);
