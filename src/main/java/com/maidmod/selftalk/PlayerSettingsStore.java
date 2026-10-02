@@ -3,6 +3,7 @@ package com.maidmod.selftalk;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.server.MinecraftServer;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -18,7 +19,8 @@ import java.util.UUID;
  *   <li>睡觉时安静全局开关缺省 true（安静）——<b>极性与上相反</b>，玩家允许说话时存 false；</li>
  *   <li>自话/互聊单只名单只存 false（关闭项）；睡觉时安静单只名单只存 true（安静项）；</li>
  *   <li>自定义 Prompt 全局/单只段空串不落盘（缺失 = 未填写）；覆盖开关与 Tool 全局开关仅存 true；</li>
- *   <li>Tool 单只名单只存 false（关闭项），Tool 全局缺省 false——玩家默认不开启 Tool。</li>
+ *   <li>Tool 单只名单只存 false（关闭项），Tool 全局缺省 false——玩家默认不开启 Tool；</li>
+ *   <li>环境上下文三态偏好只存与目录默认模式不同的项（原随机项保持 random、原固定项保持 always 都不落盘）。</li>
  * </ul>
  */
 public final class PlayerSettingsStore {
@@ -259,5 +261,41 @@ public final class PlayerSettingsStore {
     /** 某玩家 Tool 单只关闭名单条数（上限检查用） */
     public static int countToolCallMaidOverrides(MinecraftServer server, UUID playerUuid) {
         return data(server).countToolCallMaidOverrides(playerUuid);
+    }
+
+    // ===== 环境上下文三态偏好 =====
+
+    /**
+     * 该玩家保存的环境上下文覆盖表（独立快照，不泄漏存档内部的可变 Map）。
+     * <p>
+     * 只含与目录默认模式不同的项，因此可能少于 32 项，也可能是空表。
+     */
+    public static Map<String, EnvironmentContextMode> getEnvironmentContextOverrides(MinecraftServer server, UUID playerUuid) {
+        if (playerUuid == null) {
+            return new HashMap<>();
+        }
+        return data(server).getEnvironmentContextOverrides(playerUuid);
+    }
+
+    /**
+     * 该玩家对某条目的偏好模式（缺省补目录默认值）。
+     * <p>
+     * <b>不因管理员临时禁用或提供者缺失而篡改返回值</b>：这里只表达玩家自己的选择，
+     * 有效模式的门控（{@code PLAYER_OPTION_ENABLED} 时改用默认值）由
+     * {@link EnvironmentContextSettings#effectiveModes} 统一计算。
+     */
+    public static EnvironmentContextMode getEnvironmentContextMode(MinecraftServer server, UUID playerUuid,
+                                                                   EnvironmentContextOption option) {
+        return getEnvironmentContextOverrides(server, playerUuid).getOrDefault(option.key(), option.defaultMode());
+    }
+
+    /**
+     * 保存某条目的模式：与目录默认一致时删键，否则写覆盖；内层表清空后删外层键。
+     * <p>
+     * 注意不能把「所有 random 都当默认」——原固定项改为 random 时必须落盘。
+     */
+    public static void setEnvironmentContextMode(MinecraftServer server, UUID playerUuid,
+                                                 EnvironmentContextOption option, EnvironmentContextMode mode) {
+        data(server).setEnvironmentContextMode(playerUuid, option, mode);
     }
 }

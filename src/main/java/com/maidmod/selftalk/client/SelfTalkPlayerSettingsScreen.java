@@ -3,6 +3,7 @@ package com.maidmod.selftalk.client;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.network.SelfTalkPackets;
 import com.maidmod.selftalk.network.CustomPromptConfigRequestMessage;
+import com.maidmod.selftalk.network.EnvironmentContextConfigResponseMessage;
 import com.maidmod.selftalk.network.CustomPromptConfigSetMessage;
 import com.maidmod.selftalk.network.InterChatConfigRequestMessage;
 import com.maidmod.selftalk.network.InterChatConfigSetMessage;
@@ -51,6 +52,8 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private static final int PANEL_WIDTH = 190;
     /** Prompt 输入框高度：3 行文本 + 内边距 */
     private static final int PROMPT_BOX_HEIGHT = 36;
+    /** 「屏幕外」鼠标坐标：浮层打开时用它绘制底层控件，避免底层出现悬停高亮 */
+    private static final int OFFSCREEN = -1000;
 
     private final EntityMaid maid;
 
@@ -106,6 +109,10 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private MultiLineEditBox lastFocusedBox;
     /** 程序化 setValue 期间挂起 value listener（防误标 dirty） */
     private boolean suspendPromptListener = false;
+    /** 环境上下文入口按钮（右侧 Prompt 区，打开浮层） */
+    private Button environmentContextButton;
+    /** 环境上下文浮层（本 Screen 内部管理的组件，不是另一个 Screen） */
+    private final EnvironmentContextPanel environmentContextPanel;
     // ===== 布局（init 计算，render 复用；resize 重建时刷新） =====
     private int leftX;
     private int rightX;
@@ -115,6 +122,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     public SelfTalkPlayerSettingsScreen(EntityMaid maid) {
         super(Component.translatable("config.maid_self_talk.screen.player_settings.title"));
         this.maid = maid;
+        this.environmentContextPanel = new EnvironmentContextPanel(this.font);
     }
 
     @Override
@@ -194,13 +202,35 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                 .tooltip(Tooltip.create(Component.translatable(
                         "config.maid_self_talk.screen.player_settings.custom_prompt.override.tooltip")))
                 .build());
+        // 环境上下文入口：放在右侧 Prompt 区（左列已有 8 枚按钮，再往左列追加会把页面继续撑高）。
+        // 入口本身始终可打开——即使管理员禁止编辑，也要能进去看到禁用说明
+        this.environmentContextButton = this.addRenderableWidget(Button.builder(
+                        Component.translatable("config.maid_self_talk.screen.player_settings.context.entry"),
+                        b -> openEnvironmentContextPanel())
+                .bounds(rightX, colTop + 172, panelW, 20)
+                .build());
+        this.environmentContextPanel.layout(this.width, this.height);
         refreshButtonState();
+    }
+
+    /**
+     * 打开环境上下文浮层：先 flush Prompt 编辑（清掉输入框焦点，内容不清空——关闭浮层后仍要能继续编辑），
+     * 再让浮层换新会话并请求快照。
+     */
+    private void openEnvironmentContextPanel() {
+        flushPromptEdits();
+        this.setFocused(null);
+        this.environmentContextPanel.layout(this.width, this.height);
+        this.environmentContextPanel.open();
     }
 
     /**
      * 窗口缩放：init 重建控件会清空输入框内容，先暂存当前值、重建后恢复。
      * 否则关闭界面时 flush 会把「显示空 ≠ 基线」误判为用户清空，
      * 静默发出空串 Set 包抹掉已保存的 Prompt（数据丢失路径）。
+     * <p>
+     * 浮层状态（开关、滚动偏移、32 项状态、焦点、session、seq、同步标志）由浮层自身持有，
+     * 这里只让它按新尺寸重算几何——<b>不</b>新建会话、不把默认值覆盖到已收到的设置上。
      */
     @Override
     public void resize(Minecraft minecraft, int width, int height) {
@@ -215,6 +245,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
             this.maidPromptBox.setValue(maidValue);
         }
         this.suspendPromptListener = false;
+        this.environmentContextPanel.layout(width, height);
     }
 
     private Button addLeftButton(int leftX, int colTop, int yOffset, int w, int h,
@@ -458,6 +489,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         // 1.21.1 的 MultiLineEditBox 无 tick 方法，neo 线无此调用
         this.globalPromptBox.tick();
         this.maidPromptBox.tick();
+        this.environmentContextPanel.tick();
         // 焦点从某个输入框切出时保存（界面关闭另有 onClose 兜底）
         AbstractWidget focused = this.getFocused() instanceof AbstractWidget w ? w : null;
         if (this.lastFocusedBox != null && this.lastFocusedBox != focused) {
@@ -472,11 +504,74 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         super.onClose();
     }
 
+    // ===== 环境上下文浮层：事件转发（浮层优先，未使用也不透传） =====
+
+    /**
+     * 浮层打开时，鼠标点击／释放／拖动、滚轮、按键与字符输入一律先交给浮层；
+     * 浮层未用到的这些事件<b>也不得</b>透传给 Prompt 输入框或左列开关——
+     * 浮层是模态的（点击面板外只拦截、不关闭、不透传）。
+     */
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (this.environmentContextPanel.isOpen()) {
+            return this.environmentContextPanel.mouseClicked(mouseX, mouseY, button);
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (this.environmentContextPanel.isOpen()) {
+            return this.environmentContextPanel.mouseReleased(mouseX, mouseY, button);
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (this.environmentContextPanel.isOpen()) {
+            return this.environmentContextPanel.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    /** Forge 1.20.1 的滚轮回调只有一个滚动量（NeoForge 1.21.1 另有横向量） */
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (this.environmentContextPanel.isOpen()) {
+            return this.environmentContextPanel.mouseScrolled(delta);
+        }
+        return super.mouseScrolled(mouseX, mouseY, delta);
+    }
+
+    /** Esc 先关浮层，浮层关闭后才恢复原 Screen 的关闭行为 */
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (this.environmentContextPanel.isOpen()) {
+            return this.environmentContextPanel.keyPressed(keyCode, scanCode, modifiers);
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean charTyped(char codePoint, int modifiers) {
+        if (this.environmentContextPanel.isOpen()) {
+            return this.environmentContextPanel.charTyped(codePoint, modifiers);
+        }
+        return super.charTyped(codePoint, modifiers);
+    }
+
+    /** 环境上下文浮层的权威快照回包（会话/序号校验在浮层内完成） */
+    public void applyEnvironmentContextResponse(EnvironmentContextConfigResponseMessage msg) {
+        this.environmentContextPanel.applyResponse(msg);
+    }
+
     private void refreshButtonState() {
         if (this.globalButton == null || this.maidButton == null || this.interGlobalButton == null
                 || this.interMaidButton == null || this.sleepGlobalButton == null || this.sleepMaidButton == null
                 || this.toolGlobalButton == null || this.toolMaidButton == null
-                || this.globalPromptBox == null || this.maidPromptBox == null || this.overrideButton == null) {
+                || this.globalPromptBox == null || this.maidPromptBox == null || this.overrideButton == null
+                || this.environmentContextButton == null) {
             return;
         }
         this.globalButton.active = this.adminEnabled;
@@ -512,11 +607,20 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                 "config.maid_self_talk.screen.player_settings.tool_maid_toggle", onOff(toolMaidEnabled)));
         this.overrideButton.setMessage(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.custom_prompt.override", onOff(overrideEnabled)));
+        // 环境上下文入口始终可点（管理员禁用时也要能进去看说明）
+        this.environmentContextButton.active = true;
     }
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        super.render(graphics, mouseX, mouseY, partialTick);
+        boolean panelOpen = this.environmentContextPanel.isOpen();
+        // 浮层打开时把原页面控件按屏幕外鼠标坐标绘制：底层按钮不产生悬停高亮，
+        // 也就不会与浮层的悬停提示叠加。浮层与其 tooltip 最后绘制，位于最上层。
+        if (panelOpen) {
+            super.render(graphics, OFFSCREEN, OFFSCREEN, partialTick);
+        } else {
+            super.render(graphics, mouseX, mouseY, partialTick);
+        }
         int colTop = this.colTop;
         graphics.drawCenteredString(this.font, this.title, this.width / 2, colTop - 28, 0xFFFFFF);
         graphics.drawCenteredString(this.font,
@@ -538,7 +642,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                     Component.translatable("config.maid_self_talk.screen.player_settings.custom_prompt.overridden_hint"),
                     this.globalPromptBox.getX(), colTop + 158, 0xAAAAAA);
         }
-        int hintY = colTop + 192;
+        int hintY = colTop + 200;
         if (!this.adminEnabled) {
             graphics.drawCenteredString(this.font,
                     Component.translatable("config.maid_self_talk.screen.player_settings.admin_disabled"),
@@ -560,6 +664,9 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
             graphics.drawCenteredString(this.font,
                     Component.translatable("config.maid_self_talk.screen.player_settings.sleep_global_hint"),
                     this.width / 2, hintY, 0xFFAA55);
+        }
+        if (panelOpen) {
+            this.environmentContextPanel.render(graphics, mouseX, mouseY, partialTick);
         }
     }
 

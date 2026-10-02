@@ -21,9 +21,9 @@ import java.util.UUID;
  */
 public final class SelfTalkPackets {
 
-    // v5：新增「自定义 Prompt」与「Tool 调用」共 6 个消息；不做向后兼容（既定决策），
+    // v6：新增「环境上下文三态偏好」的 3 个消息（序号 15/16/17）；不做向后兼容（既定决策），
     // 升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
-    private static final String PROTOCOL_VERSION = "5";
+    private static final String PROTOCOL_VERSION = "6";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MaidSelfTalkMod.MODID, "main"),
@@ -87,6 +87,16 @@ public final class SelfTalkPackets {
         CHANNEL.registerMessage(nextId++, ToolConfigResponseMessage.class,
                 ToolConfigResponseMessage::encode, ToolConfigResponseMessage::decode,
                 ToolConfigResponseMessage::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        // 原 0~14 之后追加：Request=15、Set=16、Response=17
+        CHANNEL.registerMessage(nextId++, EnvironmentContextConfigRequestMessage.class,
+                EnvironmentContextConfigRequestMessage::encode, EnvironmentContextConfigRequestMessage::decode,
+                EnvironmentContextConfigRequestMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, EnvironmentContextConfigSetMessage.class,
+                EnvironmentContextConfigSetMessage::encode, EnvironmentContextConfigSetMessage::decode,
+                EnvironmentContextConfigSetMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, EnvironmentContextConfigResponseMessage.class,
+                EnvironmentContextConfigResponseMessage::encode, EnvironmentContextConfigResponseMessage::decode,
+                EnvironmentContextConfigResponseMessage::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     /** 每玩家每秒限流：防恶意客户端包风暴（正常设置界面操作远低于该频率） */
