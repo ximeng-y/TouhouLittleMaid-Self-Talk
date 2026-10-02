@@ -48,6 +48,14 @@ public final class PlayerSettingsSavedData extends SavedData {
     private final Map<String, Boolean> toolCallEnabled = new HashMap<>();
     /** Tool 调用单只关闭名单（值恒 false 关闭项，缺失 = 跟随全局） */
     private final Map<String, Map<String, Boolean>> toolCallMaidOverrides = new HashMap<>();
+    /**
+     * 环境上下文模式覆盖：玩家 UUID -> 条目标 key -> 模式存储值
+     * （{@code random} / {@code always} / {@code never}）。
+     * <p>
+     * 只存与目录默认模式不同的项；管理员禁用、提供者未注册都不是非法 key，
+     * 这些偏好必须保留，功能恢复后继续生效。
+     */
+    private final Map<String, Map<String, String>> environmentContextModes = new HashMap<>();
 
     private PlayerSettingsSavedData() {
     }
@@ -71,6 +79,7 @@ public final class PlayerSettingsSavedData extends SavedData {
         readGlobal(tag, "customPromptOverride", data.customPromptOverride);
         readGlobal(tag, "toolCallEnabled", data.toolCallEnabled);
         readMaidList(tag, "toolCallMaidOverrides", data.toolCallMaidOverrides);
+        readMaidStringList(tag, "environmentContextModes", data.environmentContextModes);
         return data;
     }
 
@@ -87,6 +96,7 @@ public final class PlayerSettingsSavedData extends SavedData {
         writeGlobal(tag, "customPromptOverride", customPromptOverride);
         writeGlobal(tag, "toolCallEnabled", toolCallEnabled);
         writeMaidList(tag, "toolCallMaidOverrides", toolCallMaidOverrides);
+        writeMaidStringList(tag, "environmentContextModes", environmentContextModes);
         return tag;
     }
 
@@ -224,6 +234,61 @@ public final class PlayerSettingsSavedData extends SavedData {
     /** 单只 Tool 关闭名单：关闭时存 false，恢复时移除 */
     public void setToolCallMaidDisabled(UUID playerUuid, UUID maidUuid, boolean disabled) {
         setMaidItem(toolCallMaidOverrides, playerUuid, maidUuid, disabled, false);
+    }
+
+    // ===== 环境上下文三态偏好 =====
+
+    /**
+     * 该玩家保存的环境上下文覆盖（独立快照：返回的是新 Map，调用方改不动存档内部状态）。
+     * <p>
+     * 只含与目录默认模式不同的项，因此可能少于 32 项，也可能为空；
+     * 非法 mode 与目录外 key 一律忽略（读路径不做清理，避免一次读操作产生写入）。
+     */
+    public Map<String, EnvironmentContextMode> getEnvironmentContextOverrides(UUID playerUuid) {
+        Map<String, String> saved = environmentContextModes.get(playerUuid.toString());
+        if (saved == null || saved.isEmpty()) {
+            return new HashMap<>();
+        }
+        Map<String, EnvironmentContextMode> result = new HashMap<>();
+        for (Map.Entry<String, String> entry : saved.entrySet()) {
+            EnvironmentContextOption option = EnvironmentContextOption.byKey(entry.getKey());
+            EnvironmentContextMode mode = EnvironmentContextMode.fromId(entry.getValue());
+            if (option != null && mode != null) {
+                result.put(option.key(), mode);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 保存某条目的模式：与目录默认一致时删键，否则写覆盖；内层表清空后删外层键。
+     * <p>
+     * 注意不能把「所有 random 都当默认」——原固定项改为 random 时必须落盘。
+     * 值未变化时不动存档，避免同值 Set 造成无意义的世界文件写入。
+     */
+    public void setEnvironmentContextMode(UUID playerUuid, EnvironmentContextOption option,
+                                          EnvironmentContextMode mode) {
+        String playerKey = playerUuid.toString();
+        Map<String, String> inner = environmentContextModes.get(playerKey);
+        String current = inner == null ? null : inner.get(option.key());
+        String target = option.isOverride(mode) ? mode.id() : null;
+        if (current == null ? target == null : current.equals(target)) {
+            return;
+        }
+        if (inner == null) {
+            inner = new HashMap<>();
+        }
+        if (target == null) {
+            inner.remove(option.key());
+        } else {
+            inner.put(option.key(), target);
+        }
+        if (inner.isEmpty()) {
+            environmentContextModes.remove(playerKey);
+        } else {
+            environmentContextModes.put(playerKey, inner);
+        }
+        setDirty();
     }
 
     /** 某玩家自定义 Prompt 单只条数（容量上限检查用） */
