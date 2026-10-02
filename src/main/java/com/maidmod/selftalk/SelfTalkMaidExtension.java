@@ -29,7 +29,7 @@ import java.util.Locale;
  * <ul>
  *   <li><b>上下文注入</b>（{@link #registerAIMaidContext}）：向 TLM 已有的
  *       {@code nearby_entities} 分类追加「附近女仆身份」上下文项，为模型补充女仆的 uuid
- *       与当前命名牌名称；</li>
+ *       与当前名称；</li>
  *   <li><b>主动查询 Tool</b>（{@link #registerAITool}）：注册无参工具，由模型自行决定何时
  *       调用，换取半径固定 32 格内女仆的 uuid、名称与距离。</li>
  * </ul>
@@ -38,6 +38,9 @@ import java.util.Locale;
  * 因此追加分类项时 {@code nearby_entities} 必然已存在；开关在此时读取一次，改动需重启才生效。
  * 名称等数据则在每次取值时实时读取，改名后下一次查询即为新名称，UUID 保持原值，
  * 不做任何缓存或持久化。
+ * <p>
+ * 两处的名称都经 {@link SelfTalkMaidNames#resolveName} 解析（命名牌名称 → TLM 内置模型预置名称，
+ * 其余未命名），语言取发起查询的女仆自己的聊天语言。
  */
 @LittleMaidExtension
 public class SelfTalkMaidExtension implements ILittleMaid {
@@ -103,9 +106,10 @@ public class SelfTalkMaidExtension implements ILittleMaid {
     /**
      * 名称转义：整体加双引号，转义引号、反斜杠与全部控制字符，不截断内容。
      * <p>
-     * 命名牌名称是玩家可控文本，直接拼入提示词会成为注入面；转义后名称恒落在引号内，
-     * 无法提前闭合上下文结构或换行伪造新行。未命名输出 {@code null}（与原生
-     * {@code getCustomName()} 的空语义一致，不擅自回退成模型名或实体类型名）。
+     * 名称（命名牌名称或内置模型预置名称）会直接拼入提示词，命名牌名称更是玩家可控文本，
+     * 因此会成为注入面；转义后名称恒落在引号内，无法提前闭合上下文结构或换行伪造新行。
+     * 无法解析出名称时输出 {@code null}（自定义模型、YSM 与第三方模型一律如此），
+     * 不回退成模型 id 或实体类型名。
      */
     private static String quoteName(Component name) {
         if (name == null) {
@@ -171,10 +175,13 @@ public class SelfTalkMaidExtension implements ILittleMaid {
 
         @Override
         public String getValue(EntityMaid maid) {
+            // 查询者即本体：语言取本只女仆自己的聊天语言，每轮只算一次
+            String language = SelfTalkMaidNames.resolveQueryLanguage(maid);
             List<String> entries = new ArrayList<>();
             maidsIn(maid.getTask().searchDimension(maid), maid, MAX_ENTITIES)
                     .forEach(nearby -> entries.add("entity_id=%d, uuid=%s, name=%s".formatted(
-                            nearby.getId(), nearby.getUUID(), quoteName(nearby.getCustomName()))));
+                            nearby.getId(), nearby.getUUID(),
+                            quoteName(SelfTalkMaidNames.resolveName(nearby, language)))));
             // 附近无女仆时也返回固定规则 + none：规则是常量，模型侧行为不随有无女仆跳变
             return IDENTITY_RULES + "\nNearby maids: "
                     + (entries.isEmpty() ? "none" : String.join("; ", entries));
@@ -253,11 +260,13 @@ public class SelfTalkMaidExtension implements ILittleMaid {
         @Override
         public LLMCallback onCall(String toolCallId, Unit result, LLMCallback callback) {
             EntityMaid maid = callback.getMaid();
+            // 语言取调用者自己的聊天语言，每轮只算一次（不跟随被查询女仆）
+            String language = SelfTalkMaidNames.resolveQueryLanguage(maid);
             List<EntityMaid> maids = maidsWithin(maid, RANGE, MAX_ENTITIES);
             List<String> entries = new ArrayList<>();
             for (EntityMaid nearby : maids) {
                 entries.add("uuid=%s, name=%s, distance=%s".formatted(
-                        nearby.getUUID(), quoteName(nearby.getCustomName()),
+                        nearby.getUUID(), quoteName(SelfTalkMaidNames.resolveName(nearby, language)),
                         // 距离保留一位小数：模型据此判断远近，浮点原值对提示词没有额外价值
                         String.format(Locale.ROOT, "%.1f", Math.sqrt(maid.distanceToSqr(nearby)))));
             }
