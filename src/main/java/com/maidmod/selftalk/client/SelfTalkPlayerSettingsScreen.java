@@ -163,7 +163,9 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                 "config.maid_self_talk.screen.player_settings.tool_maid_toggle", toolMaidEnabled, b -> toggleToolMaid());
         this.toolMaidButton.setTooltip(toolTooltip);
 
-        // 右侧 Prompt 面板：标题 + 输入框 + 覆盖开关（贴在按钮列同一顶部起点）
+        // 右侧 Prompt 面板：标题 + 输入框 + 覆盖开关（贴在按钮列同一顶部起点）。
+        // 各段之间预留 12px 以上：MultiLineEditBox 的字数上限文字由基类画在 getY()+height+4 处
+        // （高 9px），紧接着的标题或按钮上沿侵入该带就会压字
         Component placeholder = Component.translatable(
                 "config.maid_self_talk.screen.player_settings.custom_prompt.placeholder");
         this.globalPromptBox = new GuardedMultiLineEditBox(this.font, rightX, colTop + 12,
@@ -175,7 +177,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
             }
         });
         this.addRenderableWidget(this.globalPromptBox);
-        this.maidPromptBox = new GuardedMultiLineEditBox(this.font, rightX, colTop + 66,
+        this.maidPromptBox = new GuardedMultiLineEditBox(this.font, rightX, colTop + 78,
                 panelW, PROMPT_BOX_HEIGHT, placeholder);
         this.maidPromptBox.setCharacterLimit(PROMPT_MAX_LENGTH);
         this.maidPromptBox.setValueListener(v -> {
@@ -188,7 +190,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                         Component.translatable("config.maid_self_talk.screen.player_settings.custom_prompt.override",
                                 onOff(overrideEnabled)),
                         b -> toggleOverride())
-                .bounds(rightX, colTop + 108, panelW, 20)
+                .bounds(rightX, colTop + 134, panelW, 20)
                 .tooltip(Tooltip.create(Component.translatable(
                         "config.maid_self_talk.screen.player_settings.custom_prompt.override.tooltip")))
                 .build());
@@ -527,14 +529,14 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                     this.rightX, colTop, 0xFFFFFF);
             graphics.drawString(this.font,
                     Component.translatable("config.maid_self_talk.screen.player_settings.custom_prompt.maid_title"),
-                    this.rightX, colTop + 54, 0xFFFFFF);
+                    this.rightX, colTop + 66, 0xFFFFFF);
         }
         // 覆盖生效提示：全局段非空且覆盖开启时，单只段不会注入（输入框仍可编辑）
         if (this.overrideEnabled && this.globalPromptBox != null
                 && !this.globalPromptBox.getValue().isBlank()) {
             graphics.drawString(this.font,
                     Component.translatable("config.maid_self_talk.screen.player_settings.custom_prompt.overridden_hint"),
-                    this.globalPromptBox.getX(), colTop + 132, 0xAAAAAA);
+                    this.globalPromptBox.getX(), colTop + 158, 0xAAAAAA);
         }
         int hintY = colTop + 192;
         if (!this.adminEnabled) {
