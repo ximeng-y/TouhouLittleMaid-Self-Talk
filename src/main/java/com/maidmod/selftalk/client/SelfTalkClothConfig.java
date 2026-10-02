@@ -168,7 +168,7 @@ public final class SelfTalkClothConfig {
                 .build());
         main.add(interChat.build());
 
-        // 子页：环境事件（默认值与 Config 定义保持一致，重置默认时不会写入错误值）
+        // 子页：环境感知（默认值与 Config 定义保持一致，重置默认时不会写入错误值）
         SubCategoryBuilder eventContext = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.event_context"))
                 .setExpanded(false);
@@ -201,13 +201,20 @@ public final class SelfTalkClothConfig {
                 .setTooltip(Component.translatable("config.maid_self_talk.event_context.hurt_enabled.tooltip"))
                 .setSaveConsumer(v -> saveBool(Config.EVENT_CONTEXT_HURT_ENABLED, v))
                 .build());
+        eventContext.add(entryBuilder.startBooleanToggle(
+                        Component.translatable("config.maid_self_talk.event_context.self_enabled"),
+                        Config.EVENT_CONTEXT_SELF_ENABLED.get())
+                .setDefaultValue(true)
+                .setTooltip(Component.translatable("config.maid_self_talk.event_context.self_enabled.tooltip"))
+                .setSaveConsumer(v -> saveBool(Config.EVENT_CONTEXT_SELF_ENABLED, v))
+                .build());
         eventContext.add(entryBuilder.startIntField(
-                        Component.translatable("config.maid_self_talk.event_context.hurt_cooldown"),
-                        Config.EVENT_CONTEXT_HURT_COOLDOWN_SECONDS.get())
-                .setMin(10).setMax(600)
+                        Component.translatable("config.maid_self_talk.event_context.hurt_max_age"),
+                        Config.EVENT_CONTEXT_HURT_MAX_AGE_SECONDS.get())
+                .setMin(1).setMax(600)
                 .setDefaultValue(60)
-                .setTooltip(Component.translatable("config.maid_self_talk.event_context.hurt_cooldown.tooltip"))
-                .setSaveConsumer(v -> saveInt(Config.EVENT_CONTEXT_HURT_COOLDOWN_SECONDS, v))
+                .setTooltip(Component.translatable("config.maid_self_talk.event_context.hurt_max_age.tooltip"))
+                .setSaveConsumer(v -> saveInt(Config.EVENT_CONTEXT_HURT_MAX_AGE_SECONDS, v))
                 .build());
         main.add(eventContext.build());
 
