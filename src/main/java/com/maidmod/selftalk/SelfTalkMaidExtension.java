@@ -215,6 +215,11 @@ public class SelfTalkMaidExtension implements ILittleMaid {
          * <p>
          * 末句是对「不要为了了解情况而调用工具」这条 Tool 策略的显式让路：
          * 本工具正是了解情况用的，必须在说明里划出「什么时候才值得调用」，否则模型要么不调、要么乱调。
+         * <p>
+         * {@code Returns every maid within 32 blocks} 与实际最多 {@link #MAX_ENTITIES} 条不符，
+         * 是刻意保留的：女仆密集的基地里逐条列出会让工具结果过长，挤占提示词并拖慢响应，
+         * 而模型判断「身边有谁、谁在哪个方向」用不到二十条之后的条目。
+         * 若日后要改这句措辞或调整上限，两者需一并修改，不要让说明与实际返回条数继续背离。
          */
         private static final String SUMMARY = """
                 Use this when you need to know exactly which maids are around you: to tell maids with the
