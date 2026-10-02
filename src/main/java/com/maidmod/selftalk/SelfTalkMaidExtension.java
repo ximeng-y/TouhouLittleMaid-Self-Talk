@@ -68,7 +68,7 @@ public class SelfTalkMaidExtension implements ILittleMaid {
      * 顺序上先截取存活实体再筛女仆——若先筛女仆再截取，两者取到的名单对不上：
      * 上下文项要求与上游 {@code NearbyEntityMaidContexts} 的实体列表逐条对齐，
      * 而工作量任务（如远程攻击任务）会扩大 {@code searchDimension} 的半径。
-     * 工具侧用固定半径，不受任务影响，同样复用这一顺序保证两条路径行为一致。
+     * 这条约束只对上下文项成立（它必须与上游列表同批），工具另走 {@link #maidsWithin}。
      */
     private static List<EntityMaid> maidsIn(AABB box, EntityMaid maid, int maxEntities) {
         return maid.level().getEntitiesOfClass(LivingEntity.class, box, e -> e != maid && e.isAlive())
@@ -77,6 +77,26 @@ public class SelfTalkMaidExtension implements ILittleMaid {
                 .limit(maxEntities)
                 .filter(EntityMaid.class::isInstance)
                 .map(EntityMaid.class::cast)
+                .toList();
+    }
+
+    /**
+     * 固定半径内的女仆列表（排除自身、按距离升序、最多 maxEntities 个）。
+     * <p>
+     * 与 {@link #maidsIn} 有两处不同，都因为工具没有需要对齐的上游列表：
+     * 先筛女仆再截取——沿用「先取最近的 N 个活体实体再筛女仆」的话，实体密集处
+     * （畜牧场、怪堆、其他玩家扎堆）名额会被非女仆占满，女仆就在旁边却返回 none；
+     * 半径按球面判定——立方体扫描框的角落到中心约 1.73 倍半径，会让结果里出现
+     * 超出所报半径的条目。扫描框仍用 inflate，只作粗筛，精确判定交给距离谓词。
+     */
+    private static List<EntityMaid> maidsWithin(EntityMaid maid, double range, int maxEntities) {
+        double rangeSqr = range * range;
+        return maid.level()
+                .getEntitiesOfClass(EntityMaid.class, maid.getBoundingBox().inflate(range),
+                        e -> e != maid && e.isAlive() && maid.distanceToSqr(e) <= rangeSqr)
+                .stream()
+                .sorted(Comparator.comparingDouble(e -> e.distanceToSqr(maid)))
+                .limit(maxEntities)
                 .toList();
     }
 
@@ -228,7 +248,7 @@ public class SelfTalkMaidExtension implements ILittleMaid {
         @Override
         public LLMCallback onCall(String toolCallId, Unit result, LLMCallback callback) {
             EntityMaid maid = callback.getMaid();
-            List<EntityMaid> maids = maidsIn(maid.getBoundingBox().inflate(RANGE), maid, MAX_ENTITIES);
+            List<EntityMaid> maids = maidsWithin(maid, RANGE, MAX_ENTITIES);
             List<String> entries = new ArrayList<>();
             for (EntityMaid nearby : maids) {
                 entries.add("uuid=%s, name=%s, distance=%s".formatted(
