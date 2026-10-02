@@ -10,7 +10,7 @@
 - **双分支双线**：
   - `neoforge-1.21.1` 分支（GitHub 默认分支）：NeoForge 1.21.1（NeoForge 21.1.219 / ModDevGradle 2.0.95 / Java 21；TLM 1.5.3-neoforge+mc1.21.1）
   - `forge-1.20.1` 分支：Forge 1.20.1（Forge 47.2.0 / ForgeGradle 6 + parchment + mixingradle / Java 17；TLM 1.5.3-forge+mc1.20.1，fg.deobf）
-- 产物 jar（1.0.3 起加分支后缀区分）：neoforge 线 `build/libs/tlm-self-talk-1.3.0-neoforge-1.21.1.jar`；forge 线 `build/libs/tlm-self-talk-1.3.0-forge-1.20.1.jar`；部署替换 jar 后需重启服务端（代码改动无法热加载）
+- 产物 jar（1.0.3 起加分支后缀区分）：neoforge 线 `build/libs/tlm-self-talk-1.3.1-neoforge-1.21.1.jar`；forge 线 `build/libs/tlm-self-talk-1.3.1-forge-1.20.1.jar`；部署替换 jar 后需重启服务端（代码改动无法热加载）
 
 ## 构建
 
