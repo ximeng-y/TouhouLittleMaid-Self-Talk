@@ -1,6 +1,7 @@
 package com.maidmod.selftalk.client;
 
 import com.maidmod.selftalk.network.CustomPromptConfigResponsePayload;
+import com.maidmod.selftalk.network.EnvironmentContextConfigResponsePayload;
 import com.maidmod.selftalk.network.InterChatConfigResponsePayload;
 import com.maidmod.selftalk.network.SelfTalkConfigResponsePayload;
 import com.maidmod.selftalk.network.SleepQuietConfigResponsePayload;
@@ -57,6 +58,14 @@ public final class SelfTalkPlayerSettingsClient {
         if (mc.screen instanceof SelfTalkPlayerSettingsScreen screen) {
             screen.applyToolResponse(payload.toolAdminEnabled(),
                     payload.globalEnabled(), payload.maidEnabled());
+        }
+    }
+
+    /** 收到服务端环境上下文设置响应后转交浮层（会话与序号校验在浮层内） */
+    public static void onEnvironmentContextResponse(EnvironmentContextConfigResponsePayload payload) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof SelfTalkPlayerSettingsScreen screen) {
+            screen.applyEnvironmentContextResponse(payload);
         }
     }
 }

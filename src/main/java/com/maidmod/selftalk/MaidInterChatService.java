@@ -2,7 +2,6 @@ package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.HistoryMessagesCheck;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
-import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.UserPromptContexts;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMSite;
@@ -46,15 +45,14 @@ public final class MaidInterChatService {
             }
         }
         String prompt = isResponder ? SelfTalkPrompts.INTER_CHAT_RESPONDER : SelfTalkPrompts.INTER_CHAT_INITIATOR;
-        // 拼装顺序与自话同构：硬编码提示词 + 语言指令 + Tool 策略段(互聊约束行) + 自定义 Prompt + 随机情境 + 感知段
+        // 拼装顺序与自话同构：硬编码提示词 + 语言指令 + Tool 策略段(互聊约束行) + 自定义 Prompt
         prompt = prompt + SelfTalkContexts.languageInstruction(language)
                 + SelfTalkContexts.toolPolicyBlock(maid, language, true)
-                + SelfTalkContexts.customPromptBlock(maid, language)
-                + SelfTalkContexts.buildRandomContext(maid);
-        // 清洗先于感知段拼接：checkMessages 失败会放弃本次触发，感知段不能在此之前消费清空
+                + SelfTalkContexts.customPromptBlock(maid, language);
+        // 清洗先于上下文构建：checkMessages 失败会放弃本次触发，感知事件不能在此之前被 drain 消费。
+        // 构建后不得再追加任何上下文段——统一入口内部已含固定前缀、情境与感知段及 <context> 包装。
         try { HistoryMessagesCheck.checkMessages(messages); } catch (Throwable t) { MaidSelfTalkMod.LOGGER.warn("HistoryMessagesCheck after prompt failed for inter-chat, skipped", t); return false; }
-        prompt = prompt + SelfTalkContexts.perceptionContextBlock(maid);
-        String fullPrompt = UserPromptContexts.addContext(maid, prompt);
+        String fullPrompt = SelfTalkContexts.buildConfiguredUserMessage(maid, prompt);
         messages.add(LLMMessage.userChat(maid, fullPrompt));
         // 段标签包裹（历史+互聊窗口+peerText；prompt 消息为尾部、不参与包裹）
         SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowCount);

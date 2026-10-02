@@ -240,6 +240,75 @@ public final class PlayerSettingsStore {
                 && !isToolCallMaidDisabled(server, ownerUuid, maid.getUUID());
     }
 
+    // ===== 环境上下文三态偏好 =====
+
+    /**
+     * 该玩家保存的环境上下文覆盖表（独立快照，不泄漏存档内部的可变 Map）。
+     * <p>
+     * 只含与目录默认模式不同的项，因此可能少于 32 项，也可能是空表。
+     * 非法 mode 与目录外 key 一律忽略（读路径不清理存档，避免读操作产生写入）。
+     */
+    public static Map<String, EnvironmentContextMode> getEnvironmentContextOverrides(MinecraftServer server, UUID playerUuid) {
+        Map<String, EnvironmentContextMode> result = new HashMap<>();
+        if (playerUuid == null) {
+            return result;
+        }
+        Map<String, String> saved = server.overworld()
+                .getExistingData(SelfTalkAttachments.LEVEL_ENVIRONMENT_CONTEXT_MODES)
+                .map(m -> m.getOrDefault(playerUuid.toString(), Map.of()))
+                .orElse(Map.of());
+        for (Map.Entry<String, String> entry : saved.entrySet()) {
+            EnvironmentContextOption option = EnvironmentContextOption.byKey(entry.getKey());
+            EnvironmentContextMode mode = EnvironmentContextMode.fromId(entry.getValue());
+            if (option != null && mode != null) {
+                result.put(option.key(), mode);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 该玩家对某条目的偏好模式（缺省补目录默认值）。
+     * <p>
+     * <b>不因管理员临时禁用或提供者缺失而篡改返回值</b>：这里只表达玩家自己的选择，
+     * 有效模式的门控（{@code PLAYER_OPTION_ENABLED} 时改用默认值）由
+     * {@link EnvironmentContextSettings#effectiveModes} 统一计算。
+     */
+    public static EnvironmentContextMode getEnvironmentContextMode(MinecraftServer server, UUID playerUuid,
+                                                                   EnvironmentContextOption option) {
+        return getEnvironmentContextOverrides(server, playerUuid).getOrDefault(option.key(), option.defaultMode());
+    }
+
+    /**
+     * 保存某条目的模式：与目录默认一致时删键，否则写覆盖；内层表清空后删外层键。
+     * <p>
+     * 注意不能把「所有 random 都当默认」——原固定项改为 random 时必须落盘。
+     * 值未变化时直接返回，不产生一次无意义的存档写入（同值 Set 在协议层仍会回权威快照）。
+     */
+    public static void setEnvironmentContextMode(MinecraftServer server, UUID playerUuid,
+                                                 EnvironmentContextOption option, EnvironmentContextMode mode) {
+        Map<String, Map<String, String>> outer = new HashMap<>(
+                server.overworld().getData(SelfTalkAttachments.LEVEL_ENVIRONMENT_CONTEXT_MODES));
+        String playerKey = playerUuid.toString();
+        Map<String, String> inner = new HashMap<>(outer.getOrDefault(playerKey, Map.of()));
+        String current = inner.get(option.key());
+        String target = option.isOverride(mode) ? mode.id() : null;
+        if (current == null ? target == null : current.equals(target)) {
+            return;
+        }
+        if (target == null) {
+            inner.remove(option.key());
+        } else {
+            inner.put(option.key(), target);
+        }
+        if (inner.isEmpty()) {
+            outer.remove(playerKey);
+        } else {
+            outer.put(playerKey, inner);
+        }
+        server.overworld().setData(SelfTalkAttachments.LEVEL_ENVIRONMENT_CONTEXT_MODES, outer);
+    }
+
     // ===== 共用读写 =====
 
     /** 全局布尔读写（缺省值 defaultEnabled 时移除键，值不等于缺省才落盘） */

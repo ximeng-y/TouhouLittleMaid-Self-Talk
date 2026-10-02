@@ -111,6 +111,20 @@ public final class SelfTalkAttachments {
             ATTACHMENT_TYPES.register("level_tool_call_maid_overrides", SelfTalkAttachments::buildLevelMaidOverrides);
 
     /**
+     * 环境上下文模式覆盖(Level):玩家 UUID -> 条目标 key -> 模式存储值
+     * ({@code random} / {@code always} / {@code never})。
+     * <p>
+     * 只存与目录默认模式不同的项：原随机项设回 random、原固定项设回 always 都删键；
+     * 原固定项改成 random 必须落盘（{@link EnvironmentContextOption#isOverride}）。
+     * 内层表清空后删外层键——沿用本组附件的轻量化惯例。
+     * <p>
+     * 管理员禁用、提供者未注册都不是非法 key：这些偏好必须保留，功能恢复后继续生效。
+     */
+    public static final Supplier<AttachmentType<Map<String, Map<String, String>>>> LEVEL_ENVIRONMENT_CONTEXT_MODES =
+            ATTACHMENT_TYPES.register("level_environment_context_modes",
+                    SelfTalkAttachments::buildLevelMaidStringMap);
+
+    /**
      * 女仆自话回复指纹集（来源判定用，挂女仆实体）。
      * <p>
      * 指纹 = (role, message, gameTime) 三元组拼接串。TLM 历史 deque 中自话回复与主人聊天回复

@@ -9,7 +9,8 @@
     "MaidAIChatDataMixin",
     "MaidAIChatManagerAccessor",
     "MaidAIChatManagerMixin",
-    "LLMCallbackMixin"
+    "LLMCallbackMixin",
+    "GameContextRegisterAccessor"
   ],
   "client": [
     "AIChatScreenMixin"
