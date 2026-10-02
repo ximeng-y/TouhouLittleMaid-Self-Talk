@@ -123,7 +123,8 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     public SelfTalkPlayerSettingsScreen(EntityMaid maid) {
         super(Component.translatable("config.maid_self_talk.screen.player_settings.title"));
         this.maid = maid;
-        this.environmentContextPanel = new EnvironmentContextPanel(this.font);
+        // Screen.font 要到 init 才赋值，此处使用已初始化的客户端字体，并保留同一浮层实例。
+        this.environmentContextPanel = new EnvironmentContextPanel(Minecraft.getInstance().font);
     }
 
     @Override
