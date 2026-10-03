@@ -30,7 +30,10 @@ import java.util.function.Supplier;
  * @param adminEnabled 管理员是否允许玩家配置（{@code PLAYER_OPTION_ENABLED}）。
  *                     为 false 时界面整页禁用，禁用原因优先显示「玩家自定义配置被禁用」，
  *                     因此不必逐行改写 availability
- * @param rows         32 行状态（顺序即目录顺序）
+ * @param naturalLanguageEnabled 「环境信息自然语言化」的<b>已存偏好</b>，不是管理员门控后的有效值——
+ *                     与 32 项模式同口径：管理员禁用时界面要能显示玩家原来的选择，
+ *                     功能恢复后原样生效
+ * @param rows         32 行状态（顺序即目录顺序）。总开关不走这里，不伪装成第 33 项
  */
 public class EnvironmentContextConfigResponseMessage {
 
@@ -47,12 +50,15 @@ public class EnvironmentContextConfigResponseMessage {
     private final UUID sessionId;
     private final long seq;
     private final boolean adminEnabled;
+    private final boolean naturalLanguageEnabled;
     private final List<Row> rows;
 
-    public EnvironmentContextConfigResponseMessage(UUID sessionId, long seq, boolean adminEnabled, List<Row> rows) {
+    public EnvironmentContextConfigResponseMessage(UUID sessionId, long seq, boolean adminEnabled,
+                                                   boolean naturalLanguageEnabled, List<Row> rows) {
         this.sessionId = sessionId;
         this.seq = seq;
         this.adminEnabled = adminEnabled;
+        this.naturalLanguageEnabled = naturalLanguageEnabled;
         this.rows = rows;
     }
 
@@ -68,6 +74,10 @@ public class EnvironmentContextConfigResponseMessage {
         return adminEnabled;
     }
 
+    public boolean isNaturalLanguageEnabled() {
+        return naturalLanguageEnabled;
+    }
+
     public List<Row> getRows() {
         return rows;
     }
@@ -77,6 +87,7 @@ public class EnvironmentContextConfigResponseMessage {
      * <p>
      * 行序即目录序；每行取玩家的已存偏好（缺省补目录默认值）与实际可用性，
      * 两者互不影响——管理员禁用不清空偏好，偏好也不改变可用性。
+     * 总开关同样回传玩家的<b>已存偏好</b>，管理员禁用时也不改写。
      */
     public static EnvironmentContextConfigResponseMessage snapshot(MinecraftServer server, UUID playerUuid,
                                                                    UUID sessionId, long seq) {
@@ -87,7 +98,8 @@ public class EnvironmentContextConfigResponseMessage {
                     EnvironmentContextSettings.availabilityOf(option).id()));
         }
         return new EnvironmentContextConfigResponseMessage(
-                sessionId, seq, Config.PLAYER_OPTION_ENABLED.get(), rows);
+                sessionId, seq, Config.PLAYER_OPTION_ENABLED.get(),
+                PlayerSettingsStore.isEnvironmentContextNaturalLanguageEnabled(server, playerUuid), rows);
     }
 
     /**
@@ -119,6 +131,8 @@ public class EnvironmentContextConfigResponseMessage {
         buf.writeUUID(msg.sessionId);
         buf.writeVarLong(msg.seq);
         buf.writeBoolean(msg.adminEnabled);
+        // 总开关排在 adminEnabled 之后、行表之前：两个布尔字段与 32 项行序无关
+        buf.writeBoolean(msg.naturalLanguageEnabled);
         // 数量先校验再写入：解码侧只会读到 0~32 行，超量包在编码侧就不可能产生
         int size = msg.rows == null ? 0 : msg.rows.size();
         if (size != EnvironmentContextOption.ALL.size()) {
@@ -138,9 +152,11 @@ public class EnvironmentContextConfigResponseMessage {
         UUID sessionId = buf.readUUID();
         long seq = buf.readVarLong();
         boolean adminEnabled = buf.readBoolean();
+        boolean naturalLanguageEnabled = buf.readBoolean();
         int size = buf.readByte();
         if (size != EnvironmentContextOption.ALL.size()) {
-            return new EnvironmentContextConfigResponseMessage(sessionId, seq, adminEnabled, List.of());
+            return new EnvironmentContextConfigResponseMessage(
+                    sessionId, seq, adminEnabled, naturalLanguageEnabled, List.of());
         }
         List<Row> rows = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
@@ -148,7 +164,8 @@ public class EnvironmentContextConfigResponseMessage {
                     buf.readUtf(EnvironmentContextConfigSetMessage.MAX_MODE_LENGTH),
                     buf.readByte()));
         }
-        return new EnvironmentContextConfigResponseMessage(sessionId, seq, adminEnabled, rows);
+        return new EnvironmentContextConfigResponseMessage(
+                sessionId, seq, adminEnabled, naturalLanguageEnabled, rows);
     }
 
     /** 客户端分发：继续沿用现有隔离方式，避免专用服务端加载 Screen 相关类 */

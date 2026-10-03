@@ -56,6 +56,13 @@ public final class PlayerSettingsSavedData extends SavedData {
      * 这些偏好必须保留，功能恢复后继续生效。
      */
     private final Map<String, Map<String, String>> environmentContextModes = new HashMap<>();
+    /**
+     * 环境信息自然语言化开关：玩家 UUID -> true（仅存 true 项，缺失 = 关闭）。
+     * <p>
+     * 实验性模式，默认关闭。管理员关闭玩家配置时有效值为关闭，但这里的已存偏好必须保留，
+     * 功能恢复后继续生效。
+     */
+    private final Map<String, Boolean> environmentContextNaturalLanguage = new HashMap<>();
 
     private PlayerSettingsSavedData() {
     }
@@ -80,6 +87,7 @@ public final class PlayerSettingsSavedData extends SavedData {
         readGlobal(tag, "toolCallEnabled", data.toolCallEnabled);
         readMaidList(tag, "toolCallMaidOverrides", data.toolCallMaidOverrides);
         readMaidStringList(tag, "environmentContextModes", data.environmentContextModes);
+        readGlobal(tag, "environmentContextNaturalLanguage", data.environmentContextNaturalLanguage);
         return data;
     }
 
@@ -97,6 +105,7 @@ public final class PlayerSettingsSavedData extends SavedData {
         writeGlobal(tag, "toolCallEnabled", toolCallEnabled);
         writeMaidList(tag, "toolCallMaidOverrides", toolCallMaidOverrides);
         writeMaidStringList(tag, "environmentContextModes", environmentContextModes);
+        writeGlobal(tag, "environmentContextNaturalLanguage", environmentContextNaturalLanguage);
         return tag;
     }
 
@@ -287,6 +296,34 @@ public final class PlayerSettingsSavedData extends SavedData {
             environmentContextModes.remove(playerKey);
         } else {
             environmentContextModes.put(playerKey, inner);
+        }
+        setDirty();
+    }
+
+    /**
+     * 该玩家「环境信息自然语言化」的已存偏好（缺省 = false 关闭，实验性功能默认关闭）。
+     * <p>
+     * 只表达玩家自己的选择，不叠加管理员门控——有效值由
+     * {@link PlayerSettingsStore#isEnvironmentContextNaturalLanguageEnabledForMaid} 统一计算。
+     */
+    public boolean isEnvironmentContextNaturalLanguageEnabled(UUID playerUuid) {
+        return environmentContextNaturalLanguage.getOrDefault(playerUuid.toString(), false);
+    }
+
+    /**
+     * 保存该玩家的自然语言化开关：开启存 true，关闭移除键（仅存非默认项）。
+     * <p>
+     * 同值写入直接返回——已存偏好本就是「缺省 false / 开启 true」，
+     * 关闭时删键即可让缺省语义自然生效，不留无意义的 false 覆盖。
+     */
+    public void setEnvironmentContextNaturalLanguageEnabled(UUID playerUuid, boolean enabled) {
+        if (isEnvironmentContextNaturalLanguageEnabled(playerUuid) == enabled) {
+            return;
+        }
+        if (enabled) {
+            environmentContextNaturalLanguage.put(playerUuid.toString(), true);
+        } else {
+            environmentContextNaturalLanguage.remove(playerUuid.toString());
         }
         setDirty();
     }

@@ -101,6 +101,8 @@
   "config.maid_self_talk.screen.player_settings.context.entry": "环境上下文",
   "config.maid_self_talk.screen.player_settings.context.title": "环境上下文",
   "config.maid_self_talk.screen.player_settings.context.scope": "对你名下所有女仆生效",
+  "config.maid_self_talk.screen.player_settings.context.natural_language": "环境信息自然语言化",
+  "config.maid_self_talk.screen.player_settings.context.natural_language.warning": "实验性功能，可能影响模型回答质量。",
   "config.maid_self_talk.screen.player_settings.context.footer": "仅控制自言自语和互聊的自动注入",
   "config.maid_self_talk.screen.player_settings.context.close": "✕",
   "config.maid_self_talk.screen.player_settings.context.close.tooltip": "关闭",

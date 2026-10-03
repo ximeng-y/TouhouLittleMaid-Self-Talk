@@ -21,9 +21,9 @@ import java.util.UUID;
  */
 public final class SelfTalkPackets {
 
-    // v6：新增「环境上下文三态偏好」的 3 个消息（序号 15/16/17）；不做向后兼容（既定决策），
-    // 升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
-    private static final String PROTOCOL_VERSION = "6";
+    // v7：新增「环境信息自然语言化」总开关的 C2S 消息（序号 18），并给环境上下文快照增加一个布尔字段；
+    // 不做向后兼容（既定决策），升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
+    private static final String PROTOCOL_VERSION = "7";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MaidSelfTalkMod.MODID, "main"),
@@ -97,6 +97,10 @@ public final class SelfTalkPackets {
         CHANNEL.registerMessage(nextId++, EnvironmentContextConfigResponseMessage.class,
                 EnvironmentContextConfigResponseMessage::encode, EnvironmentContextConfigResponseMessage::decode,
                 EnvironmentContextConfigResponseMessage::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        // 原 0~17 之后追加为 18：环境信息自然语言化总开关（与 32 项设置共用同一浮层会话）
+        CHANNEL.registerMessage(nextId++, EnvironmentContextNaturalLanguageSetMessage.class,
+                EnvironmentContextNaturalLanguageSetMessage::encode, EnvironmentContextNaturalLanguageSetMessage::decode,
+                EnvironmentContextNaturalLanguageSetMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
     }
 
     /** 每玩家每秒限流：防恶意客户端包风暴（正常设置界面操作远低于该频率） */

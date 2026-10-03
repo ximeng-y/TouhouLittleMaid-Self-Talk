@@ -6,7 +6,9 @@ import com.maidmod.selftalk.EnvironmentContextSettings;
 import com.maidmod.selftalk.network.EnvironmentContextConfigRequestMessage;
 import com.maidmod.selftalk.network.EnvironmentContextConfigResponseMessage;
 import com.maidmod.selftalk.network.EnvironmentContextConfigSetMessage;
+import com.maidmod.selftalk.network.EnvironmentContextNaturalLanguageSetMessage;
 import com.maidmod.selftalk.network.SelfTalkPackets;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -54,7 +56,7 @@ public final class EnvironmentContextPanel {
     /** 同步中 / 读取中 的强调色（与页面既有提示色一致） */
     private static final int SYNC_COLOR = 0xFFFFAA55;
 
-    private static final int HEADER_HEIGHT = 54;
+    private static final int HEADER_HEIGHT = 78;
     private static final int FOOTER_HEIGHT = 30;
     private static final int ROW_HEIGHT = 24;
     private static final int BUTTON_HEIGHT = 20;
@@ -85,6 +87,8 @@ public final class EnvironmentContextPanel {
 
     /** 焦点哨兵：关闭按钮 */
     private static final int FOCUS_CLOSE = EnvironmentContextOption.ALL.size();
+    /** 焦点哨兵：环境信息自然语言化总开关（在标题区、不随列表滚动） */
+    private static final int FOCUS_TOGGLE = -2;
 
     private final Font font;
 
@@ -107,6 +111,12 @@ public final class EnvironmentContextPanel {
     private final Map<String, EnvironmentContextMode> modes = new LinkedHashMap<>();
     /** 32 项功能可用性 */
     private final Map<String, EnvironmentContextSettings.Availability> availability = new LinkedHashMap<>();
+    /**
+     * 环境信息自然语言化的<b>已存偏好</b>（不是管理员门控后的有效值）。
+     * <p>
+     * 首次权威快照到达前一律为 false 且开关不可点——客户端初始值绝不能写回覆盖服务端设置。
+     */
+    private boolean naturalLanguageEnabled = false;
 
     // ===== 布局（每次 layout 重算） =====
     private int screenWidth;
@@ -128,10 +138,12 @@ public final class EnvironmentContextPanel {
     private boolean draggingThumb;
     /** 拖拽起点相对滑块顶部的偏移，拖动时保证光标与滑块相对位置不跳变 */
     private int dragGrabOffset;
-    /** 当前焦点：0..31 = 行，{@link #FOCUS_CLOSE} = 关闭按钮，-1 = 无 */
+    /** 当前焦点：0..31 = 行，{@link #FOCUS_TOGGLE} = 总开关，{@link #FOCUS_CLOSE} = 关闭按钮，-1 = 无 */
     private int focusedIndex = -1;
     /** 已构建的行按钮（与目录同序，恒 32 个） */
     private final List<Button> rowButtons = new ArrayList<>();
+    /** 标题区的「环境信息自然语言化」总开关（不随列表滚动，也不进底页焦点链） */
+    private Button naturalLanguageButton;
     private Button closeButton;
 
     public EnvironmentContextPanel(Font font) {
@@ -166,6 +178,7 @@ public final class EnvironmentContextPanel {
         this.scrollOffset = 0;
         this.draggingThumb = false;
         this.focusedIndex = -1;
+        this.naturalLanguageEnabled = false;
         for (EnvironmentContextOption option : EnvironmentContextOption.ALL) {
             this.modes.put(option.key(), option.defaultMode());
             this.availability.put(option.key(), EnvironmentContextSettings.Availability.PROVIDER_MISSING);
@@ -185,8 +198,8 @@ public final class EnvironmentContextPanel {
     /**
      * 重算几何、钳制滚动偏移并重建按钮。
      * <p>
-     * 不触碰会话、序号、32 项状态与同步标志——窗口 resize 只应改变布局，
-     * 不能把默认值覆盖到已经收到的服务端设置上。
+     * 不触碰会话、序号、32 项状态、总开关与同步标志——窗口 resize 只应改变布局，
+     * 不能把默认值覆盖到已经收到的服务端设置上，也不能重置未确认的乐观值。
      */
     public void layout(int screenWidth, int screenHeight) {
         this.screenWidth = screenWidth;
@@ -212,10 +225,19 @@ public final class EnvironmentContextPanel {
             // 行按钮不入 Screen 的子控件表：焦点与事件都由浮层自己管，避免污染原页面焦点链
             this.rowButtons.add(button);
         }
+        // 总开关放在标题区固定位置（列表上方、不随滚动），沿用列表的左右对齐关系
+        this.naturalLanguageButton = Button.builder(Component.empty(), b -> toggleNaturalLanguage())
+                .bounds(buttonX, toggleY(), BUTTON_WIDTH, BUTTON_HEIGHT)
+                .build();
         this.closeButton = Button.builder(Component.translatable(closeKey()), b -> close())
                 .bounds(closeX(), closeY(), CLOSE_SIZE, CLOSE_SIZE)
                 .build();
         refreshButtons();
+    }
+
+    /** 总开关的行 Y：标题（10）→ 作用范围（24）→ 总开关（38），与行高对齐 */
+    private int toggleY() {
+        return panelY + 38;
     }
 
     private int clampScroll(int value) {
@@ -293,6 +315,26 @@ public final class EnvironmentContextPanel {
                 sessionId, latestIssuedSeq, option.key(), next.id()));
     }
 
+    /**
+     * 点击总开关：翻转自然语言化偏好并乐观更新，随后发送<b>目标绝对布尔值</b>。
+     * <p>
+     * 与行按钮同一套会话机制（同一个 sessionId/seq、同一份超时与重查规则），
+     * 因此连续点击、迟到回包、关闭重开都不会让旧状态覆盖新选择。
+     * 未收到首次快照或管理员禁用时按钮不接受点击，事件入口已按同一条件过滤。
+     */
+    private void toggleNaturalLanguage() {
+        boolean next = !naturalLanguageEnabled;
+        naturalLanguageEnabled = next;
+        refreshButtons();
+        this.seq++;
+        this.latestIssuedSeq = this.seq;
+        this.awaitingResponse = true;
+        this.pendingSet = true;
+        this.ticksSinceIssue = 0;
+        SelfTalkPackets.CHANNEL.sendToServer(new EnvironmentContextNaturalLanguageSetMessage(
+                sessionId, latestIssuedSeq, next));
+    }
+
     /** 客户端每 tick 驱动：轮询快照、待确认操作的重查与超时转权威查询 */
     public void tick() {
         if (!open) {
@@ -321,7 +363,8 @@ public final class EnvironmentContextPanel {
      * <p>
      * 只接受「浮层仍打开 + session 匹配 + seq 等于最新发出」的响应，其余一律丢弃：
      * 关闭后到达的回包、旧会话回包、被新操作取代的旧序号回包都不能改写界面。
-     * 符合条件时整包更新模式与管理员状态（不逐项合并，避免半新半旧）。
+     * 符合条件时整包更新（32 项模式 + 总开关 + 管理员状态一起应用，不部分更新），
+     * 避免半新半旧的界面。
      */
     public void applyResponse(EnvironmentContextConfigResponseMessage payload) {
         if (!open || sessionId == null || !sessionId.equals(payload.getSessionId())) {
@@ -339,6 +382,7 @@ public final class EnvironmentContextPanel {
                     EnvironmentContextSettings.Availability.fromId(row.availability()));
         }
         this.adminEnabled = payload.isAdminEnabled();
+        this.naturalLanguageEnabled = payload.isNaturalLanguageEnabled();
         this.hasSnapshot = true;
         this.awaitingResponse = false;
         this.pendingSet = false;
@@ -362,12 +406,28 @@ public final class EnvironmentContextPanel {
             // 那会把「管理员禁用」误读成「玩家选了永不包括」
             button.active = rowConfigurable(option);
         }
+        if (naturalLanguageButton != null) {
+            naturalLanguageButton.setMessage(onOffKey(naturalLanguageEnabled));
+            naturalLanguageButton.active = toggleConfigurable();
+        }
     }
 
     /** 该行当前是否可点击：已收到快照 && 玩家配置未被管理员禁用 && 该行可用 */
     private boolean rowConfigurable(EnvironmentContextOption option) {
         return hasSnapshot && adminEnabled
                 && availability.get(option.key()) == EnvironmentContextSettings.Availability.AVAILABLE;
+    }
+
+    /** 总开关是否可点击：已收到快照 && 玩家配置未被管理员禁用 */
+    private boolean toggleConfigurable() {
+        return hasSnapshot && adminEnabled;
+    }
+
+    /** 开关状态文案键：复用既有 on/off 译文，不在 Java 里硬编码 UI 中文 */
+    private static Component onOffKey(boolean value) {
+        return Component.translatable(value
+                ? "config.maid_self_talk.screen.player_settings.on"
+                : "config.maid_self_talk.screen.player_settings.off");
     }
 
     /**
@@ -432,6 +492,7 @@ public final class EnvironmentContextPanel {
             graphics.drawString(font, Component.translatable(
                             "config.maid_self_talk.screen.player_settings.context.scope"),
                     panelX + NAME_MARGIN, panelY + 24, SUBTITLE_COLOR, false);
+            renderNaturalLanguageRow(graphics, mouseX, mouseY);
 
             renderList(graphics, mouseX, mouseY);
             renderFooter(graphics);
@@ -445,6 +506,10 @@ public final class EnvironmentContextPanel {
         if (inRect(mouseX, mouseY, closeX(), closeY(), CLOSE_SIZE, CLOSE_SIZE)) {
             graphics.renderTooltip(font, wrap("config.maid_self_talk.screen.player_settings.context.close.tooltip"),
                     mouseX, mouseY);
+            return;
+        }
+        if (isOverToggle(mouseX, mouseY)) {
+            graphics.renderComponentTooltip(font, toggleTooltip(), mouseX, mouseY);
             return;
         }
         int hovered = rowIndexAt(mouseX, mouseY);
@@ -468,6 +533,25 @@ public final class EnvironmentContextPanel {
             return;
         }
         closeButton.render(graphics, mouseX, mouseY, partialTick);
+    }
+
+    /**
+     * 标题区的「环境信息自然语言化」总开关：标签在左、状态按钮在右（沿用列表的左右对齐关系）。
+     * <p>
+     * 标签与按钮都不随列表滚动，也不在底页 Screen 的控件表里——点击与键盘事件都由浮层自己吞掉。
+     */
+    private void renderNaturalLanguageRow(GuiGraphics graphics, int mouseX, int mouseY) {
+        if (naturalLanguageButton == null) {
+            return;
+        }
+        int y = toggleY();
+        String name = Component.translatable(
+                "config.maid_self_talk.screen.player_settings.context.natural_language").getString();
+        int nameWidth = buttonX - NAME_MARGIN - 4 - (panelX + NAME_MARGIN);
+        graphics.drawString(font, ellipsize(name, nameWidth), panelX + NAME_MARGIN, y + 6,
+                toggleConfigurable() ? TITLE_COLOR : SUBTITLE_COLOR, false);
+        naturalLanguageButton.setY(y);
+        naturalLanguageButton.render(graphics, mouseX, mouseY, 0.0F);
     }
 
     private void renderList(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -562,6 +646,34 @@ public final class EnvironmentContextPanel {
         return font.split(Component.translatable(key), Math.min(260, panelWidth - 40));
     }
 
+    /** 鼠标是否悬停在总开关按钮上（禁用按钮的 isMouseOver 因 active=false 返回 false，故手工判定） */
+    private boolean isOverToggle(double mouseX, double mouseY) {
+        return naturalLanguageButton != null
+                && inRect(mouseX, mouseY, buttonX, toggleY(), BUTTON_WIDTH, BUTTON_HEIGHT);
+    }
+
+    /**
+     * 总开关的 tooltip：金黄色实验警告常驻（可点与不可点都显示），
+     * 不可点（未加载完或管理员禁用）时追加该原因。
+     * <p>
+     * 警告是提示性质，用金黄色（{@link ChatFormatting#GOLD}）而非「同步中」的橙色；
+     * 禁用原因沿用行级同一套文案键，不另写一份措辞。
+     */
+    private List<Component> toggleTooltip() {
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.translatable(
+                        "config.maid_self_talk.screen.player_settings.context.natural_language.warning")
+                .withStyle(ChatFormatting.GOLD));
+        if (!hasSnapshot) {
+            lines.add(Component.translatable(
+                    "config.maid_self_talk.screen.player_settings.context.loading"));
+        } else if (!adminEnabled) {
+            lines.add(Component.translatable(
+                    "config.maid_self_talk.screen.player_settings.context.disabled.admin"));
+        }
+        return lines;
+    }
+
     // ===== 事件入口（均由页面转发） =====
 
     /** 行命中测试：只对可见裁剪区域内的按钮生效；返回 -1 表示未命中 */
@@ -587,7 +699,7 @@ public final class EnvironmentContextPanel {
                 && mouseY >= listTop && mouseY < listBottom;
     }
 
-    /** 鼠标按下：面板外只拦截（不关闭、不透传），面板内按 关闭／行／轨道 分派 */
+    /** 鼠标按下：面板外只拦截（不关闭、不透传），面板内按 关闭／总开关／行／轨道 分派 */
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (!open) {
             return false;
@@ -597,6 +709,13 @@ public final class EnvironmentContextPanel {
         }
         if (inRect(mouseX, mouseY, closeX(), closeY(), CLOSE_SIZE, CLOSE_SIZE)) {
             close();
+            return true;
+        }
+        if (isOverToggle(mouseX, mouseY)) {
+            focusedIndex = FOCUS_TOGGLE;
+            if (naturalLanguageButton.active) {
+                naturalLanguageButton.onPress();
+            }
             return true;
         }
         int index = rowIndexAt(mouseX, mouseY);
@@ -695,6 +814,12 @@ public final class EnvironmentContextPanel {
             close();
             return;
         }
+        if (focusedIndex == FOCUS_TOGGLE) {
+            if (naturalLanguageButton != null && naturalLanguageButton.active) {
+                naturalLanguageButton.onPress();
+            }
+            return;
+        }
         if (focusedIndex >= 0 && focusedIndex < rowButtons.size()
                 && rowButtons.get(focusedIndex).active) {
             rowButtons.get(focusedIndex).onPress();
@@ -702,13 +827,18 @@ public final class EnvironmentContextPanel {
     }
 
     /**
-     * 焦点移动：只在可操作的行按钮与关闭按钮之间循环（禁用行跳过，但仍参与不可用时的兜底：
-     * 全部行都禁用时焦点落在关闭按钮上）。
+     * 焦点移动：只在<b>可操作</b>的行按钮、总开关与关闭按钮之间循环
+     * （禁用项跳过，但仍参与不可用时的兜底：全部禁用时焦点落在关闭按钮上）。
+     * <p>
+     * 顺序为 总开关 → 可操作条目 → 关闭按钮：总开关在列表之前，与界面自上而下的读序一致。
      * <p>
      * 聚焦到屏幕外的行时自动滚动使其可见。
      */
     private void moveFocus(int direction) {
         List<Integer> candidates = new ArrayList<>();
+        if (naturalLanguageButton != null && naturalLanguageButton.active) {
+            candidates.add(FOCUS_TOGGLE);
+        }
         for (int i = 0; i < rowButtons.size(); i++) {
             if (rowButtons.get(i).active) {
                 candidates.add(i);
@@ -724,7 +854,7 @@ public final class EnvironmentContextPanel {
                 ? (direction > 0 ? 0 : candidates.size() - 1)
                 : Math.floorMod(current + direction, candidates.size());
         focusedIndex = candidates.get(nextPos);
-        if (focusedIndex != FOCUS_CLOSE) {
+        if (focusedIndex >= 0 && focusedIndex < rowButtons.size()) {
             scrollIntoView(focusedIndex);
         }
     }
