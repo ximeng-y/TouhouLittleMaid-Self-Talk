@@ -2,7 +2,7 @@ package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
-import org.apache.commons.lang3.StringUtils;
+import com.maidmod.selftalk.history.HistoryFingerprint;
 
 import java.util.Collection;
 import java.util.Deque;
@@ -34,12 +34,25 @@ public final class SelfTalkProvenance {
 
     /**
      * 消息指纹：唯一标识一条历史消息的三元组拼接串（带长度前缀防歧义）。
-     * 无碰撞（三元组相等 ⇔ 字符串相等），排除哈希碰撞误判的可能。
+     * <p>
+     * 算法本体在 {@link HistoryFingerprint}：历史检索库的来源过滤用同一算法排除自话，
+     * 两处若各写一份，一旦漂移就会出现「段标签认它是自话、检索库却把它当玩家对话」的分歧。
      */
     static String fingerprint(LLMMessage message) {
-        String content = message.message() == null ? StringUtils.EMPTY : message.message();
-        return message.role().name() + '|' + content.length() + '|'
-                + content + '|' + message.gameTime();
+        return HistoryFingerprint.of(message.role().name(),
+                message.message() == null ? "" : message.message(), message.gameTime());
+    }
+
+    /**
+     * 当前女仆的自话／欢迎语指纹集（只读；检索模式的来源过滤读点）。
+     * <p>
+     * 与 {@link SelfTalkContexts#wrapSegments} 的读点同源，因此两种功能永远看到同一份判定。
+     */
+    public static Set<String> selfTalkFingerprints(EntityMaid maid) {
+        if (maid == null) {
+            return Set.of();
+        }
+        return maid.getExistingData(SelfTalkAttachments.SELF_TALK_FINGERPRINTS).orElse(Set.of());
     }
 
     /**
@@ -59,11 +72,21 @@ public final class SelfTalkProvenance {
         if (maid == null || messages == null || messages.isEmpty()) {
             return;
         }
+        Set<String> fingerprints = fingerprintSet(messages);
         maid.getExistingData(SelfTalkAttachments.SELF_TALK_FINGERPRINTS).ifPresent(set -> {
-            for (LLMMessage message : messages) {
-                set.remove(fingerprint(message));
+            for (String fp : fingerprints) {
+                set.remove(fp);
             }
         });
+    }
+
+    /** 与 {@link #fingerprint} 同口径的批量取值（一次算出，避免重复拼接字符串） */
+    static Set<String> fingerprintSet(Collection<LLMMessage> messages) {
+        Set<String> set = new HashSet<>(messages.size() * 2);
+        for (LLMMessage message : messages) {
+            set.add(fingerprint(message));
+        }
+        return set;
     }
 
     /** 清空全部指纹与 legacy 标记（历史清空时调用；客户端 no-op） */
@@ -78,6 +101,8 @@ public final class SelfTalkProvenance {
         if (maid.hasData(SelfTalkAttachments.SEGMENT_LEGACY_INITIALIZED)) {
             maid.setData(SelfTalkAttachments.SEGMENT_LEGACY_INITIALIZED, false);
         }
+        // 检索库缓存随之失效：原始历史已清空，旧索引不能再被复用
+        HistoryRetrievalCache.drop(maid);
     }
 
     /**

@@ -33,10 +33,13 @@ import java.util.UUID;
  * @param naturalLanguageEnabled 「环境信息自然语言化」的<b>已存偏好</b>，不是管理员门控后的有效值——
  *                             与 32 项模式同口径：管理员禁用时界面要能显示玩家原来的选择，
  *                             功能恢复后原样生效
- * @param rows                 32 行状态（顺序即目录顺序）。总开关不走这里，不伪装成第 33 项
+ * @param historyContextModeId 「历史上下文模式」的<b>已存偏好</b>存储值，口径同上。
+ *                             它是浮层标题区的独立控件，<b>不</b>伪装成环境目录中的第 33 项
+ * @param rows                 32 行状态（顺序即目录顺序）。两个标题区开关与模式都不走这里
  */
 public record EnvironmentContextConfigResponsePayload(UUID sessionId, long seq, boolean adminEnabled,
-                                                      boolean naturalLanguageEnabled, List<Row> rows)
+                                                      boolean naturalLanguageEnabled,
+                                                      String historyContextModeId, List<Row> rows)
         implements CustomPacketPayload {
 
     /**
@@ -81,12 +84,19 @@ public record EnvironmentContextConfigResponsePayload(UUID sessionId, long seq, 
     private static final StreamCodec<FriendlyByteBuf, List<Row>> ROWS_STREAM_CODEC =
             Row.STREAM_CODEC.apply(ByteBufCodecs.list(EnvironmentContextOption.ALL.size()));
 
+    /** 历史上下文模式存储值的编解码（长度上限与 Set 包同口径） */
+    private static final StreamCodec<FriendlyByteBuf, String> HISTORY_MODE_CODEC = StreamCodec.of(
+            (buf, value) -> buf.writeUtf(value == null ? "" : value,
+                    HistoryContextModeSetPayload.MAX_MODE_LENGTH),
+            buf -> buf.readUtf(HistoryContextModeSetPayload.MAX_MODE_LENGTH));
+
     public static final StreamCodec<FriendlyByteBuf, EnvironmentContextConfigResponsePayload> STREAM_CODEC =
             StreamCodec.composite(
                     UUID_STREAM_CODEC, EnvironmentContextConfigResponsePayload::sessionId,
                     ByteBufCodecs.VAR_LONG, EnvironmentContextConfigResponsePayload::seq,
                     ByteBufCodecs.BOOL, EnvironmentContextConfigResponsePayload::adminEnabled,
                     ByteBufCodecs.BOOL, EnvironmentContextConfigResponsePayload::naturalLanguageEnabled,
+                    HISTORY_MODE_CODEC, EnvironmentContextConfigResponsePayload::historyContextModeId,
                     ROWS_STREAM_CODEC, EnvironmentContextConfigResponsePayload::rows,
                     EnvironmentContextConfigResponsePayload::new);
 
@@ -95,7 +105,7 @@ public record EnvironmentContextConfigResponsePayload(UUID sessionId, long seq, 
      * <p>
      * 行序即目录序；每行取玩家的已存偏好（缺省补目录默认值）与实际可用性，
      * 两者互不影响——管理员禁用不清空偏好，偏好也不改变可用性。
-     * 总开关同样回传玩家的<b>已存偏好</b>，管理员禁用时也不改写。
+     * 两个标题区控件同样回传玩家的<b>已存偏好</b>，管理员禁用时也不改写。
      */
     public static EnvironmentContextConfigResponsePayload snapshot(MinecraftServer server, UUID playerUuid,
                                                                    UUID sessionId, long seq) {
@@ -107,7 +117,8 @@ public record EnvironmentContextConfigResponsePayload(UUID sessionId, long seq, 
         }
         return new EnvironmentContextConfigResponsePayload(
                 sessionId, seq, Config.PLAYER_OPTION_ENABLED.get(),
-                PlayerSettingsStore.isEnvironmentContextNaturalLanguageEnabled(server, playerUuid), rows);
+                PlayerSettingsStore.isEnvironmentContextNaturalLanguageEnabled(server, playerUuid),
+                PlayerSettingsStore.getHistoryContextMode(server, playerUuid).id(), rows);
     }
 
     /**

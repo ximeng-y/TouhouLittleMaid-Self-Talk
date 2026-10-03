@@ -4,6 +4,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatMana
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.summary.HistorySummaryManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.HistoryRetrievalCache;
 import com.maidmod.selftalk.SelfTalkProvenance;
 import net.minecraft.server.level.ServerLevel;
 import org.spongepowered.asm.mixin.Mixin;
@@ -35,6 +36,10 @@ public abstract class HistorySummaryManagerMixin {
         if (maid == null || !(maid.level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        serverLevel.getServer().execute(() -> SelfTalkProvenance.removeByMessages(maid, snapshot));
+        serverLevel.getServer().execute(() -> {
+            SelfTalkProvenance.removeByMessages(maid, snapshot);
+            // 压缩把旧消息换成了摘要：可检索对话随之变化，只做失效标记
+            HistoryRetrievalCache.invalidate(maid);
+        });
     }
 }
