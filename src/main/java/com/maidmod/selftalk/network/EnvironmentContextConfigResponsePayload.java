@@ -25,15 +25,19 @@ import java.util.UUID;
  * 回传的 mode 是「已存偏好补默认值」的结果，不是被管理员强制覆盖后的有效模式——
  * 玩家保存的选择必须在功能恢复后原样生效。
  *
- * @param sessionId    浮层会话 id（客户端据此丢弃关闭后或旧会话的迟到回包）
- * @param seq          对应请求的序号
- * @param adminEnabled 管理员是否允许玩家配置（{@code PLAYER_OPTION_ENABLED}）。
- *                     为 false 时界面整页禁用，禁用原因优先显示「玩家自定义配置被禁用」，
- *                     因此不必逐行改写 availability
- * @param rows         32 行状态（顺序即目录顺序）
+ * @param sessionId            浮层会话 id（客户端据此丢弃关闭后或旧会话的迟到回包）
+ * @param seq                  对应请求的序号
+ * @param adminEnabled         管理员是否允许玩家配置（{@code PLAYER_OPTION_ENABLED}）。
+ *                             为 false 时界面整页禁用，禁用原因优先显示「玩家自定义配置被禁用」，
+ *                             因此不必逐行改写 availability
+ * @param naturalLanguageEnabled 「环境信息自然语言化」的<b>已存偏好</b>，不是管理员门控后的有效值——
+ *                             与 32 项模式同口径：管理员禁用时界面要能显示玩家原来的选择，
+ *                             功能恢复后原样生效
+ * @param rows                 32 行状态（顺序即目录顺序）。总开关不走这里，不伪装成第 33 项
  */
 public record EnvironmentContextConfigResponsePayload(UUID sessionId, long seq, boolean adminEnabled,
-                                                      List<Row> rows) implements CustomPacketPayload {
+                                                      boolean naturalLanguageEnabled, List<Row> rows)
+        implements CustomPacketPayload {
 
     /**
      * 单行状态。
@@ -82,6 +86,7 @@ public record EnvironmentContextConfigResponsePayload(UUID sessionId, long seq, 
                     UUID_STREAM_CODEC, EnvironmentContextConfigResponsePayload::sessionId,
                     ByteBufCodecs.VAR_LONG, EnvironmentContextConfigResponsePayload::seq,
                     ByteBufCodecs.BOOL, EnvironmentContextConfigResponsePayload::adminEnabled,
+                    ByteBufCodecs.BOOL, EnvironmentContextConfigResponsePayload::naturalLanguageEnabled,
                     ROWS_STREAM_CODEC, EnvironmentContextConfigResponsePayload::rows,
                     EnvironmentContextConfigResponsePayload::new);
 
@@ -90,6 +95,7 @@ public record EnvironmentContextConfigResponsePayload(UUID sessionId, long seq, 
      * <p>
      * 行序即目录序；每行取玩家的已存偏好（缺省补目录默认值）与实际可用性，
      * 两者互不影响——管理员禁用不清空偏好，偏好也不改变可用性。
+     * 总开关同样回传玩家的<b>已存偏好</b>，管理员禁用时也不改写。
      */
     public static EnvironmentContextConfigResponsePayload snapshot(MinecraftServer server, UUID playerUuid,
                                                                    UUID sessionId, long seq) {
@@ -100,7 +106,8 @@ public record EnvironmentContextConfigResponsePayload(UUID sessionId, long seq, 
                     EnvironmentContextSettings.availabilityOf(option).id()));
         }
         return new EnvironmentContextConfigResponsePayload(
-                sessionId, seq, Config.PLAYER_OPTION_ENABLED.get(), rows);
+                sessionId, seq, Config.PLAYER_OPTION_ENABLED.get(),
+                PlayerSettingsStore.isEnvironmentContextNaturalLanguageEnabled(server, playerUuid), rows);
     }
 
     /**

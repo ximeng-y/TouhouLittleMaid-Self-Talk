@@ -101,6 +101,8 @@
   "config.maid_self_talk.screen.player_settings.context.entry": "Environment Context",
   "config.maid_self_talk.screen.player_settings.context.title": "Environment Context",
   "config.maid_self_talk.screen.player_settings.context.scope": "Applies to all maids you own",
+  "config.maid_self_talk.screen.player_settings.context.natural_language": "Natural-language context",
+  "config.maid_self_talk.screen.player_settings.context.natural_language.warning": "Experimental feature; may affect model response quality.",
   "config.maid_self_talk.screen.player_settings.context.footer": "Only controls automatic injection into self-talk and inter-chat",
   "config.maid_self_talk.screen.player_settings.context.close": "✕",
   "config.maid_self_talk.screen.player_settings.context.close.tooltip": "Close",

@@ -52,7 +52,7 @@ public final class MaidInterChatService {
         // 清洗先于上下文构建：checkMessages 失败会放弃本次触发，感知事件不能在此之前被 drain 消费。
         // 构建后不得再追加任何上下文段——统一入口内部已含固定前缀、情境与感知段及 <context> 包装。
         try { HistoryMessagesCheck.checkMessages(messages); } catch (Throwable t) { MaidSelfTalkMod.LOGGER.warn("HistoryMessagesCheck after prompt failed for inter-chat, skipped", t); return false; }
-        String fullPrompt = SelfTalkContexts.buildConfiguredUserMessage(maid, prompt);
+        String fullPrompt = SelfTalkContexts.buildConfiguredUserMessage(maid, prompt, language);
         messages.add(LLMMessage.userChat(maid, fullPrompt));
         // 段标签包裹（历史+互聊窗口+peerText；prompt 消息为尾部、不参与包裹）
         SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowCount);

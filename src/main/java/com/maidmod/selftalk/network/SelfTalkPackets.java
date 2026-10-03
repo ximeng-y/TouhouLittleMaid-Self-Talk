@@ -41,9 +41,9 @@ public final class SelfTalkPackets {
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {
-        // v6：新增「环境上下文三态偏好」的 3 个 payload（request/set/response）；同样不做向后兼容——
-        // NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
-        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("6");
+        // v7：新增「环境信息自然语言化」总开关的 C2S payload，并给环境上下文快照增加一个布尔字段；
+        // 同样不做向后兼容——NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
+        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("7");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,
                 SelfTalkPackets::handleConfigRequest);
         registrar.playToServer(SelfTalkConfigSetPayload.TYPE, SelfTalkConfigSetPayload.STREAM_CODEC,
@@ -80,6 +80,9 @@ public final class SelfTalkPackets {
         registrar.playToServer(EnvironmentContextConfigSetPayload.TYPE,
                 EnvironmentContextConfigSetPayload.STREAM_CODEC,
                 SelfTalkPackets::handleEnvironmentContextSet);
+        registrar.playToServer(EnvironmentContextNaturalLanguageSetPayload.TYPE,
+                EnvironmentContextNaturalLanguageSetPayload.STREAM_CODEC,
+                SelfTalkPackets::handleEnvironmentContextNaturalLanguageSet);
         registrar.playToClient(EnvironmentContextConfigResponsePayload.TYPE,
                 EnvironmentContextConfigResponsePayload.STREAM_CODEC,
                 SelfTalkPackets::handleEnvironmentContextResponse);
@@ -387,6 +390,31 @@ public final class SelfTalkPackets {
                     && EnvironmentContextSettings.availabilityOf(option).configurable()) {
                 PlayerSettingsStore.setEnvironmentContextMode(
                         serverPlayer.server, serverPlayer.getUUID(), option, mode);
+            }
+            context.reply(EnvironmentContextConfigResponsePayload.snapshot(
+                    serverPlayer.server, serverPlayer.getUUID(), payload.sessionId(), payload.seq()));
+        });
+    }
+
+    /**
+     * 服务端：保存「环境信息自然语言化」总开关（纵深防御，不信任客户端）。
+     * <p>
+     * 与 32 项设置共用同一个浮层会话：玩家 UUID 一律取连接上的 {@code ServerPlayer}，
+     * 包内不携带玩家或女仆 UUID；限流沿用 {@link #allowConfigPacket}。
+     * 管理员允许时保存，不允许时只回快照、<b>不</b>改存档——玩家原来的 true 必须保留。
+     * 除被限流直接丢弃外，一律回完整环境上下文快照（与 32 项设置同一份，客户端整包应用）。
+     */
+    private static void handleEnvironmentContextNaturalLanguageSet(
+            EnvironmentContextNaturalLanguageSetPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (!(player instanceof ServerPlayer serverPlayer) || payload.sessionId() == null
+                    || !allowConfigPacket(serverPlayer.getUUID())) {
+                return;
+            }
+            if (Config.PLAYER_OPTION_ENABLED.get()) {
+                PlayerSettingsStore.setEnvironmentContextNaturalLanguageEnabled(
+                        serverPlayer.server, serverPlayer.getUUID(), payload.enabled());
             }
             context.reply(EnvironmentContextConfigResponsePayload.snapshot(
                     serverPlayer.server, serverPlayer.getUUID(), payload.sessionId(), payload.seq()));

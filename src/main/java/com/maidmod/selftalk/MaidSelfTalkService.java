@@ -105,8 +105,9 @@ public final class MaidSelfTalkService {
             message = UserPromptContexts.addContext(maid, prompt + SelfTalkContexts.buildRandomContext(maid));
         } else {
             // 自话：三态偏好选出的环境信息 + 固定上下文前缀一次成文；本入口内部已含 <context> 包装，
-            // 不得再调 addContext（会套两层包装），也不在此后追加任何上下文段
-            message = SelfTalkContexts.buildConfiguredUserMessage(maid, prompt);
+            // 不得再调 addContext（会套两层包装），也不在此后追加任何上下文段。
+            // 语言用本次请求已解析好的自话语言：背景模板与感知段的中英选择都由它决定
+            message = SelfTalkContexts.buildConfiguredUserMessage(maid, prompt, selfTalkLanguage);
         }
         messages.add(LLMMessage.userChat(maid, message));
 

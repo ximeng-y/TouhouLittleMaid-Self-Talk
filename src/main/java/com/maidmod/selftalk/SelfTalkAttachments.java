@@ -125,6 +125,17 @@ public final class SelfTalkAttachments {
                     SelfTalkAttachments::buildLevelMaidStringMap);
 
     /**
+     * 环境信息自然语言化开关(Level):玩家 UUID -> true（仅存 true 项，缺失 = 关闭）。
+     * <p>
+     * 实验性模式，默认关闭；只存开启项，关闭时删键，不留无意义的 false 覆盖。
+     * 管理员关闭玩家配置时有效值为关闭，但这里的已存偏好必须保留，功能恢复后继续生效。
+     */
+    public static final Supplier<AttachmentType<Map<String, Boolean>>> LEVEL_ENVIRONMENT_CONTEXT_NATURAL_LANGUAGE =
+            ATTACHMENT_TYPES.register("level_environment_context_natural_language",
+                    () -> AttachmentType.builder((Supplier<Map<String, Boolean>>) HashMap::new)
+                            .serialize(Codec.unboundedMap(Codec.STRING, Codec.BOOL)).build());
+
+    /**
      * 女仆自话回复指纹集（来源判定用，挂女仆实体）。
      * <p>
      * 指纹 = (role, message, gameTime) 三元组拼接串。TLM 历史 deque 中自话回复与主人聊天回复

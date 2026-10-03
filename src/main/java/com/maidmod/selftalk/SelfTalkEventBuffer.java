@@ -9,10 +9,15 @@ import java.util.UUID;
 
 /**
  * 女仆感知事件缓冲：结构化保存死亡、玩家受伤与自身受伤记录，
- * 负责固定采样冷却、有效期淘汰、容量收缩与自然语言归并。
+ * 负责固定采样冷却、有效期淘汰、容量收缩与相邻记录归并。
  * <p>
  * 不依赖 Minecraft / TLM 类型，也不读取配置——容量与有效期由调用方按当前配置传入，
  * 因此可脱离游戏直接自检（见 {@code src/test/java/.../SelfTalkEventBufferTest.java}）。
+ * <p>
+ * 记录保存的是<b>语言中立的事实</b>（主体类别、事发时取到的名称快照、来源分类），
+ * 不是成句文本：入队后玩家切换聊天语言，仍按新语言的模板渲染，无需重新采集事件。
+ * 名称与死亡正文在事发时取快照，避免实体离开后丢失来源；缓冲里<b>不</b>持有
+ * {@code Entity}、{@code Level}、{@code DamageSource} 等活对象引用。
  * <p>
  * 时间一律用服务器全局 tick（{@code server.getTickCount()}）折算，20 tick = 1 秒；
  * 不用各维度 {@code gameTime}（各维度独立计数，跨维度比较会出现负差）。
@@ -36,12 +41,64 @@ final class SelfTalkEventBuffer {
         SELF_HURT
     }
 
+    /** 受伤主体类别（渲染时决定称呼，不保存实体引用） */
+    enum Subject {
+        /** 观察者自己（自身受伤） */
+        SELF,
+        /** 观察者的主人 */
+        OWNER,
+        /** 其它玩家 */
+        PLAYER
+    }
+
+    /**
+     * 伤害来源分类，与既有的优先级一一对应：
+     * <ol>
+     *   <li>{@link #ATTACKER}：{@code DamageSource.getEntity()} 能取得造成伤害者；</li>
+     *   <li>{@link #FIRE}／{@link #DROWNING}／{@link #FALL}：无来源实体时按伤害类型标签分类；</li>
+     *   <li>{@link #OTHER}：其余情况保留伤害类型标识，不猜原因。</li>
+     * </ol>
+     * 投射物实体不算攻击者（{@code getDirectEntity()} 是箭矢本身），
+     * 也不新增武器、伤害数值或更细的来源推断。
+     */
+    enum Source {
+        ATTACKER,
+        FIRE,
+        DROWNING,
+        FALL,
+        OTHER
+    }
+
+    /** 事件事实：语言中立，渲染时才按目标语言成句 */
+    sealed interface Fact permits HurtFact, DeathFact {
+    }
+
+    /**
+     * 受伤事实。
+     *
+     * @param subject      主体类别
+     * @param subjectName  事发时主体名称（自己为 null）；已清洗过段标签与换行
+     * @param attackerName 事发时攻击者名称；仅 {@link Source#ATTACKER} 非空
+     * @param source       来源分类
+     */
+    record HurtFact(Subject subject, String subjectName, String attackerName, Source source) implements Fact {
+    }
+
+    /**
+     * 死亡事实：保留原有死亡正文快照，并<b>显式</b>给出英文渲染结果。
+     * <p>
+     * 中文正文取事发时的原版死亡消息（沿用原行为）；英文正文由
+     * {@link DeathMessageEnglishRenderer} 从同一份 {@code Component} 独立渲染，
+     * 两者都在事发时定格，之后不再依赖游戏全局语言。
+     */
+    record DeathFact(String zhText, String enText) implements Fact {
+    }
+
     /**
      * 一条已发生的事实。
      * <p>
      * {@code subjectId} / {@code attackerId} 只用于内部比较与归并，绝不输出；
-     * {@code text} 是采集时生成并清洗过的自然语言正文，不含任何时间前缀、编号或段标签；
-     * 不保存实体、世界、DamageSource 等引用（避免长期持有已卸载实体的对象）。
+     * {@code damageTypeId} 仅在无法归类时作为兜底标识输出。
      */
     record Event(
             Kind kind,
@@ -49,7 +106,7 @@ final class SelfTalkEventBuffer {
             UUID subjectId,
             UUID attackerId,
             String damageTypeId,
-            String text) {
+            Fact fact) {
     }
 
     /** 按真实记录顺序保存的事件（容量由调用方按当前配置收缩） */
@@ -123,20 +180,19 @@ final class SelfTalkEventBuffer {
     }
 
     /**
-     * 把有效事件归并为自然语言短段（按记录顺序，不输出编号/项目符号/字段名）。
+     * 把有效事件归并为语言中立的连续分组，供 {@link EnvironmentContextRenderer} 按语言成句。
      * <p>
-     * 只归并<b>相邻</b>且主体、攻击者、伤害类型、正文全相同的受伤记录：中间夹了别的事件就不合并，
-     * 保证事件先后关系不被打乱。死亡不归并。归并只发生在渲染阶段，不刷新缓冲记录的时间，
+     * 只归并<b>相邻</b>且种类、主体、攻击者、伤害类型与事实内容全相同的受伤记录：中间夹了别的事件
+     * 就不合并，保证事件先后关系不被打乱。死亡不归并。归并只发生在渲染阶段，不刷新缓冲里的记录时间，
      * 旧事件不会借新事件无限续期。过期记录在 {@link #drain} 阶段已被剔除，不参与「反复发生」的判断。
      * <p>
-     * 归并时只说明「不止一次」，绝不输出精确受击次数——冷却期内的受击本就没有记录，
-     * 输出条数会被误读为真实受击次数。
+     * 归并比较的是语言中立的事实，不比最终中文或英文句子——切换语言不会改变分组结果。
      */
-    static String describe(List<Event> events, long nowTick) {
+    static List<Group> group(List<Event> events) {
         if (events == null || events.isEmpty()) {
-            return "";
+            return List.of();
         }
-        StringBuilder sb = new StringBuilder();
+        List<Group> groups = new ArrayList<>();
         int index = 0;
         while (index < events.size()) {
             Event first = events.get(index);
@@ -145,19 +201,20 @@ final class SelfTalkEventBuffer {
                     && sameHurt(events.get(end), first)) {
                 end++;
             }
-            if (sb.length() > 0) {
-                sb.append(' ');
-            }
-            if (end - index > 1) {
-                sb.append("这段时间里，").append(first.text())
-                        .append("，不止一次，最近一次").append(relativeTime(events.get(end - 1).tick(), nowTick)).append('。');
-            } else {
-                sb.append(relativeTime(first.tick(), nowTick)).append('，')
-                        .append(first.text()).append('。');
-            }
+            groups.add(new Group(first, events.get(end - 1), end - index > 1));
             index = end;
         }
-        return sb.toString();
+        return groups;
+    }
+
+    /**
+     * 一组相邻同源记录。
+     *
+     * @param first    组内第一条（事实取它，组内事实相同）
+     * @param last     组内最后一条（相对时间取它的 tick）
+     * @param repeated 是否不止一条（对外只说「多次」，不输出精确次数）
+     */
+    record Group(Event first, Event last, boolean repeated) {
     }
 
     /** 全字段一致的重复投递判定（不同 UUID 的同名对象 tick 不同，不会被误判为同一条） */
@@ -166,13 +223,13 @@ final class SelfTalkEventBuffer {
                 && sameHurt(a, b);
     }
 
-    /** 伤害记录的可归并字段：种类、主体、攻击者、伤害类型、正文 */
+    /** 伤害记录的可归并字段：种类、主体、攻击者、伤害类型、语言中立的事实内容 */
     private static boolean sameHurt(Event a, Event b) {
         return a.kind() == b.kind()
                 && Objects.equals(a.subjectId(), b.subjectId())
                 && Objects.equals(a.attackerId(), b.attackerId())
                 && Objects.equals(a.damageTypeId(), b.damageTypeId())
-                && Objects.equals(a.text(), b.text());
+                && Objects.equals(a.fact(), b.fact());
     }
 
     /** 受伤冷却：首次必定通过，距上次成功记录不足一个采样间隔则忽略 */
@@ -200,14 +257,5 @@ final class SelfTalkEventBuffer {
         while (events.size() > maxEvents) {
             events.pollFirst();
         }
-    }
-
-    /** 相对时间前缀：不足一个采样间隔说「刚才」，其余按秒取整 */
-    private static String relativeTime(long tick, long nowTick) {
-        long ageTicks = nowTick - tick;
-        if (ageTicks < HURT_COOLDOWN_TICKS) {
-            return "刚才";
-        }
-        return "约 " + (ageTicks / 20L) + " 秒前";
     }
 }

@@ -309,6 +309,65 @@ public final class PlayerSettingsStore {
         server.overworld().setData(SelfTalkAttachments.LEVEL_ENVIRONMENT_CONTEXT_MODES, outer);
     }
 
+    // ===== 环境信息自然语言化（实验性） =====
+
+    /**
+     * 该玩家「环境信息自然语言化」的<b>已存偏好</b>（缺省 false = 关闭，实验性功能默认关闭）。
+     * <p>
+     * <b>不</b>在此处叠加管理员门控：本方法只表达玩家自己的选择，
+     * 有效值由 {@link #isEnvironmentContextNaturalLanguageEnabledForMaid} 统一计算
+     * （管理员关闸时有效值为关闭，但玩家原来的 true 必须保留，恢复后继续生效）。
+     */
+    public static boolean isEnvironmentContextNaturalLanguageEnabled(MinecraftServer server, UUID playerUuid) {
+        if (playerUuid == null) {
+            return false;
+        }
+        return getMap(server, SelfTalkAttachments.LEVEL_ENVIRONMENT_CONTEXT_NATURAL_LANGUAGE)
+                .getOrDefault(playerUuid.toString(), false);
+    }
+
+    /**
+     * 保存玩家的自然语言化开关：开启存 true，关闭移除键（仅存非默认项，不留无意义的 false 覆盖）。
+     * <p>
+     * 同值写入直接返回，不产生一次无意义的存档写入。
+     */
+    public static void setEnvironmentContextNaturalLanguageEnabled(MinecraftServer server, UUID playerUuid,
+                                                                   boolean enabled) {
+        Map<String, Boolean> map = new HashMap<>(
+                server.overworld().getData(SelfTalkAttachments.LEVEL_ENVIRONMENT_CONTEXT_NATURAL_LANGUAGE));
+        String key = playerUuid.toString();
+        if (map.getOrDefault(key, false) == enabled) {
+            return;
+        }
+        if (enabled) {
+            map.put(key, true);
+        } else {
+            map.remove(key);
+        }
+        server.overworld().setData(SelfTalkAttachments.LEVEL_ENVIRONMENT_CONTEXT_NATURAL_LANGUAGE, map);
+    }
+
+    /**
+     * 女仆的环境信息自然语言化有效值（派发侧统一判定口，须在<b>实际派发时</b>调用）。
+     * <p>
+     * 有效 = 管理员允许玩家配置 && 女仆有主人 UUID && 该主人保存的开关为 true。
+     * <ul>
+     *   <li>主人离线同样按 UUID 查世界存档，设置继续生效；</li>
+     *   <li>无主女仆用原模式（没有玩家偏好可查）；</li>
+     *   <li>管理员关闭玩家配置时有效值为关闭，但<b>不</b>删除玩家原来的 true。</li>
+     * </ul>
+     */
+    public static boolean isEnvironmentContextNaturalLanguageEnabledForMaid(MinecraftServer server, EntityMaid maid) {
+        if (!Config.PLAYER_OPTION_ENABLED.get()) {
+            return false;
+        }
+        UUID ownerUuid = maid.getOwnerUUID();
+        if (ownerUuid == null) {
+            return false;
+        }
+        return isEnvironmentContextNaturalLanguageEnabled(server, ownerUuid);
+    }
+
     // ===== 共用读写 =====
 
     /** 全局布尔读写（缺省值 defaultEnabled 时移除键，值不等于缺省才落盘） */

@@ -10,6 +10,7 @@ import com.maidmod.selftalk.network.SelfTalkPackets;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -318,9 +319,11 @@ public final class SelfTalkHandler {
      * 订阅在事件总线（服务端主线程），行为纪律与 {@link #onMaidTick} 相同：整体 try-catch 兜底，
      * 绝不向外抛异常。
      * <p>
-     * 死亡消息取原版本地化文本：专用服务端未注入语言表、恒为英文原文，
-     * 单人/局域网集成服务端随客户端语言（可能与下方硬编码的受伤行语言不一致，可接受）。
-     * 本 mod 不再自行给文本加 {@code [Event]} 前缀——事件已按结构保存，时间与先后由渲染阶段表达。
+     * 死亡正文在<b>事发时</b>定格两份：中文路径取原版 {@code getLocalizedDeathMessage} 的当时结果
+     * （沿用原行为：专用服务端恒为英文原文，单人/局域网集成服务端随客户端语言）；
+     * 英文路径由 {@link DeathMessageEnglishRenderer} 从同一个 Component 独立渲染。
+     * 两者都只在事后作为文本使用，不再依赖游戏全局语言，也不持有活对象引用。
+     * 本 mod 不自行给文本加 {@code [Event]} 前缀——事件已按结构保存，时间与先后由渲染阶段表达。
      * <p>
      * 过滤固定为玩家 / 有主人的可驯服或可骑乘动物 / 女仆，普通生物死亡不记录（避免噪音）。
      * 死者自身需排除：常规路径下 {@code isAlive()} 已能排除死者（事件在 {@code die()} 顶部触发时
@@ -343,13 +346,17 @@ public final class SelfTalkHandler {
                 return;
             }
             DamageSource source = event.getSource();
-            String text = SegmentTags.stripTagsFromPlayerInput(
-                    event.getSource().getLocalizedDeathMessage(dead).getString()
-                            .replace('\n', ' ').replace('\r', ' '));
+            Component message = source.getLocalizedDeathMessage(dead);
+            String zhText = SelfTalkContexts.cleanName(message.getString());
+            String enText = DeathMessageEnglishRenderer.render(message);
+            // 英文渲染不可用（第三方字面文本、缺失英文键、不支持的 Component）时回退原文本：
+            // 不删事件、不猜译——这类文本可能仍非英文，属于已声明的覆盖限制
+            SelfTalkEventBuffer.DeathFact fact = new SelfTalkEventBuffer.DeathFact(
+                    zhText, enText == null ? zhText : SelfTalkContexts.cleanName(enText));
             SelfTalkEventBuffer.Event record = new SelfTalkEventBuffer.Event(
                     SelfTalkEventBuffer.Kind.DEATH, level.getServer().getTickCount(),
                     dead.getUUID(), entityUuid(source.getEntity()),
-                    damageTypeKey(source), text);
+                    damageTypeKey(source), fact);
             appendEventToNearbyMaids(level, dead.getBoundingBox(), dead.getId(), record);
         } catch (Throwable t) {
             MaidSelfTalkMod.LOGGER.error("Failed to handle living death event for event context", t);
@@ -400,7 +407,8 @@ public final class SelfTalkHandler {
                 SelfTalkEventBuffer.Event record = new SelfTalkEventBuffer.Event(
                         SelfTalkEventBuffer.Kind.SELF_HURT, level.getServer().getTickCount(),
                         maid.getUUID(), entityUuid(source.getEntity()),
-                        damageTypeKey(source), SelfTalkContexts.hurtFact("你", source));
+                        damageTypeKey(source),
+                        SelfTalkContexts.hurtFact(SelfTalkEventBuffer.Subject.SELF, null, source));
                 SelfTalkState.get(maid.getId()).eventBuffer.append(
                         record, Config.EVENT_CONTEXT_MAX_BUFFERED.get(), hurtMaxAgeTicks());
             }
@@ -429,18 +437,18 @@ public final class SelfTalkHandler {
         long maxAge = hurtMaxAgeTicks();
         // 玩家名可能被改成段标签形态（正版名受限，但离线服/第三方可伪造），与自定义 Prompt 同口径清洗，
         // 防止伪造段边界影响模型的来源区分（不是防提示词注入本身）
-        String playerName = SegmentTags.stripTagsFromPlayerInput(
-                player.getName().getString().replace('\n', ' ').replace('\r', ' '));
+        String playerName = SelfTalkContexts.cleanName(player.getName().getString());
         UUID playerUuid = player.getUUID();
         UUID attackerUuid = entityUuid(source.getEntity());
         String damageType = damageTypeKey(source);
         for (EntityMaid maid : maids) {
             boolean isOwner = playerUuid.equals(maid.getOwnerUUID());
-            String subject = (isOwner ? "你的主人「" : "玩家「") + playerName + "」";
+            SelfTalkEventBuffer.Subject subject = isOwner
+                    ? SelfTalkEventBuffer.Subject.OWNER : SelfTalkEventBuffer.Subject.PLAYER;
             SelfTalkEventBuffer.Event record = new SelfTalkEventBuffer.Event(
                     SelfTalkEventBuffer.Kind.PLAYER_HURT, serverTick,
                     playerUuid, attackerUuid, damageType,
-                    SelfTalkContexts.hurtFact(subject, source));
+                    SelfTalkContexts.hurtFact(subject, playerName, source));
             SelfTalkState.get(maid.getId()).eventBuffer.append(record, max, maxAge);
         }
     }
