@@ -418,13 +418,15 @@ final class EnvironmentContextRenderer {
             };
         }
         String list = join(items, zh);
+        // 英文所有格独立于主格 subject：subject 是「you」，直接加 's 会拼成 You's
+        String possessive = owner ? "your owner's" : "your";
         return switch (key) {
             case "mainhand_item", "offhand_item" -> zh
                     ? subject + "当前的" + slotName(key) + "是 " + list + "。"
-                    : capitalize(subject + "'s " + slotNameEn(key) + " is " + list + ".");
+                    : capitalize(possessive + " " + slotNameEn(key) + " is " + list + ".");
             case "user_mainhand" -> zh
                     ? subject + "当前的主手物品是 " + list + "。"
-                    : capitalize(subject + "'s main-hand item is " + list + ".");
+                    : capitalize(possessive + " main-hand item is " + list + ".");
             case "inventory_items" -> zh ? "你的背包里有：" + list + "。" : "Your backpack contains: " + list + ".";
             case "armor_items" -> zh ? "你身上装备着：" + list + "。" : "You are wearing: " + list + ".";
             default -> zh ? "你的主人身上装备着：" + list + "。" : "Your owner is wearing: " + list + ".";
