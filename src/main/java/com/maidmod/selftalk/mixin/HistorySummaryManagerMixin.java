@@ -3,6 +3,8 @@ package com.maidmod.selftalk.mixin;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.summary.HistorySummaryManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
+import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.HistoryRetrievalCache;
 import com.maidmod.selftalk.SelfTalkProvenance;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -18,7 +20,8 @@ import java.util.List;
  * （压缩进行标志守卫、摘要空白、快照与历史不一致）都不会到达 TAIL，即指纹删除只在
  * 「pollLast 已真正删除历史消息」的成功路径上执行——判定始终与历史内容同步。
  * <p>
- * 该回调在 LLM 响应线程执行（TLM 异步摘要），指纹为实体字段并发集，跨线程读写安全。
+ * 该回调在 LLM 响应线程执行（TLM 异步摘要），指纹为实体字段并发集，跨线程读写安全；
+ * 检索索引缓存的失效标记同样在此派发到服务端主线程（压缩把旧消息换成了摘要，可检索对话随之变化）。
  */
 @Mixin(HistorySummaryManager.class)
 public abstract class HistorySummaryManagerMixin {
@@ -27,6 +30,10 @@ public abstract class HistorySummaryManagerMixin {
     private void maid_self_talk$removeCompressedProvenance(String summary, List<LLMMessage> snapshot,
                                                            CallbackInfoReturnable<Boolean> cir) {
         MaidAIChatManager manager = ((HistorySummaryManagerAccessor) (Object) this).maid_self_talk$getChatManager();
-        SelfTalkProvenance.removeByMessages(manager.getMaid(), snapshot);
+        EntityMaid maid = manager.getMaid();
+        SelfTalkProvenance.removeByMessages(maid, snapshot);
+        if (maid != null && !maid.level().isClientSide()) {
+            maid.level().getServer().execute(() -> HistoryRetrievalCache.invalidate(maid));
+        }
     }
 }

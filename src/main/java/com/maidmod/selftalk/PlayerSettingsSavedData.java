@@ -63,6 +63,13 @@ public final class PlayerSettingsSavedData extends SavedData {
      * 功能恢复后继续生效。
      */
     private final Map<String, Boolean> environmentContextNaturalLanguage = new HashMap<>();
+    /**
+     * 历史上下文模式：玩家 UUID -> 模式存储值（{@code compact} / {@code retrieval}）。
+     * <p>
+     * 只存非默认值（{@code full} 不落盘，恢复全量即移除键）；非法存档值在读取侧按 {@code full} 处理。
+     * 管理员关闭玩家配置时有效值为全量，但这里的已存偏好必须保留，功能恢复后继续生效。
+     */
+    private final Map<String, String> historyContextModes = new HashMap<>();
 
     private PlayerSettingsSavedData() {
     }
@@ -88,6 +95,7 @@ public final class PlayerSettingsSavedData extends SavedData {
         readMaidList(tag, "toolCallMaidOverrides", data.toolCallMaidOverrides);
         readMaidStringList(tag, "environmentContextModes", data.environmentContextModes);
         readGlobal(tag, "environmentContextNaturalLanguage", data.environmentContextNaturalLanguage);
+        readStringGlobal(tag, "historyContextModes", data.historyContextModes);
         return data;
     }
 
@@ -106,6 +114,7 @@ public final class PlayerSettingsSavedData extends SavedData {
         writeMaidList(tag, "toolCallMaidOverrides", toolCallMaidOverrides);
         writeMaidStringList(tag, "environmentContextModes", environmentContextModes);
         writeGlobal(tag, "environmentContextNaturalLanguage", environmentContextNaturalLanguage);
+        writeStringGlobal(tag, "historyContextModes", historyContextModes);
         return tag;
     }
 
@@ -324,6 +333,35 @@ public final class PlayerSettingsSavedData extends SavedData {
             environmentContextNaturalLanguage.put(playerUuid.toString(), true);
         } else {
             environmentContextNaturalLanguage.remove(playerUuid.toString());
+        }
+        setDirty();
+    }
+
+    /**
+     * 该玩家已保存的历史上下文模式（缺省 {@code null} = 未覆盖，有效值为全量）。
+     * <p>
+     * 只表达玩家自己的选择，不叠加管理员门控——有效值由
+     * {@link PlayerSettingsStore#getHistoryContextModeForMaid} 统一计算。
+     */
+    public String getHistoryContextModeId(UUID playerUuid) {
+        return historyContextModes.get(playerUuid.toString());
+    }
+
+    /**
+     * 保存该玩家的历史上下文模式：非默认值才写盘，恢复默认（全量）时移除键。
+     * <p>
+     * 只存非默认项，缺省语义自然生效，不留无意义的 {@code full} 覆盖。
+     */
+    public void setHistoryContextModeId(UUID playerUuid, String modeId) {
+        String playerKey = playerUuid.toString();
+        String current = historyContextModes.get(playerKey);
+        if (java.util.Objects.equals(current, modeId)) {
+            return;
+        }
+        if (modeId == null) {
+            historyContextModes.remove(playerKey);
+        } else {
+            historyContextModes.put(playerKey, modeId);
         }
         setDirty();
     }

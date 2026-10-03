@@ -61,6 +61,10 @@ public final class SelfTalkState {
      * <p>
      * 派发时才由 {@link MaidSelfTalkService} / {@link MaidInterChatService} 现构建消息，
      * 确保历史/互聊窗口/情境等上下文按派发时刻的最新状态生成，不被积压期间的交叉所打乱。
+     * <p>
+     * {@code chainId} 是这次连续互聊的<b>唯一链标识</b>（自话为 0）：链上每一跳都带着它，
+     * 用于「同一条链只做一次首次检索」与「过期链的续接请求直接丢弃」，
+     * 不能只凭「还是同一对女仆」判断同一次会话——那对女仆可能已经开了新链。
      */
     public record DeferredRequest(
             RequestKind kind,
@@ -68,7 +72,8 @@ public final class SelfTalkState {
             String peerText,
             int keep,
             double broadcastRange,
-            int chainRound) {
+            int chainRound,
+            long chainId) {
     }
 
     public static final class State {

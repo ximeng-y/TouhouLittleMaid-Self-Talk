@@ -3,10 +3,12 @@ package com.maidmod.selftalk.client;
 import com.maidmod.selftalk.EnvironmentContextMode;
 import com.maidmod.selftalk.EnvironmentContextOption;
 import com.maidmod.selftalk.EnvironmentContextSettings;
+import com.maidmod.selftalk.HistoryContextMode;
 import com.maidmod.selftalk.network.EnvironmentContextConfigRequestMessage;
 import com.maidmod.selftalk.network.EnvironmentContextConfigResponseMessage;
 import com.maidmod.selftalk.network.EnvironmentContextConfigSetMessage;
 import com.maidmod.selftalk.network.EnvironmentContextNaturalLanguageSetMessage;
+import com.maidmod.selftalk.network.HistoryContextModeSetMessage;
 import com.maidmod.selftalk.network.SelfTalkPackets;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.Font;
@@ -15,6 +17,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
@@ -55,8 +58,15 @@ public final class EnvironmentContextPanel {
     private static final int FOOTER_COLOR = 0xFFB0B0B0;
     /** 同步中 / 读取中 的强调色（与页面既有提示色一致） */
     private static final int SYNC_COLOR = 0xFFFFAA55;
+    /**
+     * 实验性功能警告色（金黄色）。
+     * <p>
+     * 与「同步中」的橙色 {@link #SYNC_COLOR} 刻意分开：两者语义不同，混用会让实验警告看起来像加载状态。
+     * 取值同 {@link ChatFormatting#GOLD}，但不走格式化组件——浮层的 tooltip 走自带换行，颜色由样式常量给。
+     */
+    private static final int EXPERIMENT_COLOR = 0xFFFFAA00;
 
-    private static final int HEADER_HEIGHT = 78;
+    private static final int HEADER_HEIGHT = 102;
     private static final int FOOTER_HEIGHT = 30;
     private static final int ROW_HEIGHT = 24;
     private static final int BUTTON_HEIGHT = 20;
@@ -89,6 +99,8 @@ public final class EnvironmentContextPanel {
     private static final int FOCUS_CLOSE = EnvironmentContextOption.ALL.size();
     /** 焦点哨兵：环境信息自然语言化总开关（在标题区、不随列表滚动） */
     private static final int FOCUS_TOGGLE = -2;
+    /** 焦点哨兵：历史上下文模式（在标题区、不随列表滚动） */
+    private static final int FOCUS_MODE = -3;
 
     private final Font font;
 
@@ -117,6 +129,12 @@ public final class EnvironmentContextPanel {
      * 首次权威快照到达前一律为 false 且开关不可点——客户端初始值绝不能写回覆盖服务端设置。
      */
     private boolean naturalLanguageEnabled = false;
+    /**
+     * 历史上下文模式的<b>已存偏好</b>（不是管理员门控后的有效值）。
+     * <p>
+     * 口径同上：首次快照到达前一律按默认 {@code full} 显示且按钮不可点。
+     */
+    private HistoryContextMode historyMode = HistoryContextMode.FULL;
 
     // ===== 布局（每次 layout 重算） =====
     private int screenWidth;
@@ -138,12 +156,14 @@ public final class EnvironmentContextPanel {
     private boolean draggingThumb;
     /** 拖拽起点相对滑块顶部的偏移，拖动时保证光标与滑块相对位置不跳变 */
     private int dragGrabOffset;
-    /** 当前焦点：0..31 = 行，{@link #FOCUS_TOGGLE} = 总开关，{@link #FOCUS_CLOSE} = 关闭按钮，-1 = 无 */
+    /** 当前焦点：0..31 = 行，{@link #FOCUS_TOGGLE} / {@link #FOCUS_MODE} = 标题区控件，{@link #FOCUS_CLOSE} = 关闭按钮，-1 = 无 */
     private int focusedIndex = -1;
     /** 已构建的行按钮（与目录同序，恒 32 个） */
     private final List<Button> rowButtons = new ArrayList<>();
     /** 标题区的「环境信息自然语言化」总开关（不随列表滚动，也不进底页焦点链） */
     private Button naturalLanguageButton;
+    /** 标题区的「历史上下文模式」循环按钮（同上） */
+    private Button historyModeButton;
     private Button closeButton;
 
     public EnvironmentContextPanel(Font font) {
@@ -179,6 +199,7 @@ public final class EnvironmentContextPanel {
         this.draggingThumb = false;
         this.focusedIndex = -1;
         this.naturalLanguageEnabled = false;
+        this.historyMode = HistoryContextMode.FULL;
         for (EnvironmentContextOption option : EnvironmentContextOption.ALL) {
             this.modes.put(option.key(), option.defaultMode());
             this.availability.put(option.key(), EnvironmentContextSettings.Availability.PROVIDER_MISSING);
@@ -225,9 +246,13 @@ public final class EnvironmentContextPanel {
             // 行按钮不入 Screen 的子控件表：焦点与事件都由浮层自己管，避免污染原页面焦点链
             this.rowButtons.add(button);
         }
-        // 总开关放在标题区固定位置（列表上方、不随滚动），沿用列表的左右对齐关系
+        // 两个标题区控件放在列表上方固定位置（不随滚动），沿用列表的左右对齐关系；
+        // 顺序自上而下为：自然语言化开关 → 历史上下文模式
         this.naturalLanguageButton = Button.builder(Component.empty(), b -> toggleNaturalLanguage())
-                .bounds(buttonX, toggleY(), BUTTON_WIDTH, BUTTON_HEIGHT)
+                .bounds(buttonX, naturalLanguageY(), BUTTON_WIDTH, BUTTON_HEIGHT)
+                .build();
+        this.historyModeButton = Button.builder(Component.empty(), b -> cycleHistoryMode())
+                .bounds(buttonX, historyModeY(), BUTTON_WIDTH, BUTTON_HEIGHT)
                 .build();
         this.closeButton = Button.builder(Component.translatable(closeKey()), b -> close())
                 .bounds(closeX(), closeY(), CLOSE_SIZE, CLOSE_SIZE)
@@ -235,9 +260,17 @@ public final class EnvironmentContextPanel {
         refreshButtons();
     }
 
-    /** 总开关的行 Y：标题（10）→ 作用范围（24）→ 总开关（38），与行高对齐 */
-    private int toggleY() {
+    /**
+     * 标题区控件行 Y：标题（10）→ 作用范围（24）→ 自然语言化（38）→ 历史上下文模式（62）。
+     * <p>
+     * 第四行占满 24 高，因此 {@link #HEADER_HEIGHT} 相应加高一行，列表区不被遮挡。
+     */
+    private int naturalLanguageY() {
         return panelY + 38;
+    }
+
+    private int historyModeY() {
+        return panelY + 62;
     }
 
     private int clampScroll(int value) {
@@ -335,6 +368,25 @@ public final class EnvironmentContextPanel {
                 sessionId, latestIssuedSeq, next));
     }
 
+    /**
+     * 点击历史上下文模式按钮：推进 全量 → 精简 → 检索 → 全量 并乐观更新，随后发送<b>目标绝对模式</b>。
+     * <p>
+     * 与行按钮和自然语言化开关同一套会话机制（同一个 sessionId/seq、同一份超时与重查规则），
+     * 因此连续点击、迟到回包、关闭重开都不会让旧状态覆盖新选择。
+     */
+    private void cycleHistoryMode() {
+        HistoryContextMode next = historyMode.next();
+        historyMode = next;
+        refreshButtons();
+        this.seq++;
+        this.latestIssuedSeq = this.seq;
+        this.awaitingResponse = true;
+        this.pendingSet = true;
+        this.ticksSinceIssue = 0;
+        SelfTalkPackets.CHANNEL.sendToServer(new HistoryContextModeSetMessage(
+                sessionId, latestIssuedSeq, next.id()));
+    }
+
     /** 客户端每 tick 驱动：轮询快照、待确认操作的重查与超时转权威查询 */
     public void tick() {
         if (!open) {
@@ -383,6 +435,8 @@ public final class EnvironmentContextPanel {
         }
         this.adminEnabled = payload.isAdminEnabled();
         this.naturalLanguageEnabled = payload.isNaturalLanguageEnabled();
+        HistoryContextMode parsed = HistoryContextMode.fromId(payload.getHistoryContextModeId());
+        this.historyMode = parsed == null ? HistoryContextMode.FULL : parsed;
         this.hasSnapshot = true;
         this.awaitingResponse = false;
         this.pendingSet = false;
@@ -409,6 +463,10 @@ public final class EnvironmentContextPanel {
         if (naturalLanguageButton != null) {
             naturalLanguageButton.setMessage(onOffKey(naturalLanguageEnabled));
             naturalLanguageButton.active = toggleConfigurable();
+        }
+        if (historyModeButton != null) {
+            historyModeButton.setMessage(Component.translatable(historyModeKey(historyMode)));
+            historyModeButton.active = toggleConfigurable();
         }
     }
 
@@ -460,6 +518,10 @@ public final class EnvironmentContextPanel {
         return "config.maid_self_talk.screen.player_settings.context.mode." + mode.id();
     }
 
+    private static String historyModeKey(HistoryContextMode mode) {
+        return "config.maid_self_talk.screen.player_settings.context.history.mode." + mode.id();
+    }
+
     // ===== 渲染 =====
 
     /**
@@ -492,7 +554,10 @@ public final class EnvironmentContextPanel {
             graphics.drawString(font, Component.translatable(
                             "config.maid_self_talk.screen.player_settings.context.scope"),
                     panelX + NAME_MARGIN, panelY + 24, SUBTITLE_COLOR, false);
-            renderNaturalLanguageRow(graphics, mouseX, mouseY);
+            renderHeaderRow(graphics, mouseX, mouseY, naturalLanguageButton, naturalLanguageY(),
+                    "config.maid_self_talk.screen.player_settings.context.natural_language");
+            renderHeaderRow(graphics, mouseX, mouseY, historyModeButton, historyModeY(),
+                    "config.maid_self_talk.screen.player_settings.context.history");
 
             renderList(graphics, mouseX, mouseY);
             renderFooter(graphics);
@@ -508,8 +573,12 @@ public final class EnvironmentContextPanel {
                     mouseX, mouseY);
             return;
         }
-        if (isOverToggle(mouseX, mouseY)) {
+        if (isOverHeaderRow(mouseX, mouseY, naturalLanguageY())) {
             graphics.renderComponentTooltip(font, toggleTooltip(), mouseX, mouseY);
+            return;
+        }
+        if (isOverHeaderRow(mouseX, mouseY, historyModeY())) {
+            graphics.renderComponentTooltip(font, historyModeTooltip(), mouseX, mouseY);
             return;
         }
         int hovered = rowIndexAt(mouseX, mouseY);
@@ -536,22 +605,21 @@ public final class EnvironmentContextPanel {
     }
 
     /**
-     * 标题区的「环境信息自然语言化」总开关：标签在左、状态按钮在右（沿用列表的左右对齐关系）。
+     * 标题区的一行控件：标签在左、状态按钮在右（沿用列表的左右对齐关系）。
      * <p>
      * 标签与按钮都不随列表滚动，也不在底页 Screen 的控件表里——点击与键盘事件都由浮层自己吞掉。
      */
-    private void renderNaturalLanguageRow(GuiGraphics graphics, int mouseX, int mouseY) {
-        if (naturalLanguageButton == null) {
+    private void renderHeaderRow(GuiGraphics graphics, int mouseX, int mouseY,
+                                 Button button, int y, String labelKey) {
+        if (button == null) {
             return;
         }
-        int y = toggleY();
-        String name = Component.translatable(
-                "config.maid_self_talk.screen.player_settings.context.natural_language").getString();
+        String name = Component.translatable(labelKey).getString();
         int nameWidth = buttonX - NAME_MARGIN - 4 - (panelX + NAME_MARGIN);
         graphics.drawString(font, ellipsize(name, nameWidth), panelX + NAME_MARGIN, y + 6,
                 toggleConfigurable() ? TITLE_COLOR : SUBTITLE_COLOR, false);
-        naturalLanguageButton.setY(y);
-        naturalLanguageButton.render(graphics, mouseX, mouseY, 0.0F);
+        button.setY(y);
+        button.render(graphics, mouseX, mouseY, 0.0F);
     }
 
     private void renderList(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -646,14 +714,13 @@ public final class EnvironmentContextPanel {
         return font.split(Component.translatable(key), Math.min(260, panelWidth - 40));
     }
 
-    /** 鼠标是否悬停在总开关按钮上（禁用按钮的 isMouseOver 因 active=false 返回 false，故手工判定） */
-    private boolean isOverToggle(double mouseX, double mouseY) {
-        return naturalLanguageButton != null
-                && inRect(mouseX, mouseY, buttonX, toggleY(), BUTTON_WIDTH, BUTTON_HEIGHT);
+    /** 鼠标是否悬停在标题区某行按钮上（禁用按钮的 isMouseOver 因 active=false 返回 false，故手工判定） */
+    private boolean isOverHeaderRow(double mouseX, double mouseY, int y) {
+        return inRect(mouseX, mouseY, buttonX, y, BUTTON_WIDTH, BUTTON_HEIGHT);
     }
 
     /**
-     * 总开关的 tooltip：金黄色实验警告常驻（可点与不可点都显示），
+     * 自然语言化开关的 tooltip：金黄色实验警告常驻（可点与不可点都显示），
      * 不可点（未加载完或管理员禁用）时追加该原因。
      * <p>
      * 警告是提示性质，用金黄色（{@link ChatFormatting#GOLD}）而非「同步中」的橙色；
@@ -664,6 +731,25 @@ public final class EnvironmentContextPanel {
         lines.add(Component.translatable(
                         "config.maid_self_talk.screen.player_settings.context.natural_language.warning")
                 .withStyle(ChatFormatting.GOLD));
+        appendUnavailableReason(lines);
+        return lines;
+    }
+
+    /**
+     * 历史上下文模式的 tooltip：切换成本与实验性说明共用一个金黄色警告块，
+     * 换行由本 mod 自己的本地化文案携带（与总开关同一套排版）。
+     */
+    private List<Component> historyModeTooltip() {
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.translatable(
+                        "config.maid_self_talk.screen.player_settings.context.history.warning")
+                .withStyle(ChatFormatting.GOLD));
+        appendUnavailableReason(lines);
+        return lines;
+    }
+
+    /** 未加载完 / 管理员禁用时的原因行（两者共用同一套文案键） */
+    private void appendUnavailableReason(List<Component> lines) {
         if (!hasSnapshot) {
             lines.add(Component.translatable(
                     "config.maid_self_talk.screen.player_settings.context.loading"));
@@ -671,7 +757,6 @@ public final class EnvironmentContextPanel {
             lines.add(Component.translatable(
                     "config.maid_self_talk.screen.player_settings.context.disabled.admin"));
         }
-        return lines;
     }
 
     // ===== 事件入口（均由页面转发） =====
@@ -711,10 +796,17 @@ public final class EnvironmentContextPanel {
             close();
             return true;
         }
-        if (isOverToggle(mouseX, mouseY)) {
+        if (isOverHeaderRow(mouseX, mouseY, naturalLanguageY())) {
             focusedIndex = FOCUS_TOGGLE;
             if (naturalLanguageButton.active) {
                 naturalLanguageButton.onPress();
+            }
+            return true;
+        }
+        if (isOverHeaderRow(mouseX, mouseY, historyModeY())) {
+            focusedIndex = FOCUS_MODE;
+            if (historyModeButton.active) {
+                historyModeButton.onPress();
             }
             return true;
         }
@@ -768,7 +860,7 @@ public final class EnvironmentContextPanel {
     /**
      * 滚轮：每档 {@link #SCROLL_ROWS_PER_NOTCH} 行。
      * <p>
-     * 双线签名不同（NeoForge 传横纵两个滚动量，Forge 1.20.1 只有一个），页面适配后把纵向量传进来：
+     * 双线签名不同（NeoForge 传横纵两个滚动量，Forge 1.20.1 只有一个），页面适配后把纵向量传进来。
      */
     public boolean mouseScrolled(double delta) {
         if (!open || delta == 0.0D || maxScroll <= 0) {
@@ -820,6 +912,12 @@ public final class EnvironmentContextPanel {
             }
             return;
         }
+        if (focusedIndex == FOCUS_MODE) {
+            if (historyModeButton != null && historyModeButton.active) {
+                historyModeButton.onPress();
+            }
+            return;
+        }
         if (focusedIndex >= 0 && focusedIndex < rowButtons.size()
                 && rowButtons.get(focusedIndex).active) {
             rowButtons.get(focusedIndex).onPress();
@@ -838,6 +936,9 @@ public final class EnvironmentContextPanel {
         List<Integer> candidates = new ArrayList<>();
         if (naturalLanguageButton != null && naturalLanguageButton.active) {
             candidates.add(FOCUS_TOGGLE);
+        }
+        if (historyModeButton != null && historyModeButton.active) {
+            candidates.add(FOCUS_MODE);
         }
         for (int i = 0; i < rowButtons.size(); i++) {
             if (rowButtons.get(i).active) {

@@ -98,12 +98,12 @@
   "config.maid_self_talk.screen.player_settings.sleep_global": "Sleep Quiet All: %s",
   "config.maid_self_talk.screen.player_settings.sleep_maid_toggle": "Sleep Quiet Maid: %s",
   "config.maid_self_talk.screen.player_settings.sleep_global_hint": "Quiet-while-sleeping applies to all your maids; turn off the global switch to configure this maid",
-  "config.maid_self_talk.screen.player_settings.context.entry": "Environment Context",
-  "config.maid_self_talk.screen.player_settings.context.title": "Environment Context",
+  "config.maid_self_talk.screen.player_settings.context.entry": "Context Settings",
+  "config.maid_self_talk.screen.player_settings.context.title": "Context Settings",
   "config.maid_self_talk.screen.player_settings.context.scope": "Applies to all maids you own",
   "config.maid_self_talk.screen.player_settings.context.natural_language": "Natural-language context",
   "config.maid_self_talk.screen.player_settings.context.natural_language.warning": "Experimental feature; may affect model response quality.",
-  "config.maid_self_talk.screen.player_settings.context.footer": "Only controls automatic injection into self-talk and inter-chat",
+  "config.maid_self_talk.screen.player_settings.context.footer": "Environment items control automatic injection into self-talk and inter-chat only; the history mode also affects welcome messages.",
   "config.maid_self_talk.screen.player_settings.context.close": "✕",
   "config.maid_self_talk.screen.player_settings.context.close.tooltip": "Close",
   "config.maid_self_talk.screen.player_settings.context.loading": "Reading settings from the server.",
@@ -148,5 +148,10 @@
   "config.maid_self_talk.screen.player_settings.context.entry.maid_self_talk_recent_player_hurt": "Nearby players' recent damage and source",
   "config.maid_self_talk.screen.player_settings.context.entry.maid_self_talk_recent_self_hurt": "Maid's own recent damage and source",
   "config.maid_self_talk.screen.player_settings.context.entry.maid_self_talk_self_on_fire": "Maid is on fire",
-  "config.maid_self_talk.screen.player_settings.context.entry.maid_self_talk_self_drowning": "Maid is drowning"
+  "config.maid_self_talk.screen.player_settings.context.entry.maid_self_talk_self_drowning": "Maid is drowning",
+  "config.maid_self_talk.screen.player_settings.context.history": "History context mode",
+  "config.maid_self_talk.screen.player_settings.context.history.mode.full": "Full",
+  "config.maid_self_talk.screen.player_settings.context.history.mode.compact": "Compact",
+  "config.maid_self_talk.screen.player_settings.context.history.mode.retrieval": "Retrieval",
+  "config.maid_self_talk.screen.player_settings.context.history.warning": "Switching modes changes the request structure and may lower the prefix cache hit rate. Retrieval mode also sends extra requests; the real cost depends on model pricing, hit rate and recall length, so pick one and keep using it rather than switching often.\nRetrieval is independent of the normal Tool toggle. In a continuous inter-chat, each maid plans only once, on her own first line."
 }

@@ -2,6 +2,7 @@ package com.maidmod.selftalk.network;
 
 import com.maidmod.selftalk.Config;
 import com.maidmod.selftalk.EnvironmentContextOption;
+import com.maidmod.selftalk.HistoryContextMode;
 import com.maidmod.selftalk.EnvironmentContextSettings;
 import com.maidmod.selftalk.PlayerSettingsStore;
 import com.maidmod.selftalk.client.SelfTalkPlayerSettingsClient;
@@ -33,7 +34,8 @@ import java.util.function.Supplier;
  * @param naturalLanguageEnabled 「环境信息自然语言化」的<b>已存偏好</b>，不是管理员门控后的有效值——
  *                     与 32 项模式同口径：管理员禁用时界面要能显示玩家原来的选择，
  *                     功能恢复后原样生效
- * @param rows         32 行状态（顺序即目录顺序）。总开关不走这里，不伪装成第 33 项
+ * @param historyContextModeId 历史上下文模式的<b>已存偏好</b>存储值（口径同上：不回传管理员门控后的有效值）
+ * @param rows         32 行状态（顺序即目录顺序）。两个开关都不走这里，不伪装成第 33、34 项
  */
 public class EnvironmentContextConfigResponseMessage {
 
@@ -51,14 +53,17 @@ public class EnvironmentContextConfigResponseMessage {
     private final long seq;
     private final boolean adminEnabled;
     private final boolean naturalLanguageEnabled;
+    private final String historyContextModeId;
     private final List<Row> rows;
 
     public EnvironmentContextConfigResponseMessage(UUID sessionId, long seq, boolean adminEnabled,
-                                                   boolean naturalLanguageEnabled, List<Row> rows) {
+                                                   boolean naturalLanguageEnabled, String historyContextModeId,
+                                                   List<Row> rows) {
         this.sessionId = sessionId;
         this.seq = seq;
         this.adminEnabled = adminEnabled;
         this.naturalLanguageEnabled = naturalLanguageEnabled;
+        this.historyContextModeId = historyContextModeId;
         this.rows = rows;
     }
 
@@ -76,6 +81,10 @@ public class EnvironmentContextConfigResponseMessage {
 
     public boolean isNaturalLanguageEnabled() {
         return naturalLanguageEnabled;
+    }
+
+    public String getHistoryContextModeId() {
+        return historyContextModeId;
     }
 
     public List<Row> getRows() {
@@ -99,7 +108,8 @@ public class EnvironmentContextConfigResponseMessage {
         }
         return new EnvironmentContextConfigResponseMessage(
                 sessionId, seq, Config.PLAYER_OPTION_ENABLED.get(),
-                PlayerSettingsStore.isEnvironmentContextNaturalLanguageEnabled(server, playerUuid), rows);
+                PlayerSettingsStore.isEnvironmentContextNaturalLanguageEnabled(server, playerUuid),
+                PlayerSettingsStore.getHistoryContextMode(server, playerUuid).id(), rows);
     }
 
     /**
@@ -133,6 +143,9 @@ public class EnvironmentContextConfigResponseMessage {
         buf.writeBoolean(msg.adminEnabled);
         // 总开关排在 adminEnabled 之后、行表之前：两个布尔字段与 32 项行序无关
         buf.writeBoolean(msg.naturalLanguageEnabled);
+        // 历史上下文模式与前两个字段同属标题区状态，排在行表之前
+        buf.writeUtf(msg.historyContextModeId == null ? HistoryContextMode.FULL.id() : msg.historyContextModeId,
+                HistoryContextModeSetMessage.MAX_MODE_LENGTH);
         // 数量先校验再写入：解码侧只会读到 0~32 行，超量包在编码侧就不可能产生
         int size = msg.rows == null ? 0 : msg.rows.size();
         if (size != EnvironmentContextOption.ALL.size()) {
@@ -153,10 +166,11 @@ public class EnvironmentContextConfigResponseMessage {
         long seq = buf.readVarLong();
         boolean adminEnabled = buf.readBoolean();
         boolean naturalLanguageEnabled = buf.readBoolean();
+        String historyContextModeId = buf.readUtf(HistoryContextModeSetMessage.MAX_MODE_LENGTH);
         int size = buf.readByte();
         if (size != EnvironmentContextOption.ALL.size()) {
             return new EnvironmentContextConfigResponseMessage(
-                    sessionId, seq, adminEnabled, naturalLanguageEnabled, List.of());
+                    sessionId, seq, adminEnabled, naturalLanguageEnabled, historyContextModeId, List.of());
         }
         List<Row> rows = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
@@ -165,7 +179,7 @@ public class EnvironmentContextConfigResponseMessage {
                     buf.readByte()));
         }
         return new EnvironmentContextConfigResponseMessage(
-                sessionId, seq, adminEnabled, naturalLanguageEnabled, rows);
+                sessionId, seq, adminEnabled, naturalLanguageEnabled, historyContextModeId, rows);
     }
 
     /** 客户端分发：继续沿用现有隔离方式，避免专用服务端加载 Screen 相关类 */

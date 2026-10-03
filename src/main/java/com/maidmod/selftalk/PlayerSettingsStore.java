@@ -345,4 +345,52 @@ public final class PlayerSettingsStore {
         }
         return isEnvironmentContextNaturalLanguageEnabled(server, ownerUuid);
     }
+
+    // ===== 历史上下文模式 =====
+
+    /**
+     * 该玩家「历史上下文模式」的<b>已存偏好</b>（缺省 {@code full}）。
+     * <p>
+     * <b>不</b>在此处叠加管理员门控：本方法只表达玩家自己的选择，
+     * 有效值由 {@link #getHistoryContextModeForMaid} 统一计算
+     * （管理员关闸时有效值为全量，但玩家原来的选择必须保留，恢复后继续生效）。
+     */
+    public static HistoryContextMode getHistoryContextMode(MinecraftServer server, UUID playerUuid) {
+        if (playerUuid == null) {
+            return HistoryContextMode.FULL;
+        }
+        // 非法存档值按全量处理（与「缺省、无主女仆、非法存档值一律全量」同口径）
+        HistoryContextMode parsed = HistoryContextMode.fromId(data(server).getHistoryContextModeId(playerUuid));
+        return parsed == null ? HistoryContextMode.FULL : parsed;
+    }
+
+    /** 保存玩家的历史上下文模式：非默认值才落盘，恢复全量时移除覆盖 */
+    public static void setHistoryContextMode(MinecraftServer server, UUID playerUuid, HistoryContextMode mode) {
+        if (playerUuid == null) {
+            return;
+        }
+        data(server).setHistoryContextModeId(playerUuid, mode == null || mode.isDefault() ? null : mode.id());
+    }
+
+    /**
+     * 女仆的历史上下文模式有效值（派发侧统一判定口，须在<b>实际触发时</b>调用）。
+     * <p>
+     * 有效 = 管理员允许玩家配置 && 女仆有主人 UUID && 该主人保存的模式；
+     * 不满足任一条即为全量。
+     * <ul>
+     *   <li>主人离线同样按 UUID 查世界存档，设置继续生效；</li>
+     *   <li>无主女仆用全量（没有玩家偏好可查）；</li>
+     *   <li>管理员关闭玩家配置时有效值为全量，但<b>不</b>删除玩家原来的选择。</li>
+     * </ul>
+     */
+    public static HistoryContextMode getHistoryContextModeForMaid(MinecraftServer server, EntityMaid maid) {
+        if (!Config.PLAYER_OPTION_ENABLED.get()) {
+            return HistoryContextMode.FULL;
+        }
+        UUID ownerUuid = maid.getOwnerUUID();
+        if (ownerUuid == null) {
+            return HistoryContextMode.FULL;
+        }
+        return getHistoryContextMode(server, ownerUuid);
+    }
 }

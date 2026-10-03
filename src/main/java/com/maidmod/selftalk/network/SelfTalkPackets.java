@@ -21,9 +21,9 @@ import java.util.UUID;
  */
 public final class SelfTalkPackets {
 
-    // v7：新增「环境信息自然语言化」总开关的 C2S 消息（序号 18），并给环境上下文快照增加一个布尔字段；
+    // v8：新增「历史上下文模式」的 C2S 消息（序号 19），并给环境上下文快照增加一个模式字段；
     // 不做向后兼容（既定决策），升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
-    private static final String PROTOCOL_VERSION = "7";
+    private static final String PROTOCOL_VERSION = "8";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MaidSelfTalkMod.MODID, "main"),
@@ -101,6 +101,10 @@ public final class SelfTalkPackets {
         CHANNEL.registerMessage(nextId++, EnvironmentContextNaturalLanguageSetMessage.class,
                 EnvironmentContextNaturalLanguageSetMessage::encode, EnvironmentContextNaturalLanguageSetMessage::decode,
                 EnvironmentContextNaturalLanguageSetMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        // 原 0~18 之后追加为 19：历史上下文模式总开关（与 32 项设置共用同一浮层会话）
+        CHANNEL.registerMessage(nextId++, HistoryContextModeSetMessage.class,
+                HistoryContextModeSetMessage::encode, HistoryContextModeSetMessage::decode,
+                HistoryContextModeSetMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
     }
 
     /** 每玩家每秒限流：防恶意客户端包风暴（正常设置界面操作远低于该频率） */
