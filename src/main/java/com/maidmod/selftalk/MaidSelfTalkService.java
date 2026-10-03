@@ -46,6 +46,22 @@ public final class MaidSelfTalkService {
      * @return 是否实际发起（前置检查未通过时为 false）
      */
     public static boolean triggerSelfTalk(EntityMaid maid, boolean welcome, int keep, double broadcastRange) {
+        return triggerSelfTalk(maid, welcome, keep, broadcastRange, null);
+    }
+
+    /**
+     * 触发一次自话/欢迎。
+     *
+     * @param maid           女仆
+     * @param welcome        是否为欢迎语（欢迎语视为一次自话，同样受保留条数控制）
+     * @param keep           当前态的自言自语保留上下文条数
+     * @param broadcastRange 聊天框广播半径（格）
+     * @param cachedRecall   互聊链上已完成的首次召回结果；非 null 时检索模式直接复用、不再规划
+     *                       （自话与欢迎语不走互聊链，传 null）
+     * @return 是否实际发起（前置检查未通过时为 false）
+     */
+    public static boolean triggerSelfTalk(EntityMaid maid, boolean welcome, int keep, double broadcastRange,
+                                          HistoryContextSession.CachedRecall cachedRecall) {
         MaidAIChatManager chatManager = maid.getAiChatManager();
         if (chatManager == null) {
             return false;
@@ -86,8 +102,6 @@ public final class MaidSelfTalkService {
             MaidSelfTalkMod.LOGGER.warn("HistoryMessagesCheck after inter window failed, self-talk skipped", t);
             return false;
         }
-        // 段标签包裹（历史+互聊窗口；随后的 prompt 消息为尾部、不参与包裹）
-        SelfTalkContexts.wrapSegments(maid, messages, historyCount, interWindow.size());
 
         boolean ownerNearby = isOwnerNearby(maid);
         String prompt = welcome ? SelfTalkPrompts.WELCOME
@@ -98,19 +112,50 @@ public final class MaidSelfTalkService {
                 + SelfTalkContexts.toolPolicyBlock(maid, selfTalkLanguage, false)
                 + SelfTalkContexts.customPromptBlock(maid, selfTalkLanguage);
 
-        String message;
+        // 欢迎语保留旧路径：分类级随机 + TLM 固定上下文，不读三态偏好、不消费感知事件，
+        // 也不参与历史上下文模式（它是主人刚上线的即时问候，没有可选的历史注入方式）
         if (welcome) {
-            // 欢迎语保留旧路径：分类级随机 + TLM 固定上下文，不读三态偏好、不消费感知事件
-            // （感知事件段在 checkMessages 之后才 drain，此处必须先补回，见下方 self-talk 分支注释）
-            message = UserPromptContexts.addContext(maid, prompt + SelfTalkContexts.buildRandomContext(maid));
-        } else {
-            // 自话：三态偏好选出的环境信息 + 固定上下文前缀一次成文；本入口内部已含 <context> 包装，
-            // 不得再调 addContext（会套两层包装），也不在此后追加任何上下文段。
-            // 语言用本次请求已解析好的自话语言：背景模板与感知段的中英选择都由它决定
-            message = SelfTalkContexts.buildConfiguredUserMessage(maid, prompt, selfTalkLanguage);
+            String message = UserPromptContexts.addContext(maid,
+                    prompt + SelfTalkContexts.buildRandomContext(maid));
+            messages.add(LLMMessage.userChat(maid, message));
+            // 段标签包裹（历史+互聊窗口；随后的 prompt 消息为尾部、不参与包裹）
+            SelfTalkContexts.wrapSegments(maid, messages, historyCount, interWindow.size());
+            return dispatchSelfTalk(maid, chatManager, site, messages, welcome, keep, broadcastRange);
         }
-        messages.add(LLMMessage.userChat(maid, message));
 
+        // 自话：按玩家历史上下文模式组装（环境采集与文本组装分离，一次触发只采集一次）
+        HistoryContextMode mode = PlayerSettingsStore.getHistoryContextModeForMaid(
+                maid.level().getServer(), maid);
+        SelfTalkContexts.EnvironmentSnapshot environment =
+                SelfTalkContexts.collectEnvironment(maid, selfTalkLanguage);
+        SelfTalkHistoryAssembler.HistoryLayout layout =
+                SelfTalkHistoryAssembler.split(messages, historyCount, interWindow.size());
+        boolean toolEnabled = PlayerSettingsStore.isToolCallEnabledForMaid(maid.level().getServer(), maid);
+        HistoryContextSession session = new HistoryContextSession(maid, chatManager, site, selfTalkLanguage,
+                prompt, mode, environment, layout.systemPrefix(), layout.history(), layout.window(),
+                cachedRecall, () -> true,
+                prepared -> dispatchSelfTalk(maid, chatManager, site, prepared, false, keep, broadcastRange,
+                        toolEnabled));
+        session.start();
+        // 模式为全量时是同步完成的；检索模式可能仍在规划，此时返回 true（本次触发已受理）
+        return mode == HistoryContextMode.FULL || true;
+    }
+
+    /**
+     * 派发自话请求（消息列表已按模式组装完毕）。
+     * <p>
+     * Tool 判定在派发时取（dispatcher 顺延队列是延迟派发的，入队时不判定）。
+     */
+    private static boolean dispatchSelfTalk(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
+                                            List<LLMMessage> messages, boolean welcome, int keep,
+                                            double broadcastRange) {
+        return dispatchSelfTalk(maid, chatManager, site, messages, welcome, keep, broadcastRange,
+                PlayerSettingsStore.isToolCallEnabledForMaid(maid.level().getServer(), maid));
+    }
+
+    private static boolean dispatchSelfTalk(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
+                                            List<LLMMessage> messages, boolean welcome, int keep,
+                                            double broadcastRange, boolean toolEnabled) {
         // 标记进行中（防重入）
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.selfTalkPending = true;
@@ -118,8 +163,6 @@ public final class MaidSelfTalkService {
 
         LLMClient client = site.client();
         try {
-            // Tool 判定在派发时取（dispatcher 顺延队列是延迟派发的，入队时不判定）
-            boolean toolEnabled = PlayerSettingsStore.isToolCallEnabledForMaid(maid.level().getServer(), maid);
             client.chat(new SelfTalkCallback(chatManager, messages, welcome, keep, broadcastRange, toolEnabled));
         } catch (Throwable t) {
             // client.chat 同步阶段可能抛异常（如 site.url 非法导致 URI.create 失败、header 构造异常）：
@@ -143,6 +186,9 @@ public final class MaidSelfTalkService {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.selfTalkPending = false;
         state.selfTalkPendingSinceTick = -1;
+        // 自话回复已写入历史：原始历史变了，但自话不进检索库——只做失效标记，
+        // 下次检索时来源序列不变即复用，不白白重新分词（见 HistoryRetrievalCache）
+        HistoryRetrievalCache.invalidate(maid);
 
         // 本次回复的 assistant 消息：回调在响应线程写历史后立即捕获（CappedQueue 新消息在队头）
         LLMMessage last = callback.getLastAssistantMessage();
@@ -178,6 +224,8 @@ public final class MaidSelfTalkService {
         state.playerChatSinceTick = maid.level().getServer().getTickCount();
         state.windowSelfTalkMsgs.clear();
         state.windowInterChatMsgs.clear();
+        // 玩家 chat 会写入新的玩家对话：检索索引可能变化，只做失效标记，下次检索时再比对来源序列
+        HistoryRetrievalCache.invalidate(maid);
         resetSelfTalkCooldown(maid, state);
         resetInterChatCooldown(maid, state);
     }

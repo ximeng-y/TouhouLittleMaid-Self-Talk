@@ -5,6 +5,7 @@ import com.maidmod.selftalk.Config;
 import com.maidmod.selftalk.EnvironmentContextMode;
 import com.maidmod.selftalk.EnvironmentContextOption;
 import com.maidmod.selftalk.EnvironmentContextSettings;
+import com.maidmod.selftalk.HistoryContextMode;
 import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.PlayerSettingsStore;
 import com.maidmod.selftalk.SelfTalkAttachments;
@@ -41,9 +42,9 @@ public final class SelfTalkPackets {
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {
-        // v7：新增「环境信息自然语言化」总开关的 C2S payload，并给环境上下文快照增加一个布尔字段；
+        // v8：环境上下文快照新增「历史上下文模式」字段，并新增其 C2S Set payload；
         // 同样不做向后兼容——NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
-        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("7");
+        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("8");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,
                 SelfTalkPackets::handleConfigRequest);
         registrar.playToServer(SelfTalkConfigSetPayload.TYPE, SelfTalkConfigSetPayload.STREAM_CODEC,
@@ -83,6 +84,9 @@ public final class SelfTalkPackets {
         registrar.playToServer(EnvironmentContextNaturalLanguageSetPayload.TYPE,
                 EnvironmentContextNaturalLanguageSetPayload.STREAM_CODEC,
                 SelfTalkPackets::handleEnvironmentContextNaturalLanguageSet);
+        registrar.playToServer(HistoryContextModeSetPayload.TYPE,
+                HistoryContextModeSetPayload.STREAM_CODEC,
+                SelfTalkPackets::handleHistoryContextModeSet);
         registrar.playToClient(EnvironmentContextConfigResponsePayload.TYPE,
                 EnvironmentContextConfigResponsePayload.STREAM_CODEC,
                 SelfTalkPackets::handleEnvironmentContextResponse);
@@ -415,6 +419,29 @@ public final class SelfTalkPackets {
             if (Config.PLAYER_OPTION_ENABLED.get()) {
                 PlayerSettingsStore.setEnvironmentContextNaturalLanguageEnabled(
                         serverPlayer.server, serverPlayer.getUUID(), payload.enabled());
+            }
+            context.reply(EnvironmentContextConfigResponsePayload.snapshot(
+                    serverPlayer.server, serverPlayer.getUUID(), payload.sessionId(), payload.seq()));
+        });
+    }
+
+    /**
+     * 服务端：保存历史上下文模式（纵深防御，不信任客户端）。
+     * <p>
+     * 与环境上下文共用同一个浮层会话与同一套限流；玩家 UUID 一律取连接上的 {@code ServerPlayer}，
+     * 包内不携带玩家或女仆 UUID。非法模式值不保存、只回当前权威快照。
+     * 管理员允许时保存，不允许时只回快照、<b>不</b>改存档——玩家原来的选择必须保留。
+     */
+    private static void handleHistoryContextModeSet(HistoryContextModeSetPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (!(player instanceof ServerPlayer serverPlayer) || payload.sessionId() == null
+                    || !allowConfigPacket(serverPlayer.getUUID())) {
+                return;
+            }
+            HistoryContextMode mode = HistoryContextMode.fromId(payload.modeId());
+            if (mode != null && Config.PLAYER_OPTION_ENABLED.get()) {
+                PlayerSettingsStore.setHistoryContextMode(serverPlayer.server, serverPlayer.getUUID(), mode);
             }
             context.reply(EnvironmentContextConfigResponsePayload.snapshot(
                     serverPlayer.server, serverPlayer.getUUID(), payload.sessionId(), payload.seq()));

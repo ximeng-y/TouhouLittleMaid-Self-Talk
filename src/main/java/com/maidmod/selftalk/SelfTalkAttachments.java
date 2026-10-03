@@ -136,6 +136,18 @@ public final class SelfTalkAttachments {
                             .serialize(Codec.unboundedMap(Codec.STRING, Codec.BOOL)).build());
 
     /**
+     * 历史上下文模式(Level):玩家 UUID -> 模式存储值({@code compact} / {@code retrieval})。
+     * <p>
+     * 只存<b>非默认</b>模式：默认 {@code full} 不落盘，玩家切回全量时删键——
+     * 与自然语言化开关同一哲学，不留无意义的默认值覆盖。
+     * 管理员关闭玩家配置时有效值为 full，但这里的已存偏好必须保留，功能恢复后继续生效。
+     */
+    public static final Supplier<AttachmentType<Map<String, String>>> LEVEL_HISTORY_CONTEXT_MODE =
+            ATTACHMENT_TYPES.register("level_history_context_mode",
+                    () -> AttachmentType.builder((Supplier<Map<String, String>>) HashMap::new)
+                            .serialize(Codec.unboundedMap(Codec.STRING, Codec.STRING)).build());
+
+    /**
      * 女仆自话回复指纹集（来源判定用，挂女仆实体）。
      * <p>
      * 指纹 = (role, message, gameTime) 三元组拼接串。TLM 历史 deque 中自话回复与主人聊天回复

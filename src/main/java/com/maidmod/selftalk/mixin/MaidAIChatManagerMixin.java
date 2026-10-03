@@ -5,9 +5,11 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.UserPromptCont
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.InterChatChain;
 import com.maidmod.selftalk.MaidInterChatService;
 import com.maidmod.selftalk.MaidSelfTalkService;
 import com.maidmod.selftalk.SelfTalkContexts;
+import com.maidmod.selftalk.SelfTalkDispatcher;
 import com.maidmod.selftalk.SelfTalkPrompts;
 import com.maidmod.selftalk.SegmentTags;
 import org.apache.commons.lang3.StringUtils;
@@ -50,6 +52,13 @@ public abstract class MaidAIChatManagerMixin {
                                                        LLMClient chatClient, CallbackInfo ci) {
         MaidAIChatManager self = (MaidAIChatManager) (Object) this;
         EntityMaid maid = self.getMaid();
+        // 主人插话：真实派发的主动聊天会立即终止该女仆所在的连续互聊链，
+        // 必须在注入互聊窗口之前处理，否则被丢弃的旧回复会随窗口重新进入本次请求
+        InterChatChain chain = InterChatChain.activeFor(maid);
+        if (chain != null) {
+            chain.interruptByOwnerChat(maid);
+            SelfTalkDispatcher.dropQueuedForChain(maid, chain.id());
+        }
         int historyCount = messages.size();
         MaidInterChatService.injectPlayerChatContext(maid, messages);
         int windowCount = messages.size() - historyCount;

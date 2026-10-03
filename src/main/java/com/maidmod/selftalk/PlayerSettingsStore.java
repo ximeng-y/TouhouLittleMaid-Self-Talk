@@ -368,6 +368,69 @@ public final class PlayerSettingsStore {
         return isEnvironmentContextNaturalLanguageEnabled(server, ownerUuid);
     }
 
+    // ===== 历史上下文模式 =====
+
+    /**
+     * 该玩家的历史上下文模式<b>已存偏好</b>（缺省 {@link HistoryContextMode#FULL}）。
+     * <p>
+     * <b>不</b>在此处叠加管理员门控：本方法只表达玩家自己的选择，
+     * 有效值由 {@link #getHistoryContextModeForMaid} 统一计算
+     * （管理员关闸或非法存档值时有效值为 full，但玩家原来的选择必须保留）。
+     * 非法存档值一律按默认处理，不做读路径清理——读操作不产生写入。
+     */
+    public static HistoryContextMode getHistoryContextMode(MinecraftServer server, UUID playerUuid) {
+        if (playerUuid == null) {
+            return HistoryContextMode.FULL;
+        }
+        String saved = getStringMap(server, SelfTalkAttachments.LEVEL_HISTORY_CONTEXT_MODE)
+                .get(playerUuid.toString());
+        HistoryContextMode mode = HistoryContextMode.fromId(saved);
+        return mode == null ? HistoryContextMode.FULL : mode;
+    }
+
+    /**
+     * 保存玩家的历史上下文模式：非默认值落盘，切回默认 {@code full} 时删键（仅存非默认项）。
+     * <p>
+     * 同值写入直接返回，不产生一次无意义的存档写入。
+     */
+    public static void setHistoryContextMode(MinecraftServer server, UUID playerUuid, HistoryContextMode mode) {
+        if (playerUuid == null || mode == null) {
+            return;
+        }
+        Map<String, String> map = new HashMap<>(
+                server.overworld().getData(SelfTalkAttachments.LEVEL_HISTORY_CONTEXT_MODE));
+        String key = playerUuid.toString();
+        String current = map.get(key);
+        String target = mode.isDefault() ? null : mode.id();
+        if (current == null ? target == null : current.equals(target)) {
+            return;
+        }
+        if (target == null) {
+            map.remove(key);
+        } else {
+            map.put(key, target);
+        }
+        server.overworld().setData(SelfTalkAttachments.LEVEL_HISTORY_CONTEXT_MODE, map);
+    }
+
+    /**
+     * 女仆的历史上下文模式<b>有效值</b>（派发侧统一判定口，须在<b>实际派发时</b>调用）。
+     * <p>
+     * 有效 = 管理员允许玩家配置 && 女仆有主人 UUID && 该主人保存的模式。
+     * 任一条不满足都是 {@code full}：没有玩家偏好可查时不能凭空替玩家选精简或检索。
+     * 主人的 token 配额、AI 开关等仍在各自路径上另行检查。
+     */
+    public static HistoryContextMode getHistoryContextModeForMaid(MinecraftServer server, EntityMaid maid) {
+        if (!Config.PLAYER_OPTION_ENABLED.get()) {
+            return HistoryContextMode.FULL;
+        }
+        UUID ownerUuid = maid.getOwnerUUID();
+        if (ownerUuid == null) {
+            return HistoryContextMode.FULL;
+        }
+        return getHistoryContextMode(server, ownerUuid);
+    }
+
     // ===== 共用读写 =====
 
     /** 全局布尔读写（缺省值 defaultEnabled 时移除键，值不等于缺省才落盘） */
