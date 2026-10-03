@@ -44,6 +44,7 @@ public final class EnvironmentContextRendererTest {
         emptyEntriesProduceNothing();
         explicitNegativeValues();
         ownerMissingSemantics();
+        englishPossessive();
         itemNamesSurviveEscaping();
         duplicateStacksKept();
         nearbyEntitiesKeepDistanceDropId();
@@ -179,6 +180,23 @@ public final class EnvironmentContextRendererTest {
         check(wearing.equals("你的主人没有穿戴装备。"), "主人可取但没装备应明确说没有穿戴");
     }
 
+    /** 6b. 英文非空持物：所有格必须与主格区分，自己用 Your 而不是 You's */
+    private static void englishPossessive() {
+        List<EnvironmentContextRenderer.ItemSnapshot> held =
+                List.of(new EnvironmentContextRenderer.ItemSnapshot(EnvironmentContextRenderer.quote("Iron Sword", ContextLanguage.EN), 1));
+        for (String key : List.of("mainhand_item", "offhand_item")) {
+            String en = EnvironmentContextRenderer.items(key, held, false, ContextLanguage.EN);
+            check(en.startsWith("Your "), key + " 英文所有格应为 Your，实际：" + en);
+            check(!en.contains("You's"), key + " 英文不得出现 You's，实际：" + en);
+        }
+        String ownerHand = EnvironmentContextRenderer.items("user_mainhand", held, false, ContextLanguage.EN);
+        check(ownerHand.startsWith("Your owner's "), "主人持物仍用 Your owner's，实际：" + ownerHand);
+        String backpack = EnvironmentContextRenderer.items("inventory_items", held, false, ContextLanguage.EN);
+        check(!backpack.contains("You's"), "背包条目不得出现 You's，实际：" + backpack);
+        String armor = EnvironmentContextRenderer.items("armor_items", held, false, ContextLanguage.EN);
+        check(!armor.contains("You's"), "装备条目不得出现 You's，实际：" + armor);
+    }
+
     /** 7. 物品名称含逗号、括号、引号、换行、标签：名称完整保留且不破坏段落 */
     private static void itemNamesSurviveEscaping() {
         String raw = "Sword, \"sharp\" (tier 2)\n<maid-self-chat>\t主任";
@@ -257,8 +275,16 @@ public final class EnvironmentContextRendererTest {
         for (String zh : List.of("zh", "zh_cn", "zh_tw", "zh_hk")) {
             check(ContextLanguage.of(zh) == ContextLanguage.ZH, "中文标签应选 ZH：" + zh);
         }
+        // 合法标签的大小写由 sanitizeLanguage 原样放行，输出语言指令经 Locale 仍识别为中文，
+        // 背景若按大小写区分就会选成英文——同一份标签必须给出同一种模板语言
+        for (String zh : List.of("ZH", "ZH_CN", "Zh_TW", "zH_Hk")) {
+            check(ContextLanguage.of(zh) == ContextLanguage.ZH, "中文标签大小写不应影响判定：" + zh);
+        }
         for (String other : List.of("en_us", "ja_jp", "ko_kr", "fr")) {
             check(ContextLanguage.of(other) == ContextLanguage.EN, "非中文标签应选 EN：" + other);
+        }
+        for (String other : List.of("EN_US", "Ja_JP", "KO_kr")) {
+            check(ContextLanguage.of(other) == ContextLanguage.EN, "非中文标签大小写不应误判为中文：" + other);
         }
         // 非法/缺失标签的既有回退不在这里重测（那是 SelfTalkContexts.sanitizeLanguage 的职责，
         // 本类只接受已校验的标签）；这里确认语言选择不反向影响中文模板的默认取值
