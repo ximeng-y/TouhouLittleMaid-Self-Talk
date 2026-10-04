@@ -38,48 +38,81 @@ public final class SelfTalkDispatcher {
     /** 自话派发请求：空闲立即派发，忙则顺延，冲突/满则吞（欢迎语为一次性、不走本闸门，见 SelfTalkHandler） */
     public static void requestSelfTalk(EntityMaid maid, int keep, double broadcastRange) {
         submit(maid, new SelfTalkState.DeferredRequest(
-                SelfTalkState.RequestKind.SELF_TALK, null, null, keep, broadcastRange, 0));
+                SelfTalkState.RequestKind.SELF_TALK, null, null, keep, broadcastRange, 0, 0));
     }
 
-    /** 互聊发起者派发请求 */
+    /**
+     * 互聊发起者派发请求：同时新建一条互聊链。
+     * <p>
+     * 链标识在<b>入队前</b>生成——顺延派发时也要带着同一个 chainId，
+     * 才能与后续续接请求（以及主人插话判定）对应到同一次会话。
+     * 请求被吞或派发失败时链立即释放，不留悬挂条目。
+     */
     public static void requestInterChatInitiator(EntityMaid initiator, EntityMaid responder, double broadcastRange) {
-        submit(initiator, new SelfTalkState.DeferredRequest(
-                SelfTalkState.RequestKind.INTER_CHAT_INITIATOR, responder, null, 0, broadcastRange, 1));
+        InterChatChain chain = InterChatChain.create(initiator, responder);
+        boolean accepted = submit(initiator, new SelfTalkState.DeferredRequest(
+                SelfTalkState.RequestKind.INTER_CHAT_INITIATOR, responder, null, 0, broadcastRange, 1,
+                chain.id()));
+        if (!accepted) {
+            InterChatChain.release(chain);
+        }
     }
 
-    /** 互聊回答者（链式续接）派发请求 */
+    /** 互聊回答者（链式续接）派发请求：沿用本链的 chainId */
     public static void requestInterChatResponder(EntityMaid responder, EntityMaid initiator,
-                                                 String peerText, double broadcastRange, int chainRound) {
+                                                 String peerText, double broadcastRange, int chainRound,
+                                                 long chainId) {
         submit(responder, new SelfTalkState.DeferredRequest(
-                SelfTalkState.RequestKind.INTER_CHAT_RESPONDER, initiator, peerText, 0, broadcastRange, chainRound));
+                SelfTalkState.RequestKind.INTER_CHAT_RESPONDER, initiator, peerText, 0, broadcastRange,
+                chainRound, chainId));
     }
 
     // ===== 入队与派发 =====
 
-    /** 按吞请求规则入队，空闲则立即派发 */
-    private static void submit(EntityMaid maid, SelfTalkState.DeferredRequest req) {
+    /**
+     * 按吞请求规则入队，空闲则立即派发。
+     *
+     * @return 请求是否被受理（入队或已派发）；false 表示被吞，调用方需自行释放随请求创建的资源
+     */
+    private static boolean submit(EntityMaid maid, SelfTalkState.DeferredRequest req) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         boolean isInterChat = req.kind() != SelfTalkState.RequestKind.SELF_TALK;
 
         if (isInterChat) {
             // 互聊优先：清掉队内自话（互相聊天顶掉自言自语）
             state.deferredRequests.removeIf(r -> r.kind() == SelfTalkState.RequestKind.SELF_TALK);
+            // 同一女仆只保留一条互聊请求：本女仆又拿到新互聊任务时，队里的旧互聊请求必然已失效
+            // （链已结束、回复已返回或被插话），留在队里只会占位并拖到超时
+            state.deferredRequests.removeIf(r -> r.kind() != SelfTalkState.RequestKind.SELF_TALK);
         } else if (state.interChatPending || hasQueuedInterChat(state)
                 || isMaidInterChatLocked(maid, maid.level().getServer().getTickCount())) {
             // 自话与互聊冲突（互聊在途/已在队/本人处于互聊对锁中）：吞掉自话。
             // 对锁同样算「互聊进行中」——链上交接的间隙本人 pending 已清、队列已空，
             // 但锁仍在（对方正在生成回复），此时放行自话即与互聊交替进行，故一并吞掉
-            return;
+            return false;
         }
         if (state.deferredRequests.size() >= Config.DEFER_QUEUE_MAX.get()) {
             // 队列已满：吞请求
-            return;
+            return false;
         }
         if (isBusy(maid, state)) {
             state.deferredRequests.addLast(req);
-        } else {
-            dispatchNow(maid, req);
+            return true;
         }
+        dispatchNow(maid, req);
+        return true;
+    }
+
+    /**
+     * 丢弃该女仆顺延队列中属于指定互聊链的请求（主人插话中断时调用）。
+     * 只按 chainId 匹配：新链的请求不是「旧链的续接」，绝不能被一起清掉。
+     */
+    public static void dropQueuedForChain(EntityMaid maid, long chainId) {
+        if (maid == null || chainId == 0) {
+            return;
+        }
+        SelfTalkState.State state = SelfTalkState.get(maid.getId());
+        state.deferredRequests.removeIf(r -> r.chainId() == chainId);
     }
 
     /** 空闲时从顺延队列出队派发，直到忙或队列空 */
@@ -133,8 +166,17 @@ public final class SelfTalkDispatcher {
             }
             case INTER_CHAT_INITIATOR, INTER_CHAT_RESPONDER -> {
                 long nowTick = maid.level().getServer().getTickCount();
+                // 链已中断或已释放（主人插话、链结束、失败）：请求作废，不得重新创建该链。
+                // 已中断／已漂移的链在此统一释放注册表，不残留 CHAINS/ACTIVE_BY_MAID 阻塞后续配对
+                InterChatChain chain = InterChatChain.of(req.chainId());
+                if (chain == null || chain.interrupted() || !chain.matches(maid, req.peer())) {
+                    unlockPairIfPaired(maid, req.peer(), nowTick);
+                    InterChatChain.release(chain);
+                    return false;
+                }
                 if (req.peer() == null || !req.peer().isAlive()) {
                     unlockPairIfPaired(maid, req.peer(), nowTick);
+                    InterChatChain.release(chain);
                     return false;
                 }
                 // 派发前双方复核(发起者/回答者路径对等):顺延期间 peer 可能已被他人锁定/进入
@@ -150,6 +192,7 @@ public final class SelfTalkDispatcher {
                     // 仅当双方当前仍互为配对才解锁:漂移后旧链对锁已被新链 lockPair 前置清理,
                     // 无条件 unlockPair 会误拆第三方在途新链(不能触碰不属于本对的锁)
                     unlockPairIfPaired(maid, req.peer(), nowTick);
+                    InterChatChain.release(chain);
                     return false;
                 }
                 // 自身若已与他链配对(配对者不是当前 peer):放弃本请求,保留新链锁不动
@@ -159,15 +202,17 @@ public final class SelfTalkDispatcher {
                 }
                 boolean ok;
                 if (req.kind() == SelfTalkState.RequestKind.INTER_CHAT_INITIATOR) {
-                    ok = MaidInterChatService.triggerInitiator(maid, req.peer(), req.broadcastRange());
+                    ok = MaidInterChatService.triggerInitiator(maid, req.peer(), req.broadcastRange(), chain);
                 } else {
-                    ok = MaidInterChatService.triggerResponder(maid, req.peer(), req.peerText(), req.broadcastRange(), req.chainRound());
+                    ok = MaidInterChatService.triggerResponder(maid, req.peer(), req.peerText(),
+                            req.broadcastRange(), req.chainRound(), chain);
                 }
                 if (ok) {
                     lockPair(maid, req.peer(), maid.level().getServer().getTickCount());
                 } else {
-                    // 派发失败（AI 中途失效等）：链已断，解除本对旧锁
+                    // 派发失败（AI 中途失效等）：链已断，解除本对旧锁并释放链
                     unlockPair(maid, req.peer());
+                    InterChatChain.release(chain);
                 }
                 return ok;
             }

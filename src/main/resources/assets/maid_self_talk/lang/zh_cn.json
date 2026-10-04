@@ -98,12 +98,12 @@
   "config.maid_self_talk.screen.player_settings.sleep_global": "睡觉安静 全局：%s",
   "config.maid_self_talk.screen.player_settings.sleep_maid_toggle": "睡觉安静 本只：%s",
   "config.maid_self_talk.screen.player_settings.sleep_global_hint": "睡觉时安静已对全部女仆生效，需先关闭全局才能单独配置",
-  "config.maid_self_talk.screen.player_settings.context.entry": "环境上下文",
-  "config.maid_self_talk.screen.player_settings.context.title": "环境上下文",
+  "config.maid_self_talk.screen.player_settings.context.entry": "上下文设置",
+  "config.maid_self_talk.screen.player_settings.context.title": "上下文设置",
   "config.maid_self_talk.screen.player_settings.context.scope": "对你名下所有女仆生效",
   "config.maid_self_talk.screen.player_settings.context.natural_language": "环境信息自然语言化",
   "config.maid_self_talk.screen.player_settings.context.natural_language.warning": "实验性功能，可能影响模型回答质量。",
-  "config.maid_self_talk.screen.player_settings.context.footer": "仅控制自言自语和互聊的自动注入",
+  "config.maid_self_talk.screen.player_settings.context.footer": "环境项仅控制自言自语和互聊的自动注入；历史模式同时影响自言自语、欢迎语与互聊",
   "config.maid_self_talk.screen.player_settings.context.close": "✕",
   "config.maid_self_talk.screen.player_settings.context.close.tooltip": "关闭",
   "config.maid_self_talk.screen.player_settings.context.loading": "正在读取服务端设置。",
@@ -148,5 +148,10 @@
   "config.maid_self_talk.screen.player_settings.context.entry.maid_self_talk_recent_player_hurt": "附近玩家最近受到的伤害及来源",
   "config.maid_self_talk.screen.player_settings.context.entry.maid_self_talk_recent_self_hurt": "女仆自身最近受到的伤害及来源",
   "config.maid_self_talk.screen.player_settings.context.entry.maid_self_talk_self_on_fire": "女仆当前着火状态",
-  "config.maid_self_talk.screen.player_settings.context.entry.maid_self_talk_self_drowning": "女仆当前水下缺氧状态"
+  "config.maid_self_talk.screen.player_settings.context.entry.maid_self_talk_self_drowning": "女仆当前水下缺氧状态",
+  "config.maid_self_talk.screen.player_settings.context.history": "历史上下文模式",
+  "config.maid_self_talk.screen.player_settings.context.history.mode.full": "全量",
+  "config.maid_self_talk.screen.player_settings.context.history.mode.compact": "精简",
+  "config.maid_self_talk.screen.player_settings.context.history.mode.retrieval": "检索",
+  "config.maid_self_talk.screen.player_settings.context.history.warning": "切换模式会改变请求结构，可能降低前缀缓存命中率。检索模式还会产生额外请求；实际费用取决于模型价格、命中率与召回长度，建议选择后保持使用，避免频繁切换。\n检索不受普通 Tool 开关影响。连续互聊时每只女仆只在自己第一次发言时做一次规划。"
 }
