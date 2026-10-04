@@ -87,14 +87,9 @@ public final class MaidInterChatService {
                         broadcastRange, isResponder, chainRound, toolEnabled, chain),
                 // 检索成品回报：链上后续轮次据此判断「首次检索已完成」（空结果同样算完成）
                 blocks -> recordChainRecall(chain, maid, blocks));
-        // 链的交接登记先于本次会话启动：本次可能同步跑完并回调（此时自身已进入正式生成阶段，
-        // 交付后判交接才不会把自己误判成「对方尚未进入正式阶段」而卡住）
-        chain.markFormalPhase(maid);
         session.start();
-        if (!session.settled()) {
-            // 请求被插话中断或作废：不产生任何输出，链也不必再等这一轮
-            chain.clearFormalPhase(maid);
-        }
+        // 检索模式的规划与建索引是异步的：此时正式请求可能尚未发出，但本次触发已受理；
+        // 正式阶段标记在实际派发点（dispatchInterChat）完成，链交接以真实派发为准
         return true;
     }
 
@@ -114,10 +109,12 @@ public final class MaidInterChatService {
                 broadcastRange, isResponder, chainRound, toolEnabled, chain);
         try {
             site.client().chat(callback);
+            // 正式请求已实际发出：此刻才标记进入正式阶段（关键词规划／建索引阶段不算），
+            // 链上第 3 轮起的交接校验以此为准
+            chain.markFormalPhase(maid);
         } catch (Throwable t) {
             state.interChatPending = false;
             state.interChatPendingSinceTick = -1;
-            chain.clearFormalPhase(maid);
             MaidSelfTalkMod.LOGGER.warn("Failed to dispatch inter-chat request for maid {}", maid.getId(), t);
             return false;
         }

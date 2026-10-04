@@ -64,6 +64,8 @@ public final class HistoryRetrievalCache {
         /** 分块结果（下标基于可检索序列） */
         List<DialogueBlock> blocks;
         HistoryRetrievalIndex index;
+        /** 失效标记：原始历史可能已变化；下次检索先比对来源序列，未变则直接复用并解除标记 */
+        boolean dirty;
 
         Entry(EntityMaid maid, UUID ownerUuid) {
             this.maid = maid;
@@ -109,6 +111,8 @@ public final class HistoryRetrievalCache {
 
         List<String> tokens = PlayerDialogueLibrary.snapshotTokens(searchable.searchable());
         if (entry.index != null && entry.sourceTokens != null && entry.sourceTokens.equals(tokens)) {
+            // 来源序列未变：直接复用旧索引，失效标记就此解除（序列校验替代了立即重建）
+            entry.dirty = false;
             onReady.accept(new Result(entry.index, searchable));
             return;
         }
@@ -120,8 +124,9 @@ public final class HistoryRetrievalCache {
             worker().execute(() -> {
                 List<DialogueBlock> blocks = PlayerDialogueLibrary.buildBlocks(source);
                 HistoryRetrievalIndex index = HistoryRetrievalIndex.build(blocks);
-                publish(target, generation, tokens, blocks, index);
-                onReady.accept(new Result(index, searchable));
+                // 缓存写回与 onReady 回调都必须在服务端主线程执行：
+                // 回调会读取实体与状态机并提交 LLM 请求，不能留在文本工作线程
+                publish(target, generation, tokens, blocks, index, new Result(index, searchable), onReady);
             });
         } catch (Throwable t) {
             // 执行器已释放（服务器正在停止）：本次不召回，不复活缓存
@@ -131,9 +136,15 @@ public final class HistoryRetrievalCache {
         }
     }
 
-    /** 构建完成：仅在服务端主线程、且世代号未变时写入缓存 */
+    /**
+     * 构建完成：回到服务端主线程后核验世代号写回缓存，并在同一主线程任务里交付回调。
+     * <p>
+     * 即使世代号已过期（缓存不采用本次构建），索引仍对应本次来源快照，回调照常交付；
+     * 服务器已停止时整体放弃——不写缓存也不再回调，调用方的会话随世界一并销毁。
+     */
     private static void publish(Entry entry, int generation, List<String> tokens,
-                                List<DialogueBlock> blocks, HistoryRetrievalIndex index) {
+                                List<DialogueBlock> blocks, HistoryRetrievalIndex index,
+                                Result result, Consumer<Result> onReady) {
         EntityMaid maid = entry.maid;
         if (maid.level().getServer() == null) {
             return;
@@ -143,7 +154,9 @@ public final class HistoryRetrievalCache {
                 entry.blocks = blocks;
                 entry.index = index;
                 entry.sourceTokens = tokens;
+                entry.dirty = false;
             }
+            onReady.accept(result);
         });
     }
 
@@ -168,9 +181,9 @@ public final class HistoryRetrievalCache {
     /**
      * 标记该女仆的原始历史可能已变化（玩家发言、回复完成、压缩、工具过程清理后调用）。
      * <p>
-     * 只做失效而不重建：下一次真正检索时由来源序列比较决定是否重建，
-     * 因此「只新增了被排除的消息」这类变化不会造成无谓的重新分词。
-     * 同时自增世代号：在途的旧构建回来时不再被采用。
+     * 只做失效标记而不重建：旧索引与来源序列<b>保留</b>，下一次真正检索时先比对来源序列——
+     * 未变则直接复用并解除标记（「只新增了被排除的消息」这类变化不会造成无谓的重新分词），
+     * 变了才重建。同时自增世代号：在途的旧构建回来时不再被采用。
      */
     public static void invalidate(EntityMaid maid) {
         if (maid == null) {
@@ -179,9 +192,7 @@ public final class HistoryRetrievalCache {
         Entry entry = CACHE.get(maid.getUUID());
         if (entry != null && entry.maid == maid) {
             entry.generation++;
-            entry.index = null;
-            entry.blocks = null;
-            entry.sourceTokens = null;
+            entry.dirty = true;
         }
     }
 
