@@ -166,10 +166,12 @@ public final class SelfTalkDispatcher {
             }
             case INTER_CHAT_INITIATOR, INTER_CHAT_RESPONDER -> {
                 long nowTick = maid.level().getServer().getTickCount();
-                // 链已中断或已释放（主人插话、链结束、失败）：请求作废，不得重新创建该链
+                // 链已中断或已释放（主人插话、链结束、失败）：请求作废，不得重新创建该链。
+                // 已中断／已漂移的链在此统一释放注册表，不残留 CHAINS/ACTIVE_BY_MAID 阻塞后续配对
                 InterChatChain chain = InterChatChain.of(req.chainId());
                 if (chain == null || chain.interrupted() || !chain.matches(maid, req.peer())) {
                     unlockPairIfPaired(maid, req.peer(), nowTick);
+                    InterChatChain.release(chain);
                     return false;
                 }
                 if (req.peer() == null || !req.peer().isAlive()) {

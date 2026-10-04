@@ -51,9 +51,11 @@ public final class SelfTalkHistoryAssembler {
      * 拆开一次已构建的完整消息列表（尚未附加本轮当前回合消息）。
      * <p>
      * 调用方持有 {@code historyCount} 与 {@code windowCount} 两个游标（构建时即知道），
-     * 因此这里按游标切分，无需猜测结构。摘要 SYSTEM 位于历史区之内（TLM 的 buildMessage
-     * 把摘要紧接设定之后），所以它既不是前导段也不会被当作对话消息——{@link #toSearchableView}
-     * 会把它连同人设一起按 role 排除。
+     * 因此这里按游标切分，无需猜测结构。注意 {@code historyCount} 是「加入窗口前的
+     * {@code messages.size()}」，<b>已包含前导 SYSTEM 段</b>，切分时必须扣除 {@code prefixEnd}，
+     * 否则窗口区会被吞进历史区（互聊窗口与 peerText 全部丢失）。
+     * 摘要 SYSTEM 位于历史区之内（TLM 的 buildMessage 把摘要紧接设定之后），所以它既不是前导段
+     * 也不会被当作对话消息——{@link #toSearchableView} 会把它连同人设一起按 role 排除。
      */
     public static HistoryLayout split(List<LLMMessage> messages, int historyCount, int windowCount) {
         int total = messages.size();
@@ -61,7 +63,7 @@ public final class SelfTalkHistoryAssembler {
         while (prefixEnd < total && messages.get(prefixEnd).role() == Role.SYSTEM) {
             prefixEnd++;
         }
-        int historyEnd = Math.min(prefixEnd + Math.max(0, historyCount), total);
+        int historyEnd = Math.min(prefixEnd + Math.max(0, historyCount - prefixEnd), total);
         int windowEnd = Math.min(historyEnd + Math.max(0, windowCount), total);
         return new HistoryLayout(
                 List.copyOf(messages.subList(0, prefixEnd)),

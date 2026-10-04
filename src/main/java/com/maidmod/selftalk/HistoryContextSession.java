@@ -10,6 +10,7 @@ import com.maidmod.selftalk.history.DialogueBlock;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -68,6 +69,12 @@ public final class HistoryContextSession {
     private final Dispatcher dispatcher;
     /** 检索成品的回报口（互聊链用；自话为 null） */
     private final RecallReporter recallReporter;
+    /**
+     * 最终 user message 的自定义渲染器（可空）：入参是拼装完毕的提示词（业务指令 + 各类说明段），
+     * 返回完整的 user message 文本。欢迎语等自带环境采集口径的调用方借此保留原有消息形态；
+     * 为 null 时默认按环境快照渲染（含 {@code <context>} 包装）。
+     */
+    private final Function<String, String> finalMessageRenderer;
 
     /** 链上首次检索的成品结果（为空也是成品，不能靠空列表判断「还没算过」） */
     public record CachedRecall(boolean completed, List<List<LLMMessage>> blocks) {
@@ -82,13 +89,6 @@ public final class HistoryContextSession {
     private boolean dispatched;
     /** 本次会话的检索结果是否已回报（回报口只被调用一次） */
     private boolean recallReported;
-    /** 本次会话是否已到终态：成品已交付，或经判定不再会有成品（链据此继续 / 释放） */
-    private boolean settled;
-
-    /** 本次会话是否已到终态（派发后同步成立；被中断或请求作废时也成立） */
-    public boolean settled() {
-        return settled;
-    }
 
     public HistoryContextSession(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
                                  String language, String basePrompt, HistoryContextMode mode,
@@ -97,7 +97,7 @@ public final class HistoryContextSession {
                                  List<LLMMessage> windowMessages, CachedRecall cachedRecall,
                                  Supplier<Boolean> stillAllowed, Dispatcher dispatcher) {
         this(maid, chatManager, site, language, basePrompt, mode, environment, systemPrefix,
-                fullHistory, windowMessages, cachedRecall, stillAllowed, dispatcher, null);
+                fullHistory, windowMessages, cachedRecall, stillAllowed, dispatcher, null, null);
     }
 
     public HistoryContextSession(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
@@ -107,6 +107,18 @@ public final class HistoryContextSession {
                                  List<LLMMessage> windowMessages, CachedRecall cachedRecall,
                                  Supplier<Boolean> stillAllowed, Dispatcher dispatcher,
                                  RecallReporter recallReporter) {
+        this(maid, chatManager, site, language, basePrompt, mode, environment, systemPrefix,
+                fullHistory, windowMessages, cachedRecall, stillAllowed, dispatcher, recallReporter, null);
+    }
+
+    public HistoryContextSession(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
+                                 String language, String basePrompt, HistoryContextMode mode,
+                                 SelfTalkContexts.EnvironmentSnapshot environment,
+                                 List<LLMMessage> systemPrefix, List<LLMMessage> fullHistory,
+                                 List<LLMMessage> windowMessages, CachedRecall cachedRecall,
+                                 Supplier<Boolean> stillAllowed, Dispatcher dispatcher,
+                                 RecallReporter recallReporter,
+                                 Function<String, String> finalMessageRenderer) {
         this.maid = maid;
         this.chatManager = chatManager;
         this.site = site;
@@ -121,6 +133,7 @@ public final class HistoryContextSession {
         this.stillAllowed = stillAllowed;
         this.dispatcher = dispatcher;
         this.recallReporter = recallReporter;
+        this.finalMessageRenderer = finalMessageRenderer;
     }
 
     /** 本次会话的模式（供调用方记录进互聊链上下文） */
@@ -159,12 +172,10 @@ public final class HistoryContextSession {
         messages.addAll(windowMessages);
         String prompt = basePrompt + SelfTalkContexts.latestSelfTalkNote(language, false)
                 + SelfTalkContexts.recalledHistoryNote(language, false);
-        messages.add(LLMMessage.userChat(maid, SelfTalkContexts.renderConfiguredUserMessage(prompt,
-                language, environment)));
+        messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt)));
         int historyCount = systemPrefix.size() + fullHistory.size();
         SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowMessages.size());
         deliver(messages);
-        settled = true;
     }
 
     // ===== 精简模式 =====
@@ -192,10 +203,17 @@ public final class HistoryContextSession {
                 + SelfTalkContexts.latestSelfTalkNote(language, latestSelfTalk != null)
                 + SelfTalkContexts.recalledHistoryNote(language,
                 recallNote && recalledBlocks != null && !recalledBlocks.isEmpty());
-        messages.add(LLMMessage.userChat(maid, SelfTalkContexts.renderConfiguredUserMessage(prompt,
-                language, environment)));
+        messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt)));
         SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowMessages.size());
         deliver(messages);
+    }
+
+    /** 渲染本轮最终 user message：默认按环境快照渲染；注入了自定义渲染器（如欢迎语）时走调用方口径 */
+    private String renderFinalUserMessage(String prompt) {
+        if (finalMessageRenderer != null) {
+            return finalMessageRenderer.apply(prompt);
+        }
+        return SelfTalkContexts.renderConfiguredUserMessage(prompt, language, environment);
     }
 
     /**
@@ -309,6 +327,9 @@ public final class HistoryContextSession {
             // 传输阶段就抛异常（site.url 非法等）：本次不召回，仍进入一次正式生成
             MaidSelfTalkMod.LOGGER.warn("Failed to dispatch keyword plan for maid {}, continue without recall",
                     maid.getId(), t);
+            // 与其他失败出口一致：同步抛出同样回报「首次检索完成、结果为空」，
+            // 否则互聊链上本女仆的后续轮次会重复规划
+            reportRecall(List.of());
             dispatchReduced(List.of(), false);
         }
     }
@@ -408,9 +429,8 @@ public final class HistoryContextSession {
         }
     }
 
-    /** 一次会话的终态结算：交付成功即算已达成；被中断／请求作废时同样置位，链不得继续等待 */
+    /** 派发失败（含被中断／请求作废）时回报空召回：失败同样算「首次检索完成」，链不得继续等待 */
     private void settle(boolean delivered) {
-        settled = true;
         if (!delivered) {
             reportRecall(List.of());
         }

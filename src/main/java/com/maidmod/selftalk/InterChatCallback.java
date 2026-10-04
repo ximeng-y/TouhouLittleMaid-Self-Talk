@@ -27,8 +27,9 @@ import java.util.UUID;
  * <ul>
  *   <li>被插话的目标女仆（{@link InterChatChain#canDeliver} 为 false）：旧回复不显示、不播报、
  *       不广播、不写窗口、不同步对方、不抽连续概率；只清理本轮工具历史与自己持有的 pending／等待气泡；</li>
- *   <li>另一只女仆：只有「正式回复请求已经发出」（{@link InterChatChain#formalDispatched}）才允许
- *       正常显示与播报该次最终文本，且不再续接、不再同步回已被插话的一方；</li>
+ *   <li>另一只女仆：只有「正式回复请求已经发出」才允许正常显示与播报该次最终文本
+ *       （回调存在即意味着正式请求已派发，规划阶段被中断的会话不会产生回调），
+ *       且不再续接、不再同步回已被插话的一方；</li>
  *   <li>双方都不再派发下一轮。</li>
  * </ul>
  * 工具续接也在同一许可下收紧：中断后不执行新的工具批次，父类异步续接同样被 {@link #isStillAllowed()} 拦住。
@@ -160,8 +161,10 @@ public class InterChatCallback extends LLMCallback {
             state.interChatPending = false;
             state.interChatPendingSinceTick = -1;
             if (!deliver) {
-                // 被主人插话的目标：不显示、不播报、不广播、不写窗口、不同步对方；只清掉自己的等待气泡
+                // 被主人插话的目标：不显示、不播报、不广播、不写窗口、不同步对方；只清掉自己的等待气泡。
+                // 链已在插话时中断：此处统一结束链（解锁 + 释放注册表），不留悬挂状态阻塞后续配对
                 discardWaitingBubble(maid);
+                endChain();
                 return;
             }
             if (AIConfig.TTS_ENABLED.get() && chatManager.getTTSSite() != null && chatManager.getTTSSite().enabled()) {
@@ -187,9 +190,10 @@ public class InterChatCallback extends LLMCallback {
                 }
             }
             broadcastToNearby(maid, chatText);
-            // 链已中断（含本次为被插话的一方）时不再续接；对方不可用时链终止
+            // 链已中断（含本次为被插话的一方）时不再续接；对方不可用时链终止。
+            // 交付完本次回复即结束链：解锁并释放注册表，不让旧链残留阻塞后续配对
             if (chain != null && !chain.canChain()) {
-                unlockPair();
+                endChain();
                 return;
             }
             if (peer != null && peer.isAlive() && peer.level() instanceof ServerLevel) {
@@ -231,9 +235,11 @@ public class InterChatCallback extends LLMCallback {
         if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), nextSpeaker)) { endChain(); return; }
         // 主人插话可能在上方任一步之间发生：派发前再确认一次链未被中断
         if (chain != null && !chain.canChain()) { endChain(); return; }
-        // 链的两轮交接：必须等对方也已进入过正式生成阶段（无论成败）才派发下一轮。
-        // 否则对方仍在规划／建索引时本轮的快速交付就会先跑，两条请求交错写同一窗口
-        if (chain != null && !chain.formalPhase(nextSpeaker)) { return; }
+        // 链的两轮交接（第 3 轮起）：对方上一轮交付后才轮到本轮派发，此时其正式请求必然已实际
+        // 发出；未发出说明上一轮请求失败或状态已漂移，本链无以为继，显式结束并释放，
+        // 避免对锁悬挂到超时。首次交接（chainRound == 1，对方尚未收到过本链第一轮请求）
+        // 绝不能要求对方已进入正式阶段——否则交接被永久挡住
+        if (chain != null && chainRound > 1 && !chain.formalPhase(nextSpeaker)) { endChain(); return; }
         // 链式续接是发起者回复后的单条连续请求，天然串行、每轮隔一次 LLM 往返，
         // 不走 5~8s 全局节流桶（发起者派发已占用该桶），否则 responder 路径永远被退避。
         // 若对方忙（自话/玩家 chat 在途），dispatcher 会顺延本次回应；对锁保持，链仅暂停不终止。

@@ -58,6 +58,9 @@ public abstract class MaidAIChatManagerMixin {
         if (chain != null) {
             chain.interruptByOwnerChat(maid);
             SelfTalkDispatcher.dropQueuedForChain(maid, chain.id());
+            // 中断即释放注册表：在途回调持有链的直接引用、仍按中断状态自行判定交付许可；
+            // 规划阶段被中断的会话没有任何回调会来收尾，注册表不能留给超时清理
+            InterChatChain.release(chain);
         }
         int historyCount = messages.size();
         MaidInterChatService.injectPlayerChatContext(maid, messages);

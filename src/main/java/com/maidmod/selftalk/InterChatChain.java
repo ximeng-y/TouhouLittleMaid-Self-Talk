@@ -57,7 +57,7 @@ public final class InterChatChain {
         private boolean recallCompleted;
         /** 首次召回的历史块（每项是一块按历史顺序排列的消息） */
         private List<List<LLMMessage>> blocks = List.of();
-        /** 是否已进入过正式生成阶段（含成功与失败）：链的两轮交接判据 */
+        /** 本链该女仆的正式请求是否已实际派发：链上第 3 轮起的交接判据 */
         private boolean formalPhase;
         /** 是否被主人插话禁言：旧回复不得显示、播报、写窗口 */
         private boolean suppressed;
@@ -76,7 +76,7 @@ public final class InterChatChain {
             this.blocks = recalled == null ? List.of() : List.copyOf(recalled);
         }
 
-        /** 本链该女仆是否已进入过正式生成阶段 */
+        /** 本链该女仆的正式请求是否已实际派发（规划／建索引阶段不算） */
         public boolean formalPhase() {
             return formalPhase;
         }
@@ -211,23 +211,19 @@ public final class InterChatChain {
     }
 
     /**
-     * 该女仆在本链是否已进入过正式生成阶段。
+     * 该女仆在本链的正式请求是否已实际派发（关键词规划／建索引阶段不算）。
      * <p>
-     * 用于链的两轮交接：只有「对方已进入过正式生成（无论成败）」才允许派发下一轮，
-     * 否则对方的规划／索引阶段就可能被本轮的快速交付抢跑，两条请求交错写同一窗口。
+     * 用于链上第 3 轮起的交接校验：对方上一轮交付后才轮到本轮派发，此时其正式请求必然已发出；
+     * 不成立说明上一轮请求失败或状态已漂移，本链无以为继。首次交接（对方尚未收到本链第一轮
+     * 请求）不做此校验——否则交接会被永久挡住。
      */
     public boolean formalPhase(EntityMaid maid) {
         return participant(maid).formalPhase;
     }
 
-    /** 标记该女仆已进入正式生成阶段（在互聊派发口真正提交请求后调用） */
+    /** 标记该女仆的正式请求已实际派发（在互聊派发口真正提交请求成功后调用） */
     public void markFormalPhase(EntityMaid maid) {
         participant(maid).formalPhase = true;
-    }
-
-    /** 撤销正式生成阶段标记（请求实际未发出：插话中断、同步抛异常等，链不必等这一轮） */
-    public void clearFormalPhase(EntityMaid maid) {
-        participant(maid).formalPhase = false;
     }
 
     /** 登记该女仆本链的首次检索结果（同一女仆只生效一次） */
