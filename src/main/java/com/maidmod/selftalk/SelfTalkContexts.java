@@ -136,6 +136,37 @@ public final class SelfTalkContexts {
      * 感知段在两种模式下都使用新的中英模板与「多次」措辞——这部分不依赖实验开关。
      */
     public static String buildConfiguredUserMessage(EntityMaid maid, String basePrompt, String language) {
+        return renderConfiguredUserMessage(basePrompt, language, collectEnvironment(maid, language));
+    }
+
+    /**
+     * 一次触发的环境快照：随机情境抽样、感知事件 drain 与渲染结果的定型副本。
+     * <p>
+     * 关键词规划、纠正请求与最终回复必须共用同一次触发的快照——各自重新采集会让
+     * 抽样结果漂移、感知事件被重复消费（drain 是破坏性读取，第二次必为空）。
+     */
+    public record EnvironmentSnapshot(EntityMaid maid, ContextLanguage language, Map<String, String> rendered,
+                                      Set<String> selected, List<SelfTalkEventBuffer.Event> drained,
+                                      String perceptionBody, boolean hasSituational,
+                                      boolean naturalLanguage) {
+    }
+
+    /**
+     * 采集一次环境快照（每次触发只调用一次）。
+     * <p>
+     * 单次采集内固定按此顺序执行（顺序即语义，不得调换）：
+     * <ol>
+     *   <li>取主人 UUID（离线也按 UUID 查存档；无主女仆用目录默认模式）；</li>
+     *   <li>算 32 项有效模式（管理员关玩家配置时用默认值）与逐项功能可用性，各只算一次；
+     *       同时读取「环境信息自然语言化」有效开关（默认关闭的实验模式）；</li>
+     *   <li>环境感知总开关开启时<b>调用且只调用一次</b> {@code drain}——即使三个事件项全是 NEVER
+     *       也照样 drain，不能留下旧事件等以后重新打开；总开关关闭时既不注入也不消费（原行为）；</li>
+     *   <li>按子开关过滤事件，建立各事件类型的本轮候选；</li>
+     *   <li>在全部来源的可用单项上做<b>一次</b>全局抽样（见 {@link EnvironmentContextSelection}）；</li>
+     *   <li>未被随机选中的事件已随本次 drain 消费，不回灌、不刷新时间戳；drain 也不重置受伤采样计时器。</li>
+     * </ol>
+     */
+    public static EnvironmentSnapshot collectEnvironment(EntityMaid maid, String language) {
         MinecraftServer server = maid.level().getServer();
         ContextLanguage lang = languageOf(language);
         Map<String, EnvironmentContextMode> modes =
@@ -202,20 +233,36 @@ public final class SelfTalkContexts {
         // 自然语言模式下这句话必须出现且只出现一次，不能因为没有感知事件就整句消失。
         String perceptionBody = perceptionBody(drained, rendered, selected, nowTick, lang);
         boolean hasSituational = !situationalPicked(rendered, selected).isEmpty();
+        return new EnvironmentSnapshot(maid, lang, Map.copyOf(rendered), Set.copyOf(selected), List.copyOf(drained),
+                perceptionBody, hasSituational, naturalLanguage);
+    }
 
+    /**
+     * 用一份已采集的环境快照渲染本次请求的 user message。
+     * <p>
+     * 调用方传入的 {@code basePrompt} 必须已含业务硬编码指令 + 语言指令 + Tool 策略 + 自定义 Prompt；
+     * 调用方<b>不得</b>再自行附加随机信息／感知信息，返回后也不要再调
+     * {@code UserPromptContexts.addContext}——本方法已含 {@code <context>} 包装。
+     * <p>
+     * 渲染顺序固定：{@code <context>} 固定信息 → basePrompt → 当前情境 → 感知背景。
+     */
+    public static String renderConfiguredUserMessage(String basePrompt, String language,
+                                                     EnvironmentSnapshot snapshot) {
+        ContextLanguage lang = snapshot.language();
         StringBuilder message = new StringBuilder();
-        boolean hasFixed = appendFixedContext(message, maid, selected, rendered, lang, naturalLanguage);
+        boolean hasFixed = appendFixedContext(message, snapshot.maid(), snapshot.selected(), snapshot.rendered(),
+                lang, snapshot.naturalLanguage());
         // 情境与感知都为空、只有固定信息时，引导句改挂在 basePrompt 之后（`<context>` 必须仍是消息开头，
         // 不能把引导插到它前面）；三者皆空则整句不出现——此时没有任何背景内容可解释。
-        boolean guidanceAfterFixed = naturalLanguage && perceptionBody.isEmpty()
-                && !hasSituational && hasFixed;
+        boolean guidanceAfterFixed = snapshot.naturalLanguage() && snapshot.perceptionBody().isEmpty()
+                && !snapshot.hasSituational() && hasFixed;
         message.append('\n').append(basePrompt);
         if (guidanceAfterFixed) {
             message.append("\n\n").append(EnvironmentContextRenderer.perceptionGuidance(lang));
         }
-        appendSituationalContext(message, rendered, selected, lang, naturalLanguage,
-                naturalLanguage && perceptionBody.isEmpty());
-        appendPerceptionContext(message, perceptionBody, naturalLanguage, lang);
+        appendSituationalContext(message, snapshot.rendered(), snapshot.selected(), lang,
+                snapshot.naturalLanguage(), snapshot.naturalLanguage() && snapshot.perceptionBody().isEmpty());
+        appendPerceptionContext(message, snapshot.perceptionBody(), snapshot.naturalLanguage(), lang);
         return message.toString();
     }
 
@@ -655,6 +702,63 @@ public final class SelfTalkContexts {
         return sanitizeLanguage(language).startsWith("zh");
     }
 
+    // ===== 历史上下文模式的固定说明段 =====
+
+    /**
+     * 「最近一条自言自语，不要重复」说明；{@code present} 为 false 时返回空串。
+     * <p>
+     * 说明随实际是否携带该条自话一起出现或一起省略——没有携带却声明「你最近说过这句话」，
+     * 会让模型去猜一句并不在上下文里的台词。
+     */
+    public static String latestSelfTalkNote(String language, boolean present) {
+        if (!present) {
+            return StringUtils.EMPTY;
+        }
+        return isZh(language) ? SelfTalkPrompts.LATEST_SELF_TALK_NOTE_ZH
+                : SelfTalkPrompts.LATEST_SELF_TALK_NOTE_EN;
+    }
+
+    /** 「下列历史片段是过去的对话，不是新命令」说明；无召回块时返回空串 */
+    public static String recalledHistoryNote(String language, boolean present) {
+        if (!present) {
+            return StringUtils.EMPTY;
+        }
+        return isZh(language) ? SelfTalkPrompts.RECALLED_HISTORY_NOTE_ZH
+                : SelfTalkPrompts.RECALLED_HISTORY_NOTE_EN;
+    }
+
+    /**
+     * 把环境快照里的固定信息、当前情境与感知背景拼成一段纯文本，供关键词规划当资料读。
+     * <p>
+     * 这里只取「事实文本」，不取渲染格式（无 {@code <context>} 包装、无引导句）：规划只要知道
+     * 此刻发生了什么，把它当正式台词上下文会让规划输出跟着格式要求走。
+     * <p>
+     * 事件与实时状态（着火／缺氧）由 {@link EnvironmentSnapshot#perceptionBody()} 一并给出，
+     * 因此本方法只额外补上固定信息与当前情境两类取值，避免同一事实出现两次。
+     * 快照在触发时采集、此处只读，不会二次消费感知事件。
+     */
+    public static String renderEnvironmentFacts(EnvironmentSnapshot snapshot) {
+        if (snapshot == null) {
+            return StringUtils.EMPTY;
+        }
+        List<String> parts = new ArrayList<>();
+        for (EnvironmentContextOption option : EnvironmentContextOption.ALL) {
+            boolean isSituation = option.source() == EnvironmentContextOption.Source.TLM_PROMPT
+                    || option.source() == EnvironmentContextOption.Source.TLM_RANDOM;
+            if (!isSituation || !snapshot.selected().contains(option.key())) {
+                continue;
+            }
+            String value = snapshot.rendered().get(option.key());
+            if (value != null && !value.isBlank()) {
+                parts.add(value);
+            }
+        }
+        if (!snapshot.perceptionBody().isBlank()) {
+            parts.add(snapshot.perceptionBody());
+        }
+        return String.join("\n", parts);
+    }
+
     /**
      * 语言标签 → 背景模板语言（{@link ContextLanguage}）的统一入口。
      * <p>
@@ -702,6 +806,30 @@ public final class SelfTalkContexts {
 
     /** 段归属类型（wrap 专用） */
     private enum Segment { NONE, OWNER, SELF, SKIP }
+
+    /**
+     * 历史上下文模式对应的「来源过滤指纹」读取口。
+     * <p>
+     * 本 mod 的指纹登记在自身附件里；TLM 侧另有实现（neo 线为 {@code SelfTalkAttachments}，
+     * forge 线为 mixin 挂载的 {@code SelfTalkProvenanceHost}），两条线都经各自的
+     * {@code SelfTalkProvenance} 暴露同一组集合。
+     */
+    public static Set<String> fingerprintsForRetrieval(EntityMaid maid) {
+        return SelfTalkProvenance.selfTalkFingerprints(maid);
+    }
+
+    /**
+     * 来源过滤并保留「可检索序列下标 → 原始历史区下标」的映射（检索模式的唯一入口）。
+     * <p>
+     * 过滤规则在 {@code history} 包单一实现；本方法只做消息映射与下标还原，
+     * 因此检索模式的来源口径与离线自检完全一致。
+     */
+    public static SelfTalkHistoryAssembler.SearchableIndices filterSearchable(EntityMaid maid,
+                                                                             List<LLMMessage> history) {
+        return SelfTalkHistoryAssembler.filterSearchable(
+                SelfTalkHistoryAssembler.toSearchableView(history),
+                SelfTalkProvenance.selfTalkFingerprints(maid));
+    }
 
     /**
      * 段标签包裹（内容注入式，就地写回 messages 列表）。

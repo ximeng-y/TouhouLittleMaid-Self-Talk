@@ -20,6 +20,20 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * 互聊专用的 LLM 回调：最终响应的一切副作用统一在服务端主线程执行，并<b>先检查链／请求许可</b>。
+ * <p>
+ * 主人插话中断一条互聊链后：
+ * <ul>
+ *   <li>被插话的目标女仆（{@link InterChatChain#canDeliver} 为 false）：旧回复不显示、不播报、
+ *       不广播、不写窗口、不同步对方、不抽连续概率；只清理本轮工具历史与自己持有的 pending／等待气泡；</li>
+ *   <li>另一只女仆：只有「正式回复请求已经发出」才允许正常显示与播报该次最终文本
+ *       （回调存在即意味着正式请求已派发，规划阶段被中断的会话不会产生回调），
+ *       且不再续接、不再同步回已被插话的一方；</li>
+ *   <li>双方都不再派发下一轮。</li>
+ * </ul>
+ * 工具续接也在同一许可下收紧：中断后不执行新的工具批次，父类异步续接同样被 {@link #isStillAllowed()} 拦住。
+ */
 public class InterChatCallback extends LLMCallback {
 
     private final EntityMaid peer;
@@ -28,6 +42,8 @@ public class InterChatCallback extends LLMCallback {
     private final boolean isResponder;
     /** 本条消息在互聊链上的序号（发起者消息为 1），用于链长护栏 */
     private final int chainRound;
+    /** 本次互聊所属的链（回调持有直接引用：链释放后仍可按中断状态判定交付许可） */
+    private final InterChatChain chain;
     /**
      * 本轮工具过程写入 TLM 历史的消息引用（与 SelfTalkCallback 同构）。
      * 最终回答后成对全删——assistant(tool_calls) 与 tool 结果必须配对删除，
@@ -40,19 +56,34 @@ public class InterChatCallback extends LLMCallback {
 
     public InterChatCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
                              EntityMaid peer, String peerText,
-                             double broadcastRange, boolean isResponder, int chainRound, boolean toolEnabled) {
+                             double broadcastRange, boolean isResponder, int chainRound, boolean toolEnabled,
+                             InterChatChain chain) {
         super(chatManager, messages);
         this.peer = peer;
         this.peerText = peerText;
         this.broadcastRange = broadcastRange;
         this.isResponder = isResponder;
         this.chainRound = chainRound;
+        this.chain = chain;
         this.needAddTools = toolEnabled;
     }
 
-    /** 工具轮次：父类写 assistant(tool_calls) 历史后捕获队头引用（CappedQueue 新消息在队头） */
+    /**
+     * 本次请求是否仍允许继续（含工具续接与新请求派发）。
+     * <p>
+     * 判据是「链未被中断」而非「结果是否显示」：被插话后另一只女仆的输出可以照发，
+     * 但同样不得再续接下一轮或发起工具批次。
+     */
+    private boolean isStillAllowed() {
+        return chain == null || chain.canChain();
+    }
+
+    /** 工具轮次：被中断后不再执行新的工具批次；父类写 assistant(tool_calls) 历史后捕获队头引用 */
     @Override
     public void onFunctionCall(Message choice, LLMClient client) {
+        if (!isStillAllowed()) {
+            return;
+        }
         super.onFunctionCall(choice, client);
         captureToolHistoryHead(Role.ASSISTANT);
     }
@@ -97,6 +128,19 @@ public class InterChatCallback extends LLMCallback {
         }
     }
 
+    /**
+     * 清理自己持有的等待气泡。
+     * <p>
+     * 被插话的目标女仆不得显示旧回复，但「少女思考中」气泡若留在头上会一直悬着，
+     * 因此按<b>本轮捕获的 id</b>精准删除，绝不误删新请求的气泡。
+     */
+    private void discardWaitingBubble(EntityMaid maid) {
+        if (waitingChatBubbleId == 0) {
+            return;
+        }
+        maid.getChatBubbleManager().removeChatBubble(waitingChatBubbleId);
+    }
+
     @Override
     public void onSuccess(ResponseChat responseChat) {
         // 本类不调 super.onSuccess（父类 mixin 的剥离不会进入），首行显式剥离段标签
@@ -108,20 +152,26 @@ public class InterChatCallback extends LLMCallback {
             this.onFailure(null, new Throwable(message), com.github.tartaricacid.touhoulittlemaid.ai.service.ErrorCode.CHAT_TEXT_IS_EMPTY);
             return;
         }
-        if (AIConfig.TTS_ENABLED.get() && chatManager.getTTSSite() != null && chatManager.getTTSSite().enabled()) {
-            chatManager.tts(chatManager.getTTSSite(), chatText, ttsText, waitingChatBubbleId);
-        } else {
-            if (chatText != null && !chatText.isBlank() && maid.level() instanceof ServerLevel serverLevel) {
-                serverLevel.getServer().submit(() -> maid.getChatBubbleManager().addLLMChatText(chatText, waitingChatBubbleId));
-            }
-        }
         EntityMaid maid = getMaid();
+        // 交付许可在服务端主线程判定：链可能在此期间已被主人插话中断
         Runnable finish = () -> {
-            // 工具过程从历史里全部丢掉（成对删除，先于窗口同步执行）
+            boolean deliver = chain == null || chain.canDeliver(maid);
             discardToolHistory();
             SelfTalkState.State state = SelfTalkState.get(maid.getId());
             state.interChatPending = false;
             state.interChatPendingSinceTick = -1;
+            if (!deliver) {
+                // 被主人插话的目标：不显示、不播报、不广播、不写窗口、不同步对方；只清掉自己的等待气泡。
+                // 链已在插话时中断：此处统一结束链（解锁 + 释放注册表），不留悬挂状态阻塞后续配对
+                discardWaitingBubble(maid);
+                endChain();
+                return;
+            }
+            if (AIConfig.TTS_ENABLED.get() && chatManager.getTTSSite() != null && chatManager.getTTSSite().enabled()) {
+                chatManager.tts(chatManager.getTTSSite(), chatText, ttsText, waitingChatBubbleId);
+            } else if (maid.level() instanceof ServerLevel serverLevel) {
+                serverLevel.getServer().submit(() -> maid.getChatBubbleManager().addLLMChatText(chatText, waitingChatBubbleId));
+            }
             if (isResponder && peerText != null && !peerText.isBlank()) {
                 boolean needSync = true;
                 if (!state.windowInterChatMsgs.isEmpty()) {
@@ -134,20 +184,29 @@ public class InterChatCallback extends LLMCallback {
             }
             MaidInterChatService.addInterChatMessage(maid, chatText);
             if (peer != null && peer.isAlive() && peer.level() instanceof ServerLevel) {
-                MaidInterChatService.syncPeerMessageToWindow(peer, chatText);
+                // 不重新同步回已被主人插话、已开启新聊天的对方窗口
+                if (chain == null || chain.canDeliver(peer)) {
+                    MaidInterChatService.syncPeerMessageToWindow(peer, chatText);
+                }
             }
             broadcastToNearby(maid, chatText);
-            if (peer != null && peer.isAlive() && peer.level() instanceof ServerLevel peerLevel) {
+            // 链已中断（含本次为被插话的一方）时不再续接；对方不可用时链终止。
+            // 交付完本次回复即结束链：解锁并释放注册表，不让旧链残留阻塞后续配对
+            if (chain != null && !chain.canChain()) {
+                endChain();
+                return;
+            }
+            if (peer != null && peer.isAlive() && peer.level() instanceof ServerLevel) {
                 double prob = Config.INTER_CHAT_CHAIN_PROBABILITY.get();
                 if (maid.getRandom().nextDouble() < prob) {
                     tryChain(peer, maid, chatText);
                 } else {
                     // 概率抽签不续接：链自然结束，解除互聊对锁（tryChain 各提前返回路径也会解锁）
-                    unlockPair();
+                    endChain();
                 }
             } else {
                 // 对方不可用（死亡/卸载/非服务端维度）：链终止，解除对锁
-                unlockPair();
+                endChain();
             }
         };
         if (isOnServerThread()) {
@@ -158,26 +217,40 @@ public class InterChatCallback extends LLMCallback {
     }
 
     private void tryChain(EntityMaid nextSpeaker, EntityMaid lastSpeaker, String lastText) {
-        if (!(nextSpeaker.level() instanceof ServerLevel level)) { unlockPair(); return; }
+        if (!(nextSpeaker.level() instanceof ServerLevel level)) { endChain(); return; }
         // 热重载下中途关闭互聊时立即终止在途链
-        if (!Config.INTER_CHAT_ENABLED.get()) { unlockPair(); return; }
+        if (!Config.INTER_CHAT_ENABLED.get()) { endChain(); return; }
         // 链长护栏：本条消息已是链上第 chainRound 条，达到上限即结束本次互聊，
         // 防止连续概率配到 1.0 等极端配置下无限往返消耗 token
-        if (chainRound >= Config.INTER_CHAT_MAX_CHAIN_ROUNDS.get()) { unlockPair(); return; }
-        if (!SelfTalkHandler.hasPlayerNearby(nextSpeaker, Config.INTER_CHAT_PLAYER_RANGE.get())) { unlockPair(); return; }
-        if (!isMaidNearby(nextSpeaker, lastSpeaker, Config.INTER_CHAT_MAID_RANGE.get())) { unlockPair(); return; }
+        if (chainRound >= Config.INTER_CHAT_MAX_CHAIN_ROUNDS.get()) { endChain(); return; }
+        if (!SelfTalkHandler.hasPlayerNearby(nextSpeaker, Config.INTER_CHAT_PLAYER_RANGE.get())) { endChain(); return; }
+        if (!isMaidNearby(nextSpeaker, lastSpeaker, Config.INTER_CHAT_MAID_RANGE.get())) { endChain(); return; }
         // 1.1.2 睡眠 gate：对方睡觉且玩家开启「睡觉时安静」→ 链自然结束（下一跳由 dispatchNow 顺延会挂锁
         // 到超时兜底，此处显式终止并解锁，与对方死亡/卸载同语义）
         if (nextSpeaker.isSleeping()
                 && PlayerSettingsStore.isSleepQuietForMaid(nextSpeaker.level().getServer(), nextSpeaker)) {
-            unlockPair();
+            endChain();
             return;
         }
-        if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), nextSpeaker)) { unlockPair(); return; }
+        if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), nextSpeaker)) { endChain(); return; }
+        // 主人插话可能在上方任一步之间发生：派发前再确认一次链未被中断
+        if (chain != null && !chain.canChain()) { endChain(); return; }
+        // 链的两轮交接（第 3 轮起）：对方上一轮交付后才轮到本轮派发，此时其正式请求必然已实际
+        // 发出；未发出说明上一轮请求失败或状态已漂移，本链无以为继，显式结束并释放，
+        // 避免对锁悬挂到超时。首次交接（chainRound == 1，对方尚未收到过本链第一轮请求）
+        // 绝不能要求对方已进入正式阶段——否则交接被永久挡住
+        if (chain != null && chainRound > 1 && !chain.formalPhase(nextSpeaker)) { endChain(); return; }
         // 链式续接是发起者回复后的单条连续请求，天然串行、每轮隔一次 LLM 往返，
         // 不走 5~8s 全局节流桶（发起者派发已占用该桶），否则 responder 路径永远被退避。
         // 若对方忙（自话/玩家 chat 在途），dispatcher 会顺延本次回应；对锁保持，链仅暂停不终止。
-        SelfTalkDispatcher.requestInterChatResponder(nextSpeaker, lastSpeaker, lastText, broadcastRange, chainRound + 1);
+        SelfTalkDispatcher.requestInterChatResponder(nextSpeaker, lastSpeaker, lastText, broadcastRange,
+                chainRound + 1, chain == null ? 0 : chain.id());
+    }
+
+    /** 链自然结束：解除本对锁并释放链召回缓存 */
+    private void endChain() {
+        unlockPair();
+        InterChatChain.release(chain);
     }
 
     /** 解除本回调双方（maid 与 peer）的互聊对锁：仅当双方当前仍互为配对时才解除——
@@ -215,8 +288,12 @@ public class InterChatCallback extends LLMCallback {
             SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
             state.interChatPending = false;
             state.interChatPendingSinceTick = -1;
-            // 请求失败即链终止：解除互聊对锁（仅当双方仍互为配对才解锁，防误拆第三方新链锁）
-            unlockPair();
+            // 请求失败即链终止：解除互聊对锁并释放链（仅当双方仍互为配对才解锁，防误拆第三方新链锁）。
+            // 被主人插话的目标同样要清掉自己的等待气泡——本路径不产生任何可见输出
+            if (chain != null && !chain.canDeliver(getMaid())) {
+                discardWaitingBubble(getMaid());
+            }
+            endChain();
         });
     }
 }
