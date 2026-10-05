@@ -122,7 +122,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private int panelWidth;
     private int colTop;
 
-    /** 兼容原有单参构造：父界面为 null，关闭后保持原行为（回到主菜单） */
+    /** 兼容原有单参构造：父界面为 null，关闭后保持原行为（关闭 GUI） */
     public SelfTalkPlayerSettingsScreen(EntityMaid maid) {
         this(maid, null);
     }
@@ -473,6 +473,12 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
      */
     private void flushPromptEdits() {
         if (!this.promptAdminEnabled) {
+            return;
+        }
+        // 断连/退出世界等场景无服务端连接：PacketDistributor.sendToServer 内部
+        // requireNonNull(Minecraft.getInstance().getConnection()) 会抛 NPE，须在发包前拦截；
+        // 连接不可用时跳过本次保存（不动 synced 基线，重连后以服务端为准）
+        if (Minecraft.getInstance().getConnection() == null) {
             return;
         }
         if (this.globalPromptBox != null) {
