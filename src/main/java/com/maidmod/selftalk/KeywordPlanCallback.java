@@ -100,9 +100,21 @@ public class KeywordPlanCallback extends LLMCallback {
 
     /** 结果只投递一次；重复投递（上游偶发的多路径回调）由本标志挡掉 */
     private boolean delivered;
+    /** 是否已被主动作废：作废后的迟到结果不导出任何动作（沉默收尾） */
+    private volatile boolean cancelled;
+
+    /**
+     * 静默收敛本规划回调（会话侧调用）：不再导出结果、不再触发上层任何动作。
+     * <p>
+     * 用于请求被作废（如主人插话中断检索模式请求）时结束在途规划请求——
+     * 上游可能仍在飞行，但迟到结果已无意义，必须被挡在这里，既不写回忆也不驱动纠正。
+     */
+    public void completeSilently() {
+        cancelled = true;
+    }
 
     private synchronized void deliver(Outcome outcome) {
-        if (delivered) {
+        if (delivered || cancelled) {
             return;
         }
         delivered = true;

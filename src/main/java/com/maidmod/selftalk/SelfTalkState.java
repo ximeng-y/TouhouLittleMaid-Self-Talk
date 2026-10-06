@@ -106,6 +106,12 @@ public final class SelfTalkState {
         public final List<LLMMessage> windowInterChatMsgs = new ArrayList<>();
         /** 顺延队列：忙时积压的自话/互聊请求，空闲时按序派发（派发时现构建消息） */
         public final Deque<DeferredRequest> deferredRequests = new ArrayDeque<>();
+        /**
+         * 本女仆当前互聊请求身份（服务端主线程访问；同一时刻至多一个在途互聊请求）。
+         * 用于主人插话中断时定位「即使链已释放也要作废的旧轮请求」——
+         * 链释放后 {@link InterChatChain} 已无该女仆条目，只有状态表仍保留本女仆的请求引用。
+         */
+        public InterChatRequest currentInterChatRequest = null;
 
         // ===== 感知事件（附近死亡、玩家受伤、自身受伤） =====
         /**

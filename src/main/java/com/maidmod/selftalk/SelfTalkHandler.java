@@ -107,6 +107,7 @@ public final class SelfTalkHandler {
             cleanupStaleStates(level.getServer());
         }
         if (!maid.isAlive()) {
+            cleanupInterChatRequest(maid.getId());
             SelfTalkState.cleanupIfDead(maid.getId(), false);
             SelfTalkDispatcher.onMaidRemoved(maid.getId());
             InterChatChain.onMaidRemoved(maid.getId());
@@ -125,6 +126,12 @@ public final class SelfTalkHandler {
         if (state.interChatPending && state.interChatPendingSinceTick >= 0
                 && serverTick - state.interChatPendingSinceTick > PENDING_TIMEOUT_TICKS) {
             MaidSelfTalkMod.LOGGER.warn("Inter-chat pending timed out for maid {}, force reset", maid.getId());
+            // 先结束本女仆持用的互聊请求：作废会话/规划/正式回调 + 解除登记，再复位 pending，
+            // 否则遗留请求身份会在超时后继续飞行、产生迟到可见输出
+            InterChatRequest held = state.currentInterChatRequest;
+            if (held != null) {
+                held.cancel();
+            }
             state.interChatPending = false;
             state.interChatPendingSinceTick = -1;
         }
@@ -591,10 +598,25 @@ public final class SelfTalkHandler {
                 && event.getEntity() instanceof EntityMaid maid
                 && maid.isRemoved()
                 && maid.getRemovalReason() != Entity.RemovalReason.CHANGED_DIMENSION) {
+            cleanupInterChatRequest(maid.getId());
             SelfTalkState.cleanupIfDead(maid.getId(), false);
             SelfTalkDispatcher.onMaidRemoved(maid.getId());
             InterChatChain.onMaidRemoved(maid.getId());
             HistoryRetrievalCache.drop(maid);
+        }
+    }
+
+    /**
+     * 结束并解除本女仆持用的互聊请求（死亡/卸载/清扫/超时共用）。
+     * <p>
+     * 必须在移除状态之前执行：请求身份此时仍登记在状态表，先作废（终止会话/规划/正式回调）
+     * 再让状态表/链/对锁各自清理，避免遗留的迟到回调引用已移除的状态条目。
+     */
+    private static void cleanupInterChatRequest(int maidId) {
+        SelfTalkState.State state = SelfTalkState.get(maidId);
+        InterChatRequest held = state.currentInterChatRequest;
+        if (held != null) {
+            held.cancel();
         }
     }
 
@@ -608,6 +630,7 @@ public final class SelfTalkHandler {
             }
         }
         for (int maidId : staleIds) {
+            cleanupInterChatRequest(maidId);
             SelfTalkState.remove(maidId);
             SelfTalkDispatcher.onMaidRemoved(maidId);
             InterChatChain.onMaidRemoved(maidId);

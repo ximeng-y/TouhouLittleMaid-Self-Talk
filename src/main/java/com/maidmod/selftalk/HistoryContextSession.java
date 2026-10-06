@@ -87,8 +87,24 @@ public final class HistoryContextSession {
     private int corrections;
     /** 本次会话是否已经派发过正式请求（防重复派发） */
     private boolean dispatched;
+    /** 本次会话是否已被作废（作废后不再产生任何派发/纠正/召回回报；幂等标记） */
+    private boolean cancelled;
     /** 本次会话的检索结果是否已回报（回报口只被调用一次） */
     private boolean recallReported;
+
+    /**
+     * 可选的会话终止回调：本会话被 {@link #cancel()} 主动作废时在服务端主线程调用一次。
+     * <p>
+     * 互聊请求身份用它把「作废」传导给链/请求注册表（结束在途规划请求、清理注册）；
+     * 自话/欢迎语调用方不传（null），会话没有链、作废即沉默，无需外部收尾。
+     */
+    private final Runnable onCancelled;
+
+    /**
+     * 在途规划请求的回调引用：作废/发出纠正时用于静默结束当前规划请求（迟到结果不再导出动作）。
+     * 全量/精简模式没有规划请求，恒为 null；正式请求已派发后也不再持有。
+     */
+    private KeywordPlanCallback activePlanCallback;
 
     public HistoryContextSession(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
                                  String language, String basePrompt, HistoryContextMode mode,
@@ -97,7 +113,7 @@ public final class HistoryContextSession {
                                  List<LLMMessage> windowMessages, CachedRecall cachedRecall,
                                  Supplier<Boolean> stillAllowed, Dispatcher dispatcher) {
         this(maid, chatManager, site, language, basePrompt, mode, environment, systemPrefix,
-                fullHistory, windowMessages, cachedRecall, stillAllowed, dispatcher, null, null);
+                fullHistory, windowMessages, cachedRecall, stillAllowed, dispatcher, null, null, null);
     }
 
     public HistoryContextSession(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
@@ -108,7 +124,7 @@ public final class HistoryContextSession {
                                  Supplier<Boolean> stillAllowed, Dispatcher dispatcher,
                                  RecallReporter recallReporter) {
         this(maid, chatManager, site, language, basePrompt, mode, environment, systemPrefix,
-                fullHistory, windowMessages, cachedRecall, stillAllowed, dispatcher, recallReporter, null);
+                fullHistory, windowMessages, cachedRecall, stillAllowed, dispatcher, recallReporter, null, null);
     }
 
     public HistoryContextSession(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
@@ -119,6 +135,20 @@ public final class HistoryContextSession {
                                  Supplier<Boolean> stillAllowed, Dispatcher dispatcher,
                                  RecallReporter recallReporter,
                                  Function<String, String> finalMessageRenderer) {
+        this(maid, chatManager, site, language, basePrompt, mode, environment, systemPrefix,
+                fullHistory, windowMessages, cachedRecall, stillAllowed, dispatcher, recallReporter,
+                finalMessageRenderer, null);
+    }
+
+    public HistoryContextSession(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
+                                 String language, String basePrompt, HistoryContextMode mode,
+                                 SelfTalkContexts.EnvironmentSnapshot environment,
+                                 List<LLMMessage> systemPrefix, List<LLMMessage> fullHistory,
+                                 List<LLMMessage> windowMessages, CachedRecall cachedRecall,
+                                 Supplier<Boolean> stillAllowed, Dispatcher dispatcher,
+                                 RecallReporter recallReporter,
+                                 Function<String, String> finalMessageRenderer,
+                                 Runnable onCancelled) {
         this.maid = maid;
         this.chatManager = chatManager;
         this.site = site;
@@ -134,6 +164,29 @@ public final class HistoryContextSession {
         this.dispatcher = dispatcher;
         this.recallReporter = recallReporter;
         this.finalMessageRenderer = finalMessageRenderer;
+        this.onCancelled = onCancelled;
+    }
+
+    /**
+     * 会话被作废（业务判定本请求不再期待任何结果）时调用：终止在途规划请求并触发外部收尾。
+     * <p>
+     * 不在此置 dispatched／改 dispatched 之外的状态：迟到结果仍可能进入 {@link #deliver} 系列，
+     * 但已被别的入口（如请求身份的停止标记、链中断）判过许可而沉默；本方法只负责把「规划请求
+     * 仍在飞行」这件事收束掉——让规划回调的迟到结果不再导出下一步动作。
+     * 幂等：第二次调用不再重复终止。
+     */
+    void cancel() {
+        if (cancelled) {
+            return;
+        }
+        cancelled = true;
+        if (activePlanCallback != null) {
+            activePlanCallback.completeSilently();
+            activePlanCallback = null;
+        }
+        if (onCancelled != null) {
+            onCancelled.run();
+        }
     }
 
     /** 本次会话的模式（供调用方记录进互聊链上下文） */
@@ -321,9 +374,12 @@ public final class HistoryContextSession {
         // 规划与纠正共用同一次在途身份：不重复经过全局发起限流，也不重设触发冷却
         LLMClient client = site.client();
         try {
-            client.chat(new KeywordPlanCallback(chatManager, messages, outcome ->
-                    onServerThread(() -> onPlanOutcome(outcome, result))));
+            KeywordPlanCallback planCallback = new KeywordPlanCallback(chatManager, messages, outcome ->
+                    onServerThread(() -> onPlanOutcome(outcome, result)));
+            activePlanCallback = planCallback;
+            client.chat(planCallback);
         } catch (Throwable t) {
+            activePlanCallback = null;
             // 传输阶段就抛异常（site.url 非法等）：本次不召回，仍进入一次正式生成
             MaidSelfTalkMod.LOGGER.warn("Failed to dispatch keyword plan for maid {}, continue without recall",
                     maid.getId(), t);
@@ -347,6 +403,9 @@ public final class HistoryContextSession {
      * 不回退全量、不编造关键词、不调用其他「修复模型」。
      */
     private void onPlanOutcome(KeywordPlanCallback.Outcome outcome, HistoryRetrievalCache.Result result) {
+        // 当前规划回调已收敛（正常成功/失败/格式错误都到这里），解除在途跟踪；
+        // 后续纠正请求由 sendPlanRequest 重新登记，作废时只对真正在途的规划请求收束
+        activePlanCallback = null;
         if (!allowed()) {
             return;
         }
@@ -402,7 +461,7 @@ public final class HistoryContextSession {
     // ===== 派发 =====
 
     private boolean allowed() {
-        return !dispatched && maid.isAlive() && (stillAllowed == null || stillAllowed.get());
+        return !dispatched && !cancelled && maid.isAlive() && (stillAllowed == null || stillAllowed.get());
     }
 
     /** 正式派发（服务端主线程）：派发前再复核一次许可，超时或插话中断的迟到结果不会继续发请求 */
