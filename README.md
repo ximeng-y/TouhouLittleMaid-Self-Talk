@@ -52,6 +52,15 @@
 - **自定义 Prompt**：支持为「全部女仆」和「这只女仆」分别填写提示词
 - **Tool调用**：全局与单只开关，开启后这只女仆的自言自语/互聊可以调用工具
 
+### 可选：AgentTweaks 集成（NeoForge 1.21.1）
+
+本模组通过 `com.maidmod.selftalk.client.SelfTalkSettingsBridge` 对外提供可选设置导航桥（仅 NeoForge 1.21.1 线）：
+
+- 未安装 AgentTweaks 时，独立安装与原有行为完全一致：在 AI 聊天输入界面点 💬 打开女仆设置，关闭后返回聊天界面
+- AgentTweaks 接入后，💬 的打开权交给 AgentTweaks，由其提供左上角导航入口；从女仆设置返回时回到其父界面
+- 桥只提供打开/创建/导航协商等固定公开方法，不修改任何网络协议与业务行为，也不要求外部模组存在
+- **Forge 1.20.1 线尚未适配该桥**
+
 ## 许可
 
 [MIT](LICENSE)
@@ -111,6 +120,15 @@ Open the maid's AI chat input screen (usually by pressing T) and click the 💬 
 - **Sleep Quiet**: when on, self-talk / inter-chat no longer trigger while the maid is sleeping
 - **Custom Prompt**: fill in separate prompts for all maids and for this maid
 - **Tool**: global and per-maid switches; when enabled, this maid's self-talk / inter-chat can call tools
+
+### Optional: AgentTweaks integration (NeoForge 1.21.1)
+
+This mod exposes an optional settings-navigation bridge via `com.maidmod.selftalk.client.SelfTalkSettingsBridge` (NeoForge 1.21.1 line only):
+
+- Without AgentTweaks, standalone installation behaves exactly as before: open the Maid Settings with 💬 in the AI chat screen and return to the chat screen on close
+- With AgentTweaks, opening the 💬 entry is delegated to AgentTweaks, which provides a top-left navigation entry; closing the Maid Settings returns to its parent screen
+- The bridge only provides fixed public methods for opening / creating / navigation coordination — no network protocol or business behavior changes, and no hard dependency on the external mod
+- **The Forge 1.20.1 line does not include this bridge yet**
 
 ## License
 

@@ -57,6 +57,8 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private static final int OFFSCREEN = -1000;
 
     private final EntityMaid maid;
+    /** 返回目标父界面；单参构造时为 null，保持原有关闭行为 */
+    private final Screen parent;
 
     // ===== 自话组状态 =====
     private boolean adminEnabled = true;
@@ -120,9 +122,16 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private int panelWidth;
     private int colTop;
 
+    /** 兼容原有单参构造：父界面为 null，关闭后保持原行为（关闭 GUI） */
     public SelfTalkPlayerSettingsScreen(EntityMaid maid) {
+        this(maid, null);
+    }
+
+    /** 带返回父界面的构造：AgentTweaks 集成时从导航入口进入，关闭后回到父界面 */
+    public SelfTalkPlayerSettingsScreen(EntityMaid maid, Screen parent) {
         super(Component.translatable("config.maid_self_talk.screen.player_settings.title"));
         this.maid = maid;
+        this.parent = parent;
         // Screen.font 要到 init 才赋值，此处使用已初始化的客户端字体，并保留同一浮层实例。
         this.environmentContextPanel = new EnvironmentContextPanel(Minecraft.getInstance().font);
     }
@@ -466,6 +475,12 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         if (!this.promptAdminEnabled) {
             return;
         }
+        // 断连/退出世界等场景无服务端连接：PacketDistributor.sendToServer 内部
+        // requireNonNull(Minecraft.getInstance().getConnection()) 会抛 NPE，须在发包前拦截；
+        // 连接不可用时跳过本次保存（不动 synced 基线，重连后以服务端为准）
+        if (Minecraft.getInstance().getConnection() == null) {
+            return;
+        }
         if (this.globalPromptBox != null) {
             String value = this.globalPromptBox.getValue();
             if (!value.equals(this.globalPromptSynced)) {
@@ -499,7 +514,36 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     @Override
     public void onClose() {
         flushPromptEdits();
-        super.onClose();
+        if (this.parent != null) {
+            // 带父界面时回到父界面；setScreen 会触发本页 removed()（其中再次 flush 为无操作）
+            Minecraft.getInstance().setScreen(this.parent);
+        } else {
+            // 单参构造保持原有行为
+            super.onClose();
+        }
+    }
+
+    /**
+     * 页面被外部 setScreen 替换（绕过 onClose）时同样保存 Prompt 编辑。
+     * flushPromptEdits 以 synced 基线判重，onClose 与 removed 先后触发不会重复发包。
+     */
+    @Override
+    public void removed() {
+        flushPromptEdits();
+        super.removed();
+    }
+
+    /**
+     * 导航协商（供 {@link SelfTalkSettingsBridge} 调用）：环境浮层打开时返回 false
+     * （不保存、不切页，防止浮层输入状态带出）；否则保存 Prompt 编辑并清除输入框焦点后返回 true。
+     */
+    boolean prepareForNavigation() {
+        if (this.environmentContextPanel.isOpen()) {
+            return false;
+        }
+        flushPromptEdits();
+        this.setFocused(null);
+        return true;
     }
 
     // ===== 环境上下文浮层：事件转发（浮层优先，未使用也不透传） =====
