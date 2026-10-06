@@ -52,6 +52,13 @@
 - **自定义 Prompt**：支持为「全部女仆」和「这只女仆」分别填写提示词
 - **Tool调用**：全局与单只开关，开启后这只女仆的自言自语/互聊可以调用工具
 
+### 可选：AgentTweaks 集成（Forge 1.20.1）
+
+- 不需要安装 AgentTweaks：在 AI 聊天输入界面点 💬 即可打开女仆设置，关闭后返回聊天界面。
+- 本版本提供设置导航桥；安装并接入该桥的 Forge 版 AgentTweaks 后，可由其提供统一导航入口，关闭女仆设置时返回父界面。
+- 切换设置页前会保存自定义 Prompt；环境上下文浮层打开时不允许切页。
+- 不新增网络协议或强制依赖。仅提供本侧接口，不代表 AgentTweaks 的 Forge 接入已完成。
+
 ## 许可
 
 [MIT](LICENSE)
@@ -111,6 +118,13 @@ Open the maid's AI chat input screen (usually by pressing T) and click the 💬 
 - **Sleep Quiet**: when on, self-talk / inter-chat no longer trigger while the maid is sleeping
 - **Custom Prompt**: fill in separate prompts for all maids and for this maid
 - **Tool**: global and per-maid switches; when enabled, this maid's self-talk / inter-chat can call tools
+
+### Optional: AgentTweaks integration (Forge 1.20.1)
+
+- AgentTweaks is not required: click 💬 in the AI chat screen to open Maid Settings, then close it to return to chat.
+- This version provides a settings-navigation bridge. A Forge version of AgentTweaks that integrates with this bridge can provide unified navigation; closing Maid Settings returns to its parent screen.
+- Custom Prompt edits are saved before switching pages; navigation is blocked while the environment-context overlay is open.
+- No new network protocol or mandatory dependency is introduced. This provides the Self-Talk side only and does not imply that the Forge integration in AgentTweaks is complete.
 
 ## License
 

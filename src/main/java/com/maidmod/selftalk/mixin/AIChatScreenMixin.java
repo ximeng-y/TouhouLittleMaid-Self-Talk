@@ -3,8 +3,7 @@ package com.maidmod.selftalk.mixin;
 import com.github.tartaricacid.touhoulittlemaid.client.gui.entity.maid.ai.AIChatScreen;
 import com.github.tartaricacid.touhoulittlemaid.client.gui.widget.button.FlatColorButton;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
-import com.maidmod.selftalk.client.SelfTalkPlayerSettingsScreen;
-import net.minecraft.client.Minecraft;
+import com.maidmod.selftalk.client.SelfTalkSettingsBridge;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Final;
@@ -16,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * 在 AI 聊天输入界面（AIChatScreen）左侧按钮组末尾新增一个小方块按钮，
- * 点击打开本模组的玩家自话设置界面（与选 AI 模型的入口同层级）。
+ * 点击经可选导航桥打开玩家自话设置界面；未注册委托时独立打开。
  * <p>
  * 仅客户端加载：通过 mixins json 的 "client" 段声明，服务端不加载本类。
  * <p>
@@ -50,8 +49,7 @@ public abstract class AIChatScreenMixin extends Screen {
     private void maid_self_talk$addSelfTalkSettingsButton(int leftX, int y, int size, int gap, CallbackInfo ci) {
         int x = leftX + size + gap;  // TAIL 处 leftX 已在 ⚙ 位置，+ 一组间距即第 4 个按钮
         FlatColorButton button = new FlatColorButton(x, y, size, size,
-                Component.literal("💬"), b ->
-                Minecraft.getInstance().setScreen(new SelfTalkPlayerSettingsScreen(this.maid)))
+                Component.literal("💬"), b -> SelfTalkSettingsBridge.openSettings(this.maid, this))
                 .setTooltips("config.maid_self_talk.screen.self_talk_button.tip");
         this.addRenderableWidget(button);
     }
