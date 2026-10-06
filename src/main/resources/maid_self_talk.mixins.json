@@ -6,6 +6,7 @@
   "mixins": [
     "HistorySummaryManagerAccessor",
     "HistorySummaryManagerMixin",
+    "InterChatToolLifecycleMixin",
     "MaidAIChatDataMixin",
     "MaidAIChatManagerAccessor",
     "MaidAIChatManagerMixin",

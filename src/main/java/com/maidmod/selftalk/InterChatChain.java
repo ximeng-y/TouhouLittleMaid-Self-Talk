@@ -25,7 +25,7 @@ import java.util.Map;
  * 释放只影响后续按 {@code chainId} 的查找，已在途回调持有本对象的直接引用，
  * 因此释放后仍能按中断状态正确判定交付许可。
  * <p>
- * 线程约定：全部访问在服务端主线程。
+ * 线程约定：状态修改在服务端主线程；中断标志允许响应线程读取，用于阻止新的工具批次。
  */
 public final class InterChatChain {
 
@@ -42,8 +42,8 @@ public final class InterChatChain {
     private final int secondMaidId;
     /** 每位参与女仆的链内状态 */
     private final Map<Integer, Participant> participants = new HashMap<>();
-    /** 整条链是否已被主人插话中断（中断后不再续接） */
-    private boolean interrupted;
+    /** 整条链是否已被主人插话中断（响应线程也会检查，中断后不再续接） */
+    private volatile boolean interrupted;
 
     private InterChatChain(long chainId, EntityMaid first, EntityMaid second) {
         this.chainId = chainId;
@@ -61,6 +61,23 @@ public final class InterChatChain {
         private boolean formalPhase;
         /** 是否被主人插话禁言：旧回复不得显示、播报、写窗口 */
         private boolean suppressed;
+        /** 该女仆在本链的当前请求身份（发起/回应各一；链释放时经 {@link InterChatRequest#detachChain} 置空引用） */
+        private InterChatRequest request;
+
+        /** 该女仆在本链的当前请求身份（未登记时 null） */
+        public InterChatRequest request() {
+            return request;
+        }
+
+        /** 登记该女仆在本链的请求身份（新轮强制覆盖旧轮；只经链访问，不自动解除登记） */
+        private void registerRequest(InterChatRequest request) {
+            this.request = request;
+        }
+
+        /** 链释放/请求作废时解除本链对请求的引用（不让链内状态长期拖住请求身份） */
+        void clearRequest() {
+            this.request = null;
+        }
 
         /** 链上首次检索的成品结果；{@code completed} 为 false 时不得当作「结果为空」复用 */
         public HistoryContextSession.CachedRecall cachedRecall() {
@@ -114,7 +131,7 @@ public final class InterChatChain {
     }
 
     /**
-     * 释放一条链。
+     * 释放一条链及其配对锁。
      * <p>
      * 只当登记表里该女仆指向的仍是本链时才清除映射：新链可能在旧链释放之前就已建立，
      * 无条件按实体 ID 删除会把新链的活动映射误删。
@@ -131,6 +148,17 @@ public final class InterChatChain {
         InterChatChain chain = CHAINS.remove(chainId);
         if (chain == null) {
             return;
+        }
+        // 解锁不依赖正式回调是否存在，规划阶段或顺延阶段结束也必须立即释放本链的锁。
+        SelfTalkDispatcher.unlockMaidForChain(chain.firstMaidId, chainId);
+        SelfTalkDispatcher.unlockMaidForChain(chain.secondMaidId, chainId);
+        // 链释放即脱离参与者对请求的持有：回调侧已持有链/请求的直接引用，按自身停止标记继续判定；
+        // 不让链内状态长期拖住请求身份（状态表与静态 CURRENT 由请求自身按对象身份解除）
+        for (Participant p : chain.participants.values()) {
+            if (p.request != null) {
+                p.request.detachChain();
+            }
+            p.request = null;
         }
         clearActive(chain.firstMaidId, chainId);
         clearActive(chain.secondMaidId, chainId);
@@ -172,6 +200,20 @@ public final class InterChatChain {
     /** 该女仆在本链的链内状态（首次访问即建立） */
     public Participant participant(EntityMaid maid) {
         return participants.computeIfAbsent(maid.getId(), id -> new Participant());
+    }
+
+    /** 登记该女仆在本链的请求身份（新轮覆盖旧轮；链释放时随 participant 一并清除） */
+    public void registerRequest(EntityMaid maid, InterChatRequest request) {
+        participant(maid).registerRequest(request);
+    }
+
+    /**
+     * 取该女仆在本链登记的请求身份；链已释放则返回 null——释放时参与者登记随链清除，
+     * 但仍可能在 {@link SelfTalkState.State#currentInterChatRequest} 保留（状态表不随链释放清空）。
+     */
+    public InterChatRequest requestOf(EntityMaid maid) {
+        Participant p = participants.get(maid.getId());
+        return p == null ? null : p.request();
     }
 
     /** 整条链是否已被主人插话中断 */

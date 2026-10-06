@@ -77,16 +77,30 @@ public final class MaidInterChatService {
         // Tool 判定在派发时取（dispatcher 顺延队列是延迟派发的，入队时不判定）
         boolean toolEnabled = PlayerSettingsStore.isToolCallEnabledForMaid(maid.level().getServer(), maid);
         InterChatChain.Participant participant = chain.participant(maid);
+        // 本轮请求身份：在会话开始前登记为本女仆「当前」互聊请求（规划/正式回调共用）。
+        // 主人插话、超时、死亡/卸载借它作废在途请求；请求登记强制覆盖旧条目——同一女仆同一时刻
+        // 至多一个在途互聊请求，新轮请求压着旧轮（旧轮的迟到回调按自身停止标记沉默，不误伤新轮）
+        InterChatRequest request = InterChatRequest.registerFor(maid.getId(), chain.id(), chain);
+        chain.registerRequest(maid, request);
         HistoryContextSession session = new HistoryContextSession(maid, chatManager, site, language,
                 prompt, mode, environment, layout.systemPrefix(), layout.history(), layout.window(),
                 // 链上首次检索结果：已完成（含「结果为空」）则直接复用，不再规划、不再跑 BM25
                 participant.cachedRecall(),
-                // 主人插话中断后一切未发出的动作停止：规划结果不再触发正式生成、迟到结果不再派发
-                () -> !chain.interrupted(),
+                // 主人插话中断/请求作废后一切未发出的动作停止：规划结果不再触发正式生成、
+                // 迟到结果不再派发
+                () -> !chain.interrupted() && !request.isCancelled(),
+                // 正式派发（服务端主线程）：把本轮请求身份带上，标记正式阶段并登记回调
                 prepared -> dispatchInterChat(maid, chatManager, site, prepared, peer, peerText,
-                        broadcastRange, isResponder, chainRound, toolEnabled, chain),
+                        broadcastRange, isResponder, chainRound, toolEnabled, chain, request),
                 // 检索成品回报：链上后续轮次据此判断「首次检索已完成」（空结果同样算完成）
-                blocks -> recordChainRecall(chain, maid, blocks));
+                blocks -> recordChainRecall(chain, maid, blocks),
+                null,
+                // 会话被作废时（检索模式规划请求的终止入口）把请求一并作废：
+                // 请求的 cancel 再回来终止本会话——两者互相幂等，收敛一致
+                () -> request.cancel());
+        // 把会话绑定到请求身份：请求作废时经会话终止在途规划请求（silent-cancel），
+        // 晚到的规划结果不得再导出纠正或正式生成
+        request.attachSession(session);
         session.start();
         // 检索模式的规划与建索引是异步的：此时正式请求可能尚未发出，但本次触发已受理；
         // 正式阶段标记在实际派发点（dispatchInterChat）完成，链交接以真实派发为准
@@ -97,24 +111,34 @@ public final class MaidInterChatService {
      * 派发互聊请求：置 pending、登记链上首次召回结果、提交给 LLM 客户端。
      * <p>
      * 由 {@link HistoryContextSession} 在正式生成那一刻回调；被插话中断时不会走到这里。
+     * <p>
+     * 同步报文阶段就抛异常（site.url 非法等）时，本轮请求身份一并作废：会话、在途规划、
+     * 已登记回调与 pending 全部收束，链释放——异常后的请求绝不会留下可派发回调，
+     * 否则该身份会被后续迟到结果误用。
      */
     private static boolean dispatchInterChat(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
                                              List<LLMMessage> messages, EntityMaid peer, String peerText,
                                              double broadcastRange, boolean isResponder, int chainRound,
-                                             boolean toolEnabled, InterChatChain chain) {
+                                             boolean toolEnabled, InterChatChain chain, InterChatRequest request) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.interChatPending = true;
         state.interChatPendingSinceTick = maid.level().getServer().getTickCount();
         InterChatCallback callback = new InterChatCallback(chatManager, messages, peer, peerText,
-                broadcastRange, isResponder, chainRound, toolEnabled, chain);
+                broadcastRange, isResponder, chainRound, toolEnabled, chain, request);
+        // 构造器已创建等待气泡：先登记资源，再调用可能同步失败的外部客户端。
+        request.attachFormalCallback(callback);
         try {
             site.client().chat(callback);
             // 正式请求已实际发出：此刻才标记进入正式阶段（关键词规划／建索引阶段不算），
-            // 链上第 3 轮起的交接校验以此为准
+            // 链上第 3 轮起的交接校验以此为准；回调资源已在发送前绑定
             chain.markFormalPhase(maid);
+            request.markFormalDispatched();
         } catch (Throwable t) {
+            // 同步异常：本轮请求从未真正发出，作废身份 + 复位 pending + 释放链，不留悬挂
             state.interChatPending = false;
             state.interChatPendingSinceTick = -1;
+            request.cancel();
+            InterChatChain.release(chain);
             MaidSelfTalkMod.LOGGER.warn("Failed to dispatch inter-chat request for maid {}", maid.getId(), t);
             return false;
         }

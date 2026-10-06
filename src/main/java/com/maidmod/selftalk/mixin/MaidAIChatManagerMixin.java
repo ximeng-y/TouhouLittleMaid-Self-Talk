@@ -6,11 +6,13 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.InterChatChain;
+import com.maidmod.selftalk.InterChatRequest;
 import com.maidmod.selftalk.MaidInterChatService;
 import com.maidmod.selftalk.MaidSelfTalkService;
 import com.maidmod.selftalk.SelfTalkContexts;
 import com.maidmod.selftalk.SelfTalkDispatcher;
 import com.maidmod.selftalk.SelfTalkPrompts;
+import com.maidmod.selftalk.SelfTalkState;
 import com.maidmod.selftalk.SegmentTags;
 import org.apache.commons.lang3.StringUtils;
 import org.spongepowered.asm.mixin.Mixin;
@@ -55,12 +57,31 @@ public abstract class MaidAIChatManagerMixin {
         // 主人插话：真实派发的主动聊天会立即终止该女仆所在的连续互聊链，
         // 必须在注入互聊窗口之前处理，否则被丢弃的旧回复会随窗口重新进入本次请求
         InterChatChain chain = InterChatChain.activeFor(maid);
+        long chainId = 0;
         if (chain != null) {
+            chainId = chain.id();
+            // 整条链中断：不再续接下一轮
             chain.interruptByOwnerChat(maid);
-            SelfTalkDispatcher.dropQueuedForChain(maid, chain.id());
+            // 丢弃顺延队列里属于本链的请求（新链的请求不是旧链的续接，绝不能被一起清掉）
+            SelfTalkDispatcher.dropQueuedForChain(maid, chainId);
+            // 作废本女仆在链上的当前请求（含规划阶段与已派发的正式阶段；作废后迟到结果沉默）。
+            // 被动参与者（对方）的正式请求若已派发可照常显示，但不得续接下一轮——链中断标志已拦
+            InterChatRequest request = chain.requestOf(maid);
+            if (request != null) {
+                request.cancel();
+            }
             // 中断即释放注册表：在途回调持有链的直接引用、仍按中断状态自行判定交付许可；
             // 规划阶段被中断的会话没有任何回调会来收尾，注册表不能留给超时清理
             InterChatChain.release(chain);
+        } else {
+            // 链已释放（首轮中断已释放、旧请求还在飞行时再次插话）：按状态表登记的「当前请求」兜底
+            // 作废——第二次插话的迟到回复必须同样沉默，不能经旧轮身份继续产生可见副作用
+            InterChatRequest leftover = SelfTalkState.get(maid.getId()).currentInterChatRequest;
+            if (leftover != null) {
+                chainId = leftover.chainId();
+                SelfTalkDispatcher.dropQueuedForChain(maid, chainId);
+                leftover.cancel();
+            }
         }
         int historyCount = messages.size();
         MaidInterChatService.injectPlayerChatContext(maid, messages);
