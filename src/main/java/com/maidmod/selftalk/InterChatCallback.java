@@ -137,8 +137,11 @@ public class InterChatCallback extends LLMCallback {
     /** 工具轮次心跳：刷新互聊 pending 起始 tick（须在服务端主线程写状态） */
     private void refreshPendingHeartbeat() {
         Runnable beat = () -> {
-            SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
-            if (state.interChatPending) {
+            // 归属校验：只刷新本请求自己的 pending 计时；被作废的旧请求不得经 get() 重建状态、
+            // 也不得更新新请求的计时
+            SelfTalkState.State state = SelfTalkState.peek(getMaid().getId());
+            if (state != null && state.interChatPending
+                    && (request == null || state.currentInterChatRequest == request)) {
                 state.interChatPendingSinceTick = getMaid().level().getServer().getTickCount();
             }
         };
@@ -161,9 +164,35 @@ public class InterChatCallback extends LLMCallback {
 
     /** 复位本请求的互聊 pending（服务端主线程）；只清自己持有的，不动其它轮次状态 */
     private void resetInterChatPending() {
-        SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
+        // 用不创建状态的查询 + 归属校验：被作废的旧请求不得清掉新请求的 pending，
+        // 女仆已卸载时不得经 get() 重建刚删除的状态
+        SelfTalkState.State state = SelfTalkState.peek(getMaid().getId());
+        if (state == null || (request != null && state.currentInterChatRequest != request)) {
+            return;
+        }
         state.interChatPending = false;
         state.interChatPendingSinceTick = -1;
+    }
+
+    /**
+     * 请求作废时的<b>本地收尾</b>（服务端主线程，由 {@link InterChatRequest#cancel} 同步调用）：
+     * 丢弃本轮工具历史、删除等待气泡、复位 pending、解除互聊对锁。
+     * <p>
+     * Agent-Tweaks 的 {@code cancel} 契约上<b>不调用业务回调</b>，因此不能等待
+     * {@link #onSuccess}/{@link #onFailure} 来收敛——作废即同步做完本请求自己的清理，
+     * 绝不让 pending 空占 5 分钟、也不留下可见气泡或工具残留。
+     * <p>
+     * 只触碰本请求自己持有的资源（按 {@code currentInterChatRequest == this.request} 归属校验），
+     * 绝不误清新请求的 pending、气泡或对锁。
+     */
+    void cancelLocally() {
+        EntityMaid maid = getMaid();
+        if (maid != null && maid.isAlive()) {
+            discardToolHistory();
+            discardWaitingBubble(maid);
+        }
+        resetInterChatPending();
+        endChainAndComplete(null);
     }
 
     @Override
@@ -223,9 +252,10 @@ public class InterChatCallback extends LLMCallback {
             }
             broadcastToNearby(maid, chatText);
             // 链已中断（含本次为被插话的一方）时不再续接；对方不可用时链终止。
-            // 交付完本次回复即结束链：解锁并释放注册表，不让旧链残留阻塞后续配对
+            // 交付完本次回复即结束链：解锁并释放注册表，不让旧链残留阻塞后续配对。
+            // 回复已实际交付 → 正常终态：向 Agent-Tweaks 上报 complete（normalMaid 传 maid）
             if (chain != null && !chain.canChain()) {
-                endChainAndComplete(null);
+                endChainAndComplete(maid);
                 return;
             }
             if (peer != null && peer.isAlive() && peer.level() instanceof ServerLevel) {
@@ -237,8 +267,8 @@ public class InterChatCallback extends LLMCallback {
                     endChainAndComplete(maid);
                 }
             } else {
-                // 对方不可用（死亡/卸载/非服务端维度）：链终止，解除对锁
-                endChainAndComplete(null);
+                // 对方不可用（死亡/卸载/非服务端维度）：链终止，解除对锁；回复已交付仍算正常终态
+                endChainAndComplete(maid);
             }
         };
         if (isOnServerThread()) {
@@ -282,6 +312,11 @@ public class InterChatCallback extends LLMCallback {
         // 若对方忙（自话/玩家 chat 在途），dispatcher 会顺延本次回应；对锁保持，链仅暂停不终止。
         SelfTalkDispatcher.requestInterChatResponder(nextSpeaker, lastSpeaker, lastText, broadcastRange,
                 chainRound + 1, chain == null ? 0 : chain.id());
+        // 本轮已成功交付并交棒给下一轮：解除本轮请求登记（成功后续接同属正常终态），
+        // 释放 session/回调引用；链不释放（仍在续接），对锁保持由后续轮次维护
+        if (request != null && !request.isCancelled()) {
+            request.completeLocally();
+        }
     }
 
     /**
@@ -293,8 +328,14 @@ public class InterChatCallback extends LLMCallback {
     private void endChainAndComplete(EntityMaid normalMaid) {
         unlockPair();
         InterChatChain.release(chain);
-        if (normalMaid != null && request != null && request.isFormalDispatched() && !request.isCancelled()) {
-            request.completeFormal();
+        // 正常终态统一解除本轮请求登记（成功交付、概率不续接、失败收敛、被动清退、链中断不续接）：
+        // 作废请求已由 cancel() 解除登记，此处被 isCancelled 守卫跳过，不会重复清理。
+        // 不释放仍需续接的整条链——链的续接/释放由回调按链状态决定。
+        if (request != null && !request.isCancelled()) {
+            if (normalMaid != null && request.isFormalDispatched()) {
+                request.completeFormal();
+            }
+            request.completeLocally();
         }
     }
 

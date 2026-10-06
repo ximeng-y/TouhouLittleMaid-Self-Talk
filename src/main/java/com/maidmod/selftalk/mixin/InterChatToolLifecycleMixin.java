@@ -28,6 +28,16 @@ import java.util.concurrent.CompletableFuture;
  * <p>
  * 守卫只在「宿主对象是互聊回调且已被作废」时生效：自话/欢迎语/玩家 chat/规划回调不受影响。
  * <p>
+ * 四处注入都声明 {@code cancellable = true}：处理器对命中守卫的回调执行 {@code cancel()} 或
+ * {@code setReturnValue(...)}，未声明可取消会导致 Mixin 生成的 CallbackInfo 不可取消，
+ * 第一次命中就抛 {@code CancellationException} 而不是按预期短路。
+ * <p>
+ * 目标方法的参数类型（{@code ToolCall}、{@code LLMCallback}、{@code ToolBatchResult}）在 TLM
+ * 中都是<b>包私有或嵌套类型</b>，本 mixin 与它们不同包，不能直接作为 handler 参数类型（会生成
+ * 非法描述符导致 APPLY 失败）。因此 handler 声明为 {@code Object} 参数、运行时判定（与既有
+ * {@code MaidAIChatManagerMixin} 的 {@code (Object) this} 手法一致）；Mixin 按<b>目标方法参数个数</b>
+ * 绑定到完整签名，不校验参数类型。
+ * <p>
  * 目标方法均为 {@code LLMCallback} 的实例方法（private lambda 亦同），handler 同为实例方法，
  * 与双线既有 mixin 约定一致。
  */
@@ -37,25 +47,30 @@ public abstract class InterChatToolLifecycleMixin {
     /**
      * 单个工具执行入口：请求作废后不再真正执行工具（也就不会刷新气泡、不会产生后续异步链）。
      * 直接返回「已完成的 nextCallback」——与 TLM 未执行工具的返回形状一致，
-     * {@code lambda$executeSingleToolCall$5} 的 {@code returned == nextCallback} 分支原样收束。
+     * {@code lambda$executeSingleToolCall$5} 的 {@code returned == nextCallback} 分支原样收束
+     * （该分支提前返回原 batchResult，批循环自然终止，绝不 NPE）。
      */
-    @Inject(method = "onSingleCall", remap = false, at = @At("HEAD"))
-    private void maid_self_talk$blockSingleToolCall(CallbackInfoReturnable<CompletableFuture> cir,
-                                                    LLMCallback callback) {
+    @Inject(method = "onSingleCall", remap = false, cancellable = true, at = @At("HEAD"))
+    private void maid_self_talk$blockSingleToolCall(Object toolCall, Object callback, Object client,
+                                                    CallbackInfoReturnable<CompletableFuture<LLMCallback>> cir) {
         if ((Object) this instanceof InterChatCallback ic && ic.isCancelled()) {
-            cir.setReturnValue(CompletableFuture.completedFuture(callback));
+            cir.setReturnValue(CompletableFuture.completedFuture((LLMCallback) callback));
         }
     }
 
     /**
-     * 单工具结果合并：作废后跳过错误历史写入与子流程回调构造，直接返回 null 短路。
-     * 返回值只会被 {@code lambda$onFunctionCall$2} 消费，而后者同样被本 mixin 短路，
-     * 因此 null 绝不会被解引用；同批其它工具也不会再被执行。
+     * 单工具结果合并：作废后跳过错误历史写入与子流程回调构造，<b>返回本次捕获的原批次结果</b>
+     * 而非 null——TLM 的 executeToolBatch 经 {@code thenCompose} 串联同一批工具，
+     * 下一环一进入就读取 {@code batchResult.nextCallback()}，null 会让批次中途取消时
+     * 下一个 thenCompose 直接 NPE。断链由 {@link #maid_self_talk$blockToolChainDispatch}
+     * 在最终派发守卫完成，本处只保证「已作废批次的中间合并环不炸、不写历史」。
      */
-    @Inject(method = "lambda$executeSingleToolCall$5", remap = false, at = @At("HEAD"))
-    private void maid_self_talk$blockToolBatchMerge(CallbackInfoReturnable<Object> cir) {
+    @Inject(method = "lambda$executeSingleToolCall$5", remap = false, cancellable = true, at = @At("HEAD"))
+    private void maid_self_talk$blockToolBatchMerge(Object toolCall, Object nextCallback, Object batchResult,
+                                                    boolean isLastTool, Object callback, Object throwable,
+                                                    CallbackInfoReturnable<Object> cir) {
         if ((Object) this instanceof InterChatCallback ic && ic.isCancelled()) {
-            cir.setReturnValue(null);
+            cir.setReturnValue(batchResult);
         }
     }
 
@@ -63,7 +78,7 @@ public abstract class InterChatToolLifecycleMixin {
      * 整批工具结束后的最终派发：作废后不再把 sideCallbacks/nextCallback 交给 {@code client.chat}——
      * 这是工具连环的最后一个出口，拦在这里即断链。
      */
-    @Inject(method = "lambda$onFunctionCall$2", remap = false, at = @At("HEAD"))
+    @Inject(method = "lambda$onFunctionCall$2", remap = false, cancellable = true, at = @At("HEAD"))
     private void maid_self_talk$blockToolChainDispatch(CallbackInfo ci) {
         if ((Object) this instanceof InterChatCallback ic && ic.isCancelled()) {
             ci.cancel();
@@ -74,7 +89,7 @@ public abstract class InterChatToolLifecycleMixin {
      * 等待气泡刷新（两个重载最终都进入本方法）：作废请求的气泡由回调清理时按本轮 id 删除，
      * 此处不再刷新，避免对已作废回调的残留 id 产生任何更新。
      */
-    @Inject(method = "refreshWaitingChatBubble", remap = false, at = @At("HEAD"))
+    @Inject(method = "refreshWaitingChatBubble", remap = false, cancellable = true, at = @At("HEAD"))
     private void maid_self_talk$blockBubbleRefresh(CallbackInfo ci) {
         if ((Object) this instanceof InterChatCallback ic && ic.isCancelled()) {
             ci.cancel();

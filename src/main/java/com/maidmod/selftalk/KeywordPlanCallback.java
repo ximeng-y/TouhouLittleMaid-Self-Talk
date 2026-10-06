@@ -77,6 +77,10 @@ public class KeywordPlanCallback extends LLMCallback {
      */
     @Override
     public void onFunctionCall(Message choice, LLMClient client) {
+        // 工具调用不被视为可交付的规划结果：先向上游报告「本轮规划已完成」（释放 Agent-Tweaks
+        // 对该回调的生命周期记账），再投递格式错误——否则该回调永远不会走到成功/失败终态，
+        // 上游在毫无进展的请求上继续占用 HTTP/重试/deadline/预算
+        AgentTweaksLifecycleBridge.complete(this);
         deliver(Outcome.failure("返回了工具调用，而不是 JSON 对象", "[tool_calls]"));
     }
 
@@ -110,7 +114,13 @@ public class KeywordPlanCallback extends LLMCallback {
      * 上游可能仍在飞行，但迟到结果已无意义，必须被挡在这里，既不写回忆也不驱动纠正。
      */
     public void completeSilently() {
+        if (cancelled) {
+            return;
+        }
         cancelled = true;
+        // 静默作废规划回调：释放 Agent-Tweaks 对本回调追踪的 HTTP/排队/重试/deadline/预算，
+        // 否则被主人插话中断的检索规划请求仍持续占用上游资源，只是返回结果被本地吞掉
+        AgentTweaksLifecycleBridge.cancel(this);
     }
 
     private synchronized void deliver(Outcome outcome) {

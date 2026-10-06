@@ -28,6 +28,11 @@ public final class SelfTalkState {
         return STATES.computeIfAbsent(maidId, id -> new State());
     }
 
+    /** 只读查询：状态条目不存在时不创建（迟到回调清理用，避免为已卸载女仆重建状态） */
+    public static State peek(int maidId) {
+        return STATES.get(maidId);
+    }
+
     public static void remove(int maidId) {
         STATES.remove(maidId);
     }
