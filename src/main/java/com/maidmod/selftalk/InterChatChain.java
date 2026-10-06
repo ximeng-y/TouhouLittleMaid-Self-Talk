@@ -25,7 +25,7 @@ import java.util.Map;
  * 释放只影响后续按 {@code chainId} 的查找，已在途回调持有本对象的直接引用，
  * 因此释放后仍能按中断状态正确判定交付许可。
  * <p>
- * 线程约定：全部访问在服务端主线程。
+ * 线程约定：状态修改在服务端主线程；中断标志允许响应线程读取，用于阻止新的工具批次。
  */
 public final class InterChatChain {
 
@@ -42,8 +42,8 @@ public final class InterChatChain {
     private final int secondMaidId;
     /** 每位参与女仆的链内状态 */
     private final Map<Integer, Participant> participants = new HashMap<>();
-    /** 整条链是否已被主人插话中断（中断后不再续接） */
-    private boolean interrupted;
+    /** 整条链是否已被主人插话中断（响应线程也会检查，中断后不再续接） */
+    private volatile boolean interrupted;
 
     private InterChatChain(long chainId, EntityMaid first, EntityMaid second) {
         this.chainId = chainId;
@@ -131,7 +131,7 @@ public final class InterChatChain {
     }
 
     /**
-     * 释放一条链。
+     * 释放一条链及其配对锁。
      * <p>
      * 只当登记表里该女仆指向的仍是本链时才清除映射：新链可能在旧链释放之前就已建立，
      * 无条件按实体 ID 删除会把新链的活动映射误删。
@@ -149,6 +149,9 @@ public final class InterChatChain {
         if (chain == null) {
             return;
         }
+        // 解锁不依赖正式回调是否存在，规划阶段或顺延阶段结束也必须立即释放本链的锁。
+        SelfTalkDispatcher.unlockMaidForChain(chain.firstMaidId, chainId);
+        SelfTalkDispatcher.unlockMaidForChain(chain.secondMaidId, chainId);
         // 链释放即脱离参与者对请求的持有：回调侧已持有链/请求的直接引用，按自身停止标记继续判定；
         // 不让链内状态长期拖住请求身份（状态表与静态 CURRENT 由请求自身按对象身份解除）
         for (Participant p : chain.participants.values()) {

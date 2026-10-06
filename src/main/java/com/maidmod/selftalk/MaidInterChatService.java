@@ -125,13 +125,14 @@ public final class MaidInterChatService {
         state.interChatPendingSinceTick = maid.level().getServer().getTickCount();
         InterChatCallback callback = new InterChatCallback(chatManager, messages, peer, peerText,
                 broadcastRange, isResponder, chainRound, toolEnabled, chain, request);
+        // 构造器已创建等待气泡：先登记资源，再调用可能同步失败的外部客户端。
+        request.attachFormalCallback(callback);
         try {
             site.client().chat(callback);
             // 正式请求已实际发出：此刻才标记进入正式阶段（关键词规划／建索引阶段不算），
-            // 链上第 3 轮起的交接校验以此为准；回调同时登记进请求身份，作废时可交给 bridge
-            // 静默取消
+            // 链上第 3 轮起的交接校验以此为准；回调资源已在发送前绑定
             chain.markFormalPhase(maid);
-            request.markFormalDispatched(callback);
+            request.markFormalDispatched();
         } catch (Throwable t) {
             // 同步异常：本轮请求从未真正发出，作废身份 + 复位 pending + 释放链，不留悬挂
             state.interChatPending = false;

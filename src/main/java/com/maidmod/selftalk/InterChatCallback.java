@@ -23,7 +23,7 @@ import java.util.UUID;
 /**
  * 互聊专用的 LLM 回调：最终响应的一切副作用统一在服务端主线程执行，并<b>先检查链／请求许可</b>。
  * <p>
- * 本轮请求身份 {@link #request} 在正式派发时经 {@link InterChatRequest#markFormalDispatched} 绑定，
+ * 本轮请求身份 {@link #request} 在发送前经 {@link InterChatRequest#attachFormalCallback} 绑定，
  * 回调与其请求一一对应。主人插话中断后：
  * <ul>
  *   <li>被作废的请求（{@link InterChatRequest#isCancelled()}）：迟到成功/失败任何结果都不产生
@@ -99,6 +99,21 @@ public class InterChatCallback extends LLMCallback {
     @Override
     public void onFunctionCall(Message choice, LLMClient client) {
         if (!isStillAllowed()) {
+            // 被动参与者仍可交付已发出的普通文本，但丢弃工具响应后不会再有成功/失败回调。
+            // 必须主动结束本轮，不能让 pending、等待气泡和上游登记继续等待超时。
+            Runnable finish = () -> {
+                if (request != null) {
+                    request.cancel();
+                } else {
+                    AgentTweaksLifecycleBridge.cancel(this);
+                    cancelLocally();
+                }
+            };
+            if (isOnServerThread()) {
+                finish.run();
+            } else {
+                runOnServerThread(finish);
+            }
             return;
         }
         super.onFunctionCall(choice, client);
