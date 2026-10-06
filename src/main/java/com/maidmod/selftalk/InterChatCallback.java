@@ -252,9 +252,10 @@ public class InterChatCallback extends LLMCallback {
             }
             broadcastToNearby(maid, chatText);
             // 链已中断（含本次为被插话的一方）时不再续接；对方不可用时链终止。
-            // 交付完本次回复即结束链：解锁并释放注册表，不让旧链残留阻塞后续配对
+            // 交付完本次回复即结束链：解锁并释放注册表，不让旧链残留阻塞后续配对。
+            // 回复已实际交付 → 正常终态：向 Agent-Tweaks 上报 complete（normalMaid 传 maid）
             if (chain != null && !chain.canChain()) {
-                endChainAndComplete(null);
+                endChainAndComplete(maid);
                 return;
             }
             if (peer != null && peer.isAlive() && peer.level() instanceof ServerLevel) {
@@ -266,8 +267,8 @@ public class InterChatCallback extends LLMCallback {
                     endChainAndComplete(maid);
                 }
             } else {
-                // 对方不可用（死亡/卸载/非服务端维度）：链终止，解除对锁
-                endChainAndComplete(null);
+                // 对方不可用（死亡/卸载/非服务端维度）：链终止，解除对锁；回复已交付仍算正常终态
+                endChainAndComplete(maid);
             }
         };
         if (isOnServerThread()) {
