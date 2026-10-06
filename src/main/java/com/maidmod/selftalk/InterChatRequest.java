@@ -47,6 +47,8 @@ public final class InterChatRequest {
     private boolean formalDispatched;
     /** 本请求创建并派发的正式回调（作废时交给 bridge 静默取消；用后不持有） */
     private InterChatCallback formalCallback;
+    /** 正常终态收尾是否已执行过（成功/失败收敛后不再重复；与 {@link #terminal} 互斥） */
+    private boolean locallyCompleted;
 
     private InterChatRequest(long chainId, int maidId, InterChatChain chain) {
         this.chainId = chainId;
@@ -138,6 +140,26 @@ public final class InterChatRequest {
         }
     }
 
+    /**
+     * 正常终态本地收尾（幂等）：每轮最终成功/失败（含成功后续接下一轮）时调用，
+     * 按对象身份解除当前请求登记、释放 session 与正式回调引用。
+     * <p>
+     * 与 {@link #cancel()} 相斥：正常走完的请求不得再被后续普通主人聊天当作在途请求取消——
+     * 不解除登记的话，静态 {@code CURRENT} 与 {@code State.currentInterChatRequest} 仍指向
+     * 已结束的请求，经 {@code session} 长期保留本轮历史快照与回调闭包。
+     * <p>
+     * 只结束<b>本轮请求</b>：不释放仍需续接的整条链（链的释放由回调按链状态自行决定）。
+     */
+    void completeLocally() {
+        if (terminal || locallyCompleted) {
+            return;
+        }
+        locallyCompleted = true;
+        session = null;
+        formalCallback = null;
+        clearFromRegistry();
+    }
+
     // ===== 业务作废 =====
 
     /**
@@ -169,8 +191,17 @@ public final class InterChatRequest {
             }
             session = null;
         }
-        if (formalCallback != null) {
-            AgentTweaksLifecycleBridge.cancel(formalCallback);
+        InterChatCallback callback = formalCallback;
+        if (callback != null) {
+            // 静默作废上游（Agent-Tweaks）：取消 HTTP/排队/重试/deadline，迟到结果挡在公共响应调用点。
+            // 契约上它不调用业务回调，因此下面的本地收尾必须同步完成，不能等迟到回调来收敛
+            AgentTweaksLifecycleBridge.cancel(callback);
+            try {
+                callback.cancelLocally();
+            } catch (Throwable t) {
+                MaidSelfTalkMod.LOGGER.warn("Failed to locally clean up inter-chat request for maid {} chain {}",
+                        maidId, chainId, t);
+            }
             formalCallback = null;
         }
         clearFromRegistry();
