@@ -1,7 +1,5 @@
 package com.maidmod.selftalk;
 
-import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
-
 /**
  * 某只女仆在一条互聊链上的一次<b>发言请求</b>的运行时身份（每轮每个参与者一个，
  * 仅存在于服务端内存，不持久化）。
@@ -43,9 +41,9 @@ public final class InterChatRequest {
     private volatile boolean cancelled;
     /** 作废/终态是否已收敛过（防迟到回调重复触发清理：只收敛一次） */
     private boolean terminal;
-    /** 是否已派发过一次正式请求（规划阶段为 false；作废清理据此决定要不要清理正式回调） */
+    /** 是否已派发过一次正式请求（规划阶段及同步发送失败时为 false） */
     private boolean formalDispatched;
-    /** 本请求创建并派发的正式回调（作废时交给 bridge 静默取消；用后不持有） */
+    /** 正式回调创建后立即绑定，发送前也可能持有等待气泡等需要清理的资源 */
     private InterChatCallback formalCallback;
     /** 正常终态收尾是否已执行过（成功/失败收敛后不再重复；与 {@link #terminal} 互斥） */
     private boolean locallyCompleted;
@@ -110,7 +108,7 @@ public final class InterChatRequest {
         return cancelled;
     }
 
-    /** 是否已派发过正式请求（规划阶段为 false；作废清理据此决定要不要清理正式回调） */
+    /** 是否已派发过正式请求（不等同于是否已创建回调） */
     boolean isFormalDispatched() {
         return formalDispatched;
     }
@@ -120,9 +118,16 @@ public final class InterChatRequest {
         this.session = session;
     }
 
-    /** 正式请求派发完成后登记（回调创建后立即调用，为随后作废时能取到回调做准备） */
-    void markFormalDispatched(InterChatCallback callback) {
+    /** 发送前绑定回调资源，保证同步发送失败时也能收起等待气泡 */
+    void attachFormalCallback(InterChatCallback callback) {
         this.formalCallback = callback;
+    }
+
+    /** 发送成功后推进阶段；同步回调已结束本轮时不再恢复在途状态 */
+    void markFormalDispatched() {
+        if (terminal || locallyCompleted) {
+            return;
+        }
         this.formalDispatched = true;
     }
 
@@ -173,8 +178,8 @@ public final class InterChatRequest {
      *       迟到成功/失败被挡在公共响应调用点；</li>
      *   <li>按对象身份解除本女仆的当前请求登记（旧轮不能清掉新轮登记）。</li>
      * </ul>
-     * 链的解锁、释放与对锁解除不在本方法内：由业务作废的调用方（插话中断、超时、移除、链终结）
-     * 在各自路径上完成，与「先作废、后收尾」的顺序保持一致。
+     * 无论是否已创建正式回调，最后都会释放本链及其配对锁；锁的释放按链身份校验，
+     * 不影响后来建立的新链。
      */
     public void cancel() {
         if (terminal) {
@@ -204,6 +209,7 @@ public final class InterChatRequest {
             }
             formalCallback = null;
         }
+        InterChatChain.releaseById(chainId);
         clearFromRegistry();
     }
 
@@ -213,8 +219,8 @@ public final class InterChatRequest {
             CURRENT.remove(maidId);
         }
         // 状态表同口径解除：只清掉仍指向本请求的条目，旧轮不能误清新轮
-        SelfTalkState.State state = SelfTalkState.get(maidId);
-        if (state.currentInterChatRequest == this) {
+        SelfTalkState.State state = SelfTalkState.peek(maidId);
+        if (state != null && state.currentInterChatRequest == this) {
             state.currentInterChatRequest = null;
         }
     }

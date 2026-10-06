@@ -209,11 +209,13 @@ public final class SelfTalkDispatcher {
                     ok = MaidInterChatService.triggerResponder(maid, req.peer(), req.peerText(),
                             req.broadcastRange(), req.chainRound(), chain);
                 }
+                // 同步发送失败/同步失败回调可能已释放链，不能在返回后重新挂上孤立的配对锁。
+                ok = ok && InterChatChain.of(req.chainId()) == chain;
                 if (ok) {
                     lockPair(maid, req.peer(), maid.level().getServer().getTickCount(), chain.id());
                 } else {
                     // 派发失败（AI 中途失效等）：链已断，解除本对旧锁并释放链
-                    unlockPair(maid, req.peer());
+                    unlockPairIfPaired(maid, req.peer(), nowTick, req.chainId());
                     InterChatChain.release(chain);
                 }
                 return ok;
@@ -292,6 +294,16 @@ public final class SelfTalkDispatcher {
                 && peerPartner != null && peerPartner.equals(maid.getId())
                 && (expectedChainId == 0 || (heldChain != null && heldChain == expectedChainId))) {
             unlockPair(maid, peer);
+        }
+    }
+
+    /** 仅清除仍归属本链的单个成员锁；链释放时对双方各调用一次，不依赖实体或正式回调 */
+    static void unlockMaidForChain(int maidId, long expectedChainId) {
+        Long heldChain = INTER_CHAT_PAIR_CHAIN.get(maidId);
+        if (expectedChainId != 0 && heldChain != null && heldChain == expectedChainId) {
+            INTER_CHAT_LOCK_UNTIL.remove(maidId);
+            INTER_CHAT_PAIR_PARTNER.remove(maidId);
+            INTER_CHAT_PAIR_CHAIN.remove(maidId);
         }
     }
 

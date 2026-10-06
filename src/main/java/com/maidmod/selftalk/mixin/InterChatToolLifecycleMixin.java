@@ -1,9 +1,12 @@
 package com.maidmod.selftalk.mixin;
 
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.openai.response.ToolCall;
 import com.maidmod.selftalk.InterChatCallback;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Coerce;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -32,11 +35,8 @@ import java.util.concurrent.CompletableFuture;
  * {@code setReturnValue(...)}，未声明可取消会导致 Mixin 生成的 CallbackInfo 不可取消，
  * 第一次命中就抛 {@code CancellationException} 而不是按预期短路。
  * <p>
- * 目标方法的参数类型（{@code ToolCall}、{@code LLMCallback}、{@code ToolBatchResult}）在 TLM
- * 中都是<b>包私有或嵌套类型</b>，本 mixin 与它们不同包，不能直接作为 handler 参数类型（会生成
- * 非法描述符导致 APPLY 失败）。因此 handler 声明为 {@code Object} 参数、运行时判定（与既有
- * {@code MaidAIChatManagerMixin} 的 {@code (Object) this} 手法一致）；Mixin 按<b>目标方法参数个数</b>
- * 绑定到完整签名，不校验参数类型。
+ * Mixin 会校验 handler 的参数类型与顺序；可访问类型直接使用目标方法的实际类型，
+ * 仅私有嵌套类型 {@code LLMCallback.ToolBatchResult} 使用 {@code @Coerce Object} 接收并原样返回。
  * <p>
  * 目标方法均为 {@code LLMCallback} 的实例方法（private lambda 亦同），handler 同为实例方法，
  * 与双线既有 mixin 约定一致。
@@ -47,14 +47,13 @@ public abstract class InterChatToolLifecycleMixin {
     /**
      * 单个工具执行入口：请求作废后不再真正执行工具（也就不会刷新气泡、不会产生后续异步链）。
      * 直接返回「已完成的 nextCallback」——与 TLM 未执行工具的返回形状一致，
-     * {@code lambda$executeSingleToolCall$5} 的 {@code returned == nextCallback} 分支原样收束
-     * （该分支提前返回原 batchResult，批循环自然终止，绝不 NPE）。
+     * 合并阶段保留原 batchResult，批次中的后续工具仍由本入口逐个跳过。
      */
     @Inject(method = "onSingleCall", remap = false, cancellable = true, at = @At("HEAD"))
-    private void maid_self_talk$blockSingleToolCall(Object toolCall, Object callback, Object client,
+    private void maid_self_talk$blockSingleToolCall(ToolCall toolCall, LLMCallback callback, LLMClient client,
                                                     CallbackInfoReturnable<CompletableFuture<LLMCallback>> cir) {
         if ((Object) this instanceof InterChatCallback ic && ic.isCancelled()) {
-            cir.setReturnValue(CompletableFuture.completedFuture((LLMCallback) callback));
+            cir.setReturnValue(CompletableFuture.completedFuture(callback));
         }
     }
 
@@ -66,8 +65,8 @@ public abstract class InterChatToolLifecycleMixin {
      * 在最终派发守卫完成，本处只保证「已作废批次的中间合并环不炸、不写历史」。
      */
     @Inject(method = "lambda$executeSingleToolCall$5", remap = false, cancellable = true, at = @At("HEAD"))
-    private void maid_self_talk$blockToolBatchMerge(Object toolCall, Object nextCallback, Object batchResult,
-                                                    boolean isLastTool, Object callback, Object throwable,
+    private void maid_self_talk$blockToolBatchMerge(ToolCall toolCall, LLMCallback nextCallback, @Coerce Object batchResult,
+                                                    boolean isLastTool, LLMCallback callback, Throwable throwable,
                                                     CallbackInfoReturnable<Object> cir) {
         if ((Object) this instanceof InterChatCallback ic && ic.isCancelled()) {
             cir.setReturnValue(batchResult);
