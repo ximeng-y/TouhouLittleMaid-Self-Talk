@@ -29,6 +29,8 @@ public final class SelfTalkDispatcher {
     private static final Map<Integer, Long> INTER_CHAT_LOCK_UNTIL = Maps.newHashMap();
     /** 互聊对锁的配对关系：女仆实体 ID -> 对方实体 ID（用于死亡/卸载时对称释放） */
     private static final Map<Integer, Integer> INTER_CHAT_PAIR_PARTNER = Maps.newHashMap();
+    /** 互聊对锁所属的链：女仆实体 ID -> chainId（迟到回调只能解除仍归属本链的对锁） */
+    private static final Map<Integer, Long> INTER_CHAT_PAIR_CHAIN = Maps.newHashMap();
 
     private SelfTalkDispatcher() {
     }
@@ -170,12 +172,12 @@ public final class SelfTalkDispatcher {
                 // 已中断／已漂移的链在此统一释放注册表，不残留 CHAINS/ACTIVE_BY_MAID 阻塞后续配对
                 InterChatChain chain = InterChatChain.of(req.chainId());
                 if (chain == null || chain.interrupted() || !chain.matches(maid, req.peer())) {
-                    unlockPairIfPaired(maid, req.peer(), nowTick);
+                    unlockPairIfPaired(maid, req.peer(), nowTick, req.chainId());
                     InterChatChain.release(chain);
                     return false;
                 }
                 if (req.peer() == null || !req.peer().isAlive()) {
-                    unlockPairIfPaired(maid, req.peer(), nowTick);
+                    unlockPairIfPaired(maid, req.peer(), nowTick, req.chainId());
                     InterChatChain.release(chain);
                     return false;
                 }
@@ -191,7 +193,7 @@ public final class SelfTalkDispatcher {
                         || (peerPartner != null && !peerPartner.equals(maid.getId()))) {
                     // 仅当双方当前仍互为配对才解锁:漂移后旧链对锁已被新链 lockPair 前置清理,
                     // 无条件 unlockPair 会误拆第三方在途新链(不能触碰不属于本对的锁)
-                    unlockPairIfPaired(maid, req.peer(), nowTick);
+                    unlockPairIfPaired(maid, req.peer(), nowTick, req.chainId());
                     InterChatChain.release(chain);
                     return false;
                 }
@@ -207,11 +209,13 @@ public final class SelfTalkDispatcher {
                     ok = MaidInterChatService.triggerResponder(maid, req.peer(), req.peerText(),
                             req.broadcastRange(), req.chainRound(), chain);
                 }
+                // 同步发送失败/同步失败回调可能已释放链，不能在返回后重新挂上孤立的配对锁。
+                ok = ok && InterChatChain.of(req.chainId()) == chain;
                 if (ok) {
-                    lockPair(maid, req.peer(), maid.level().getServer().getTickCount());
+                    lockPair(maid, req.peer(), maid.level().getServer().getTickCount(), chain.id());
                 } else {
                     // 派发失败（AI 中途失效等）：链已断，解除本对旧锁并释放链
-                    unlockPair(maid, req.peer());
+                    unlockPairIfPaired(maid, req.peer(), nowTick, req.chainId());
                     InterChatChain.release(chain);
                 }
                 return ok;
@@ -224,8 +228,9 @@ public final class SelfTalkDispatcher {
 
     // ===== 互聊对锁 =====
 
-    /** 锁定一对女仆的互聊（发起者首次派发与链上每跳续接都调用，持续顺延/延长锁定时长） */
-    public static void lockPair(EntityMaid a, EntityMaid b, long nowTick) {
+    /** 锁定一对女仆的互聊（发起者首次派发与链上每跳续接都调用，持续顺延/延长锁定时长）。
+     * 携带本链的 chainId：迟到回调/陈旧请求只能解除仍归属本链的对锁，不能误拆新链的对锁 */
+    public static void lockPair(EntityMaid a, EntityMaid b, long nowTick, long chainId) {
         clearPairFor(a.getId());
         clearPairFor(b.getId());
         long until = nowTick + Config.INTER_CHAT_PAIR_LOCK_SECONDS.get() * 20L;
@@ -233,6 +238,8 @@ public final class SelfTalkDispatcher {
         INTER_CHAT_LOCK_UNTIL.put(b.getId(), until);
         INTER_CHAT_PAIR_PARTNER.put(a.getId(), b.getId());
         INTER_CHAT_PAIR_PARTNER.put(b.getId(), a.getId());
+        INTER_CHAT_PAIR_CHAIN.put(a.getId(), chainId);
+        INTER_CHAT_PAIR_CHAIN.put(b.getId(), chainId);
     }
 
     /** 解除一对女仆的互聊锁（链自然结束/请求失败时调用） */
@@ -270,19 +277,33 @@ public final class SelfTalkDispatcher {
     }
 
     /**
-     * 仅当双方当前仍互为配对时才解除对锁（陈旧请求/迟到回调的失败路径：
+     * 仅当双方当前仍互为配对<b>且该配对仍归属期望的链</b>时才解除对锁（陈旧请求/迟到回调的失败路径：
      * 漂移后的新链锁不得触碰——无条件按当前配对清除会误拆第三方在途新链）。
      * 无配对对象可校验时不动任何锁（残留由 onMaidRemoved 或锁超时兜底）。
+     *
+     * @param expectedChainId 调用方期望的链 ID；0 表示不校验（无条件按配对解除）
      */
-    static void unlockPairIfPaired(EntityMaid maid, EntityMaid peer, long nowTick) {
+    static void unlockPairIfPaired(EntityMaid maid, EntityMaid peer, long nowTick, long expectedChainId) {
         if (peer == null) {
             return;
         }
         Integer maidPartner = currentPairPartner(maid, nowTick);
         Integer peerPartner = currentPairPartner(peer, nowTick);
+        Long heldChain = INTER_CHAT_PAIR_CHAIN.get(maid.getId());
         if (maidPartner != null && maidPartner.equals(peer.getId())
-                && peerPartner != null && peerPartner.equals(maid.getId())) {
+                && peerPartner != null && peerPartner.equals(maid.getId())
+                && (expectedChainId == 0 || (heldChain != null && heldChain == expectedChainId))) {
             unlockPair(maid, peer);
+        }
+    }
+
+    /** 仅清除仍归属本链的单个成员锁；链释放时对双方各调用一次，不依赖实体或正式回调 */
+    static void unlockMaidForChain(int maidId, long expectedChainId) {
+        Long heldChain = INTER_CHAT_PAIR_CHAIN.get(maidId);
+        if (expectedChainId != 0 && heldChain != null && heldChain == expectedChainId) {
+            INTER_CHAT_LOCK_UNTIL.remove(maidId);
+            INTER_CHAT_PAIR_PARTNER.remove(maidId);
+            INTER_CHAT_PAIR_CHAIN.remove(maidId);
         }
     }
 
@@ -298,9 +319,11 @@ public final class SelfTalkDispatcher {
     private static void clearPairFor(int maidId) {
         Integer partner = INTER_CHAT_PAIR_PARTNER.remove(maidId);
         INTER_CHAT_LOCK_UNTIL.remove(maidId);
+        INTER_CHAT_PAIR_CHAIN.remove(maidId);
         if (partner != null && Integer.valueOf(maidId).equals(INTER_CHAT_PAIR_PARTNER.get(partner))) {
             INTER_CHAT_LOCK_UNTIL.remove(partner);
             INTER_CHAT_PAIR_PARTNER.remove(partner);
+            INTER_CHAT_PAIR_CHAIN.remove(partner);
         }
     }
 }

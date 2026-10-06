@@ -6,7 +6,7 @@
   "refmap": "maid_self_talk.refmap.json",
   "mixins": ["MaidAIChatManagerAccessor", "MaidAIChatManagerMixin", "LLMCallbackMixin",
     "EntityMaidProvenanceMixin", "HistorySummaryManagerAccessor", "HistorySummaryManagerMixin", "MaidAIChatDataMixin",
-    "GameContextRegisterAccessor"],
+    "GameContextRegisterAccessor", "InterChatToolLifecycleMixin"],
   "client": ["AIChatScreenMixin"],
   "injectors": { "defaultRequire": 1 }
 }
