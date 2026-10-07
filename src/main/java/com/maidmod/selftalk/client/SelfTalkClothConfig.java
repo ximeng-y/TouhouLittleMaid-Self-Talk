@@ -27,7 +27,11 @@ public final class SelfTalkClothConfig {
 
         SubCategoryBuilder main = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.title"))
-                .setExpanded(true);
+                .setExpanded(true)
+                .setTooltip(Component.translatable("config.maid_self_talk.title.tooltip"));
+        // 首位放一行常驻说明：默认值即可用，不必逐项改（子分类展开即可看到，不用悬停）
+        main.add(0, entryBuilder.startTextDescription(
+                Component.translatable("config.maid_self_talk.title.description")).build());
         main.add(entryBuilder.startBooleanToggle(Component.translatable("config.maid_self_talk.enabled"),
                         Config.ENABLED.get())
                 .setDefaultValue(false)
@@ -58,7 +62,8 @@ public final class SelfTalkClothConfig {
 
         SubCategoryBuilder welcome = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.welcome"))
-                .setExpanded(false);
+                .setExpanded(false)
+                .setTooltip(Component.translatable("config.maid_self_talk.welcome.tooltip"));
         welcome.add(entryBuilder.startBooleanToggle(
                         Component.translatable("config.maid_self_talk.welcome.enabled"),
                         Config.WELCOME_ENABLED.get())
@@ -77,7 +82,8 @@ public final class SelfTalkClothConfig {
 
         SubCategoryBuilder prompt = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.prompt"))
-                .setExpanded(false);
+                .setExpanded(false)
+                .setTooltip(Component.translatable("config.maid_self_talk.prompt.tooltip"));
         prompt.add(entryBuilder.startStrField(
                         Component.translatable("config.maid_self_talk.prompt.language"),
                         Config.SELF_TALK_LANGUAGE.get())
@@ -89,7 +95,8 @@ public final class SelfTalkClothConfig {
 
         SubCategoryBuilder interChat = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.inter_chat"))
-                .setExpanded(false);
+                .setExpanded(false)
+                .setTooltip(Component.translatable("config.maid_self_talk.inter_chat.tooltip"));
         interChat.add(entryBuilder.startBooleanToggle(Component.translatable("config.maid_self_talk.inter_chat.enabled"),
                         Config.INTER_CHAT_ENABLED.get())
                 .setDefaultValue(false)
@@ -147,7 +154,8 @@ public final class SelfTalkClothConfig {
 
         SubCategoryBuilder eventContext = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.event_context"))
-                .setExpanded(false);
+                .setExpanded(false)
+                .setTooltip(Component.translatable("config.maid_self_talk.event_context.tooltip"));
         eventContext.add(entryBuilder.startBooleanToggle(Component.translatable("config.maid_self_talk.event_context.enabled"),
                         Config.EVENT_CONTEXT_ENABLED.get())
                 .setDefaultValue(true)
@@ -190,7 +198,8 @@ public final class SelfTalkClothConfig {
 
         SubCategoryBuilder maidIdentity = entryBuilder.startSubCategory(
                         Component.translatable("config.maid_self_talk.maid_identity"))
-                .setExpanded(false);
+                .setExpanded(false)
+                .setTooltip(Component.translatable("config.maid_self_talk.maid_identity.tooltip"));
         maidIdentity.add(entryBuilder.startBooleanToggle(
                         Component.translatable("config.maid_self_talk.maid_identity.enabled"),
                         Config.MAID_IDENTITY_ENABLED.get())
@@ -219,7 +228,8 @@ public final class SelfTalkClothConfig {
                                                     int defaultMin, int defaultMax,
                                                     double defaultRange, int defaultKeep) {
         SubCategoryBuilder builder = entryBuilder.startSubCategory(Component.translatable(key))
-                .setExpanded(false);
+                .setExpanded(false)
+                .setTooltip(Component.translatable(key + ".tooltip"));
         builder.add(entryBuilder.startBooleanToggle(Component.translatable(key + ".enabled"),
                         enabled.get())
                 .setDefaultValue(true)
