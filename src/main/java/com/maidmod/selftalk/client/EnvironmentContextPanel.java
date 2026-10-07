@@ -15,6 +15,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -514,6 +515,23 @@ public final class EnvironmentContextPanel {
         return "config.maid_self_talk.screen.player_settings.context.close";
     }
 
+    /**
+     * 可点行的悬停说明键：四项环境事件／状态各有专属说明，其余行共用三态通用说明。
+     * <p>
+     * 其余 28 行的名称本身已是自然语言（「女仆主手物品」……），逐条写描述只会变成 28 条冗余文案。
+     */
+    private static String rowTooltipKey(EnvironmentContextOption option) {
+        String key = switch (option.key()) {
+            case EnvironmentContextOption.KEY_IDENTITY -> "identity";
+            case EnvironmentContextOption.KEY_DEATHS -> "deaths";
+            case EnvironmentContextOption.KEY_PLAYER_HURT -> "player_hurt";
+            case EnvironmentContextOption.KEY_SELF_HURT -> "self_hurt";
+            default -> null;
+        };
+        return "config.maid_self_talk.screen.player_settings.context.row."
+                + (key == null ? "mode" : key);
+    }
+
     private static String modeKey(EnvironmentContextMode mode) {
         return "config.maid_self_talk.screen.player_settings.context.mode." + mode.id();
     }
@@ -587,11 +605,14 @@ public final class EnvironmentContextPanel {
             String reason = disabledReasonKey(option);
             if (reason != null) {
                 graphics.renderTooltip(font, wrap(reason), mouseX, mouseY);
-            } else if (nameTruncated(option)) {
-                // 名称省略号截断时，悬停给出完整自然语言名称
-                graphics.renderTooltip(font,
-                        font.split(Component.translatable(nameKey(option)), Math.min(260, panelWidth - 40)),
-                        mouseX, mouseY);
+            } else {
+                // 可点行：三态说明（或该行的专属说明）+ 名称被截断时的完整名称，合成一个多行 tooltip。
+                // 走 wrap 按面板宽度硬换行，说明文案可长可短，不必在译文里写死换行
+                List<FormattedCharSequence> lines = new ArrayList<>(wrap(rowTooltipKey(option)));
+                if (nameTruncated(option)) {
+                    lines.addAll(wrap(nameKey(option)));
+                }
+                graphics.renderTooltip(font, lines, mouseX, mouseY);
             }
         }
     }
@@ -710,7 +731,7 @@ public final class EnvironmentContextPanel {
     }
 
     /** tooltip 文本按面板宽度硬换行（本 mod 的禁用说明都比较长） */
-    private List<net.minecraft.util.FormattedCharSequence> wrap(String key) {
+    private List<FormattedCharSequence> wrap(String key) {
         return font.split(Component.translatable(key), Math.min(260, panelWidth - 40));
     }
 
