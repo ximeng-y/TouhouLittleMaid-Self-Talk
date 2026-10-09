@@ -4,6 +4,7 @@ import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.google.common.collect.Maps;
 
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 自话/互聊派发闸门：唯一入口负责「立即派发 / 顺延入队 / 吞请求」，
@@ -40,7 +41,7 @@ public final class SelfTalkDispatcher {
     /** 自话派发请求：空闲立即派发，忙则顺延，冲突/满则吞（欢迎语为一次性、不走本闸门，见 SelfTalkHandler） */
     public static void requestSelfTalk(EntityMaid maid, int keep, double broadcastRange) {
         submit(maid, new SelfTalkState.DeferredRequest(
-                SelfTalkState.RequestKind.SELF_TALK, null, null, keep, broadcastRange, 0, 0));
+                SelfTalkState.RequestKind.SELF_TALK, null, null, null, keep, broadcastRange, 0, 0));
     }
 
     /**
@@ -53,20 +54,24 @@ public final class SelfTalkDispatcher {
     public static void requestInterChatInitiator(EntityMaid initiator, EntityMaid responder, double broadcastRange) {
         InterChatChain chain = InterChatChain.create(initiator, responder);
         boolean accepted = submit(initiator, new SelfTalkState.DeferredRequest(
-                SelfTalkState.RequestKind.INTER_CHAT_INITIATOR, responder, null, 0, broadcastRange, 1,
+                SelfTalkState.RequestKind.INTER_CHAT_INITIATOR, responder, null, null, 0, broadcastRange, 1,
                 chain.id()));
         if (!accepted) {
             InterChatChain.release(chain);
         }
     }
 
-    /** 互聊回答者（链式续接）派发请求：沿用本链的 chainId */
+    /**
+     * 互聊回答者（链式续接）派发请求：沿用本链的 chainId。
+     *
+     * @param peerMessageId 需要回应的对方发言的消息身份（稳定 UUID，贯穿到回调与归档）
+     */
     public static void requestInterChatResponder(EntityMaid responder, EntityMaid initiator,
-                                                 String peerText, double broadcastRange, int chainRound,
-                                                 long chainId) {
+                                                 UUID peerMessageId, String peerText, double broadcastRange,
+                                                 int chainRound, long chainId) {
         submit(responder, new SelfTalkState.DeferredRequest(
-                SelfTalkState.RequestKind.INTER_CHAT_RESPONDER, initiator, peerText, 0, broadcastRange,
-                chainRound, chainId));
+                SelfTalkState.RequestKind.INTER_CHAT_RESPONDER, initiator, peerMessageId, peerText, 0,
+                broadcastRange, chainRound, chainId));
     }
 
     // ===== 入队与派发 =====
@@ -206,8 +211,8 @@ public final class SelfTalkDispatcher {
                 if (req.kind() == SelfTalkState.RequestKind.INTER_CHAT_INITIATOR) {
                     ok = MaidInterChatService.triggerInitiator(maid, req.peer(), req.broadcastRange(), chain);
                 } else {
-                    ok = MaidInterChatService.triggerResponder(maid, req.peer(), req.peerText(),
-                            req.broadcastRange(), req.chainRound(), chain);
+                    ok = MaidInterChatService.triggerResponder(maid, req.peer(), req.peerMessageId(),
+                            req.peerText(), req.broadcastRange(), req.chainRound(), chain);
                 }
                 // 同步发送失败/同步失败回调可能已释放链，不能在返回后重新挂上孤立的配对锁。
                 ok = ok && InterChatChain.of(req.chainId()) == chain;

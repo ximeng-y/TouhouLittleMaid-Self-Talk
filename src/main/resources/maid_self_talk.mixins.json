@@ -7,6 +7,6 @@
   "mixins": ["MaidAIChatManagerAccessor", "MaidAIChatManagerMixin", "LLMCallbackMixin",
     "EntityMaidProvenanceMixin", "HistorySummaryManagerAccessor", "HistorySummaryManagerMixin", "MaidAIChatDataMixin",
     "GameContextRegisterAccessor", "InterChatToolLifecycleMixin"],
-  "client": ["AIChatScreenMixin"],
+  "client": ["AIChatScreenMixin", "HistoryAIChatScreenMixin"],
   "injectors": { "defaultRequire": 1 }
 }

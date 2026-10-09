@@ -5,7 +5,6 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatMana
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.response.ResponseChat;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
-import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.openai.response.Message;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.ChatFormatting;
@@ -16,13 +15,11 @@ import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.MinecraftForge;
 
 import java.net.http.HttpRequest;
-import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * 自言自语专用的 LLM 回调。
+ * 自言自语／欢迎语专用的 LLM 回调。
  * <p>
  * 与玩家 chat 的裸 {@link LLMCallback} 的区别：
  * <ul>
@@ -32,6 +29,9 @@ import java.util.UUID;
  *   <li>{@code shouldCacheTokenUsage} 保持默认 {@code true}：自话会更新女仆的 lastChatTokenUsage，
  *       从而占用上下文压缩额度——但压缩只在玩家 chat 时触发（tryCompressBeforeChat 仅由 chat() 调用），
  *       因此自话即使撑大上下文也不会立即触发压缩；</li>
+ *   <li><b>历史归属</b>：本轮回合与工具过程都不写入 TLM 历史（由 {@code LLMCallbackMixin} 与
+ *       {@code InterChatToolLifecycleMixin} 的窄范围重定向跳过写入），有效回复在服务端主线程
+ *       直接构造独立记录进档案；TLM 的空白判定、TTS、气泡、主人聊天栏输出与错误处理全部保留；</li>
  *   <li>onSuccess 后广播 {@link MaidChatReplyEvent} 并执行遗忘检查。</li>
  * </ul>
  * <p>
@@ -45,77 +45,55 @@ public class SelfTalkCallback extends LLMCallback {
     private final int keepSelfTalkCount;
     /** 聊天框广播半径（格）：范围内存活玩家可见自话内容 */
     private final double broadcastRange;
-    /** 本次回复的 assistant 消息（响应线程在父类写历史后立即捕获，供遗忘机制识别） */
-    private LLMMessage lastAssistantMessage;
     /**
-     * 本轮工具过程写入 TLM 历史的消息引用（assistant(tool_calls) 与 tool 结果）。
-     * 响应线程写、主线程删（deque 为 LinkedBlockingDeque，跨线程安全）；
-     * 最终回答后成对全删——「本轮工具相关的全删」天然保证配对，绝不留下孤立的
-     * assistant(tool_calls) 或 tool（孤立记录会让后续请求被 LLM 服务端 400 拒绝）。
-     * <p>
-     * 已知边界：TLM 的第三方 sub-agent 工具（EXTENSIONS.registerAITool 返回异体回调时）
-     * 在 {@code LLMCallback.executeSingleToolCall} 内直接 addToolHistory 占位结果，
-     * 不经过本类的 addToolResult 覆盖——该占位 tool 消息不会被捕获/删除，心跳也不刷新
-     * （TLM 自带 7 个工具全部经 addToolResult 返回同体回调，不触发此路径）。
-     * 残留记录天然构成完整 tool_calls+tool 对，无 400 风险；pending 由 5 分钟超时兜底复位。
+     * 本次请求的清空世代令牌：手动清空后失效——迟到结果不写档案、不进有效上下文、
+     * 不发事件、不广播，只清自己的资源；pending 复位也不得误清新请求的状态。
      */
-    private final List<LLMMessage> toolHistoryMessages = new ArrayList<>();
+    private final SelfTalkRequestToken token;
 
     public SelfTalkCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
-                            boolean welcome, int keepSelfTalkCount, double broadcastRange, boolean toolEnabled) {
+                            boolean welcome, int keepSelfTalkCount, double broadcastRange, boolean toolEnabled,
+                            SelfTalkRequestToken token) {
         super(chatManager, messages);
         this.welcome = welcome;
         this.keepSelfTalkCount = keepSelfTalkCount;
         this.broadcastRange = broadcastRange;
+        this.token = token;
         // Tool 关闭时模型看不到工具定义；开启时由 TLM 工具循环接管
         this.needAddTools = toolEnabled;
     }
 
+    /** 本次请求是否已被清空作废（供工具异步入口在响应线程做失效判定） */
+    public boolean isRequestInvalidated() {
+        return token != null && !token.isValid();
+    }
+
     /**
-     * 工具轮次：父类写 assistant(tool_calls) 历史后捕获队头引用，供最终回答后成对删除。
-     * CappedQueue 新消息在队头（offerFirst）。
+     * 工具轮次：不再捕获历史队头——本轮回合与工具过程都不写入 TLM 历史，
+     * 由 {@code InterChatToolLifecycleMixin} 的重定向在写入点跳过。
      */
     @Override
     public void onFunctionCall(Message choice, LLMClient client) {
         super.onFunctionCall(choice, client);
-        captureToolHistoryHead(Role.ASSISTANT);
     }
 
     /**
-     * 工具结果：父类写 tool 历史后捕获队头引用，并刷新 pending 心跳
+     * 工具结果：父类照常把结果并入本轮请求；这里只刷新 pending 心跳
      * （语义从「请求发起后 5 分钟超时」变为「最后一次工具活动后 5 分钟超时」，
      * 防止 16 轮工具链被 SelfTalkHandler 的超时兜底误判空闲而并发派发第二个请求）。
      */
     @Override
     public LLMCallback addToolResult(String result, String toolId) {
         LLMCallback cb = super.addToolResult(result, toolId);
-        captureToolHistoryHead(Role.TOOL);
         refreshPendingHeartbeat();
         return cb;
-    }
-
-    /** 捕获刚写入历史的工具相关消息（队头 + role 校验，防交错抓取） */
-    private void captureToolHistoryHead(Role expected) {
-        LLMMessage head = getChatManager().getHistory().getDeque().peekFirst();
-        if (head != null && head.role() == expected) {
-            toolHistoryMessages.add(head);
-        }
-    }
-
-    /** 最终回答（或失败）后删除本轮全部工具过程消息；删完历史等价于「没发生过」，前缀缓存不受损 */
-    private void discardToolHistory() {
-        if (toolHistoryMessages.isEmpty()) {
-            return;
-        }
-        getChatManager().getHistory().getDeque().removeAll(toolHistoryMessages);
-        toolHistoryMessages.clear();
     }
 
     /** 工具轮次心跳：刷新 pending 起始 tick（须在服务端主线程写状态） */
     private void refreshPendingHeartbeat() {
         Runnable beat = () -> {
-            SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
-            if (state.selfTalkPending) {
+            SelfTalkState.State state = SelfTalkState.peek(getMaid().getId());
+            if (state != null && state.selfTalkPending && isRequestOwner(state)) {
                 state.selfTalkPendingSinceTick = getMaid().level().getServer().getTickCount();
             }
         };
@@ -126,68 +104,78 @@ public class SelfTalkCallback extends LLMCallback {
         }
     }
 
+    /**
+     * 本回调是否仍是状态表上「当前」的自话请求。
+     * <p>
+     * 用不创建状态的查询并核对请求身份：被清空作废的旧回调不得经 {@code get()} 重建状态条目，
+     * 也不得刷新清空之后新请求的心跳。
+     */
+    private boolean isRequestOwner(SelfTalkState.State state) {
+        return state.currentSelfTalkCallback == this;
+    }
+
     @Override
     public void onSuccess(ResponseChat responseChat) {
-        // TLM 默认行为：写 assistant 历史（供聊天记录 UI 显示）、显示气泡并给主人发送聊天栏消息
+        // TLM 默认行为：显示气泡并给主人发送聊天栏消息（历史写入已被重定向跳过）、空白回复转 onFailure
         super.onSuccess(responseChat);
-        // 捕获本次写入历史的 assistant 消息：三重校验（队头 + role + 内容）防并发响应线程交错抓取。
-        // 父类对空白回复内部转调 onFailure 不写历史，队头为旧消息/null，校验不通过返回 null。
-        this.lastAssistantMessage = captureLatestAssistantMessage(responseChat);
-        // 登记自话指纹（与历史写入同线程紧邻，供 wrap 区分自话/主人段；
-        // 先登记后判空：新老窗口消息都可能随后被 trim，指纹随消息同生同灭）
-        SelfTalkProvenance.registerSelfTalk(getMaid(), this.lastAssistantMessage);
-        if (this.lastAssistantMessage == null) {
-            // 无消息可捕获（空白回复）或校验未过（罕见交错）：
-            // 跳过事件/遗忘/广播，复位 pending 防卡死；工具过程同样丢弃（可能留有半截记录）
-            runOnServerThread(() -> {
-                discardToolHistory();
-                SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
-                state.selfTalkPending = false;
-                state.selfTalkPendingSinceTick = -1;
-            });
+        // 父类对空白回复内部转调 onFailure（本类重写已复位 pending 并沉默），此处直接收敛
+        if (responseChat.getChatText() == null || responseChat.getChatText().isBlank()) {
             return;
         }
         EntityMaid maid = getMaid();
+        // 上下文消息沿用原 ResponseChat.toString()：聊天／TTS 两段内容的既有形式不变，
+        // 与玩家 chat 路径写入 TLM 历史的形态一致，模型侧契约无变化
+        String contextMessage = responseChat.toString();
+        String chatText = responseChat.getChatText();
         Runnable finish = () -> {
-            // 工具过程从历史里全部丢掉（成对删除，先于遗忘 trim 执行）
-            discardToolHistory();
-            MinecraftForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, responseChat.getChatText(), welcome));
-            MaidSelfTalkService.onSelfTalkFinished(maid, this);
-            broadcastToNearby(maid, responseChat.getChatText());
+            if (isRequestInvalidated()) {
+                // 清空作废：迟到成功不写档案、不进有效上下文、不发事件、不广播，只复位自己的 pending
+                resetSelfTalkPending();
+                return;
+            }
+            AutonomousChatRecord record = archiveSelfTalk(maid, contextMessage, chatText);
+            MinecraftForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, chatText, welcome));
+            MaidSelfTalkService.onSelfTalkFinished(maid, this, record);
+            broadcastToNearby(maid, chatText);
         };
         if (isOnServerThread()) {
             finish.run();
         } else {
-            // LLM 回调在响应线程，状态与事件必须回到服务端主线程
+            // LLM 回调在响应线程，档案写入、状态与事件必须回到服务端主线程
             runOnServerThread(finish);
         }
     }
 
-    /**
-     * 捕获父类刚写入历史的 assistant 消息（队头=最新，CappedQueue.offerFirst）。
-     * 三重校验（队头非空 + role 为 ASSISTANT + 内容与本次响应一致）防同女仆并发响应线程
-     * 在写入与捕获间交错时抓取到对方消息；校验不过返回 null。
-     */
-    private LLMMessage captureLatestAssistantMessage(ResponseChat responseChat) {
-        Deque<LLMMessage> deque = getChatManager().getHistory().getDeque();
-        LLMMessage head = deque.peekFirst();
-        if (head != null && head.role() == Role.ASSISTANT
-                && responseChat.toString().equals(head.message())) {
-            return head;
+    /** 在服务端主线程把本次回复写成独立记录（展示档案 + 有效自话上下文），返回该记录 */
+    private AutonomousChatRecord archiveSelfTalk(EntityMaid maid, String contextMessage, String chatText) {
+        AutonomousChatHistory archive = AutonomousChatHistoryHost.of(maid);
+        if (archive == null) {
+            return null;
         }
-        return null;
+        return archive.append(welcome ? AutonomousChatRecord.Source.WELCOME
+                        : AutonomousChatRecord.Source.SELF_TALK,
+                maid.getUUID(), AutonomousChatHistoryHost.displayNameOf(maid),
+                maid.level().getGameTime(), contextMessage, chatText);
     }
 
     @Override
     public void onFailure(HttpRequest request, Throwable throwable, int errorCode) {
         super.onFailure(request, throwable, errorCode);
-        runOnServerThread(() -> {
-            // 失败链同样丢弃工具过程，否则历史里留下半截工具记录（孤立 tool_calls/tool → 后续 400）
-            discardToolHistory();
-            SelfTalkState.State state = SelfTalkState.get(getMaid().getId());
-            state.selfTalkPending = false;
-            state.selfTalkPendingSinceTick = -1;
-        });
+        runOnServerThread(this::resetSelfTalkPending);
+    }
+
+    /**
+     * 复位本请求的自话 pending（服务端主线程）：只清仍指向本回调的条目，
+     * 清空作废的旧回调不得清掉清空之后新请求的 pending。
+     */
+    private void resetSelfTalkPending() {
+        SelfTalkState.State state = SelfTalkState.peek(getMaid().getId());
+        if (state == null || !isRequestOwner(state)) {
+            return;
+        }
+        state.selfTalkPending = false;
+        state.selfTalkPendingSinceTick = -1;
+        state.currentSelfTalkCallback = null;
     }
 
     /**
@@ -221,10 +209,5 @@ public class SelfTalkCallback extends LLMCallback {
 
     public int getKeepSelfTalkCount() {
         return keepSelfTalkCount;
-    }
-
-    /** 本次回复的 assistant 消息（可能为 null：空白回复等未写历史的路径） */
-    public LLMMessage getLastAssistantMessage() {
-        return lastAssistantMessage;
     }
 }

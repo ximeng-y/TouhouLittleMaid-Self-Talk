@@ -794,6 +794,9 @@ public final class SelfTalkContexts {
      * 失败返回 null（已记录日志），调用方必须放弃本次触发、绝不向上抛。
      */
     static List<LLMMessage> fetchCleanedMessages(MaidAIChatManager chatManager, String language, String featureLabel) {
+        // 构造模型历史前完成旧数据迁移：老会话里由旧指纹标明的自话先搬进独立档案，
+        // 保证本次组装看到的是已清理的 TLM 历史（幂等；非主线程时自行延后且不做部分修改）
+        AutonomousChatHistoryMigration.ensureMigratedOnServerThread(chatManager.getMaid());
         List<LLMMessage> messages;
         try {
             messages = ((MaidAIChatManagerAccessor) (Object) chatManager).invokeGetMessages(chatManager, language);
@@ -829,17 +832,19 @@ public final class SelfTalkContexts {
      *   <li>SYSTEM 设定/摘要：混合内容、段外原样（摘要不能归入任一段）；
      *       仅首条设定在末尾追加段标签语义说明（{@link #appendSystemTagSuffix}，
      *       内容尾缀不影响缓存前缀、不落盘，卸载 mod 后原版设定恢复）；</li>
-     *   <li>历史区：命中 legacy 快照→段外（老版本会话不进 XML）；命中自话指纹→自话段；
+     *   <li>历史区：命中本次请求的独立来源标记→自话段（显式来源，优先于一切指纹判定）；
+     *       命中 legacy 快照→段外（老版本会话不进 XML）；命中自话指纹→自话段；
      *       USER/未命中 ASSISTANT→主人段；TOOL 与带 toolCalls 的 ASSISTANT 不注入标签（保护工具协议）、跟随当前段；</li>
      *   <li>窗口区（互聊窗口+peerText）：恒归自话段；若与历史区末尾的自话段相接则合并为同一段（用户语义：自话与互聊同段）。</li>
      * </ul>
-     * 该规则是「历史内容 + 指纹表」的纯函数：同一历史必然产生同一标签布局，
+     * 该规则是「历史内容 + 来源标记」的纯函数：同一历史必然产生同一标签布局，
      * 前缀缓存命中率与原版一致（标签为常量串、插入位置确定）。
      * <p>
      * 调用点必须已完成 {@link HistoryMessagesCheck}（本方法不改变消息条数/角色/顺序，
      * 清洗后的结构不受影响；先清洗后包裹保证被清洗丢弃的消息不会带走半个标签）。
      */
-    public static void wrapSegments(EntityMaid maid, List<LLMMessage> messages, int historyCount, int windowCount) {
+    public static void wrapSegments(EntityMaid maid, List<LLMMessage> messages, int historyCount,
+                                    int windowCount, SelfTalkHistoryAssembler.SourceIndex sources) {
         if (messages == null || messages.isEmpty()) {
             return;
         }
@@ -872,7 +877,7 @@ public final class SelfTalkContexts {
 
         // 历史区
         for (int i = systemEnd; i < historyCount && i < segEnd; i++) {
-            Segment seg = segmentOf(legacy, selfTalk, messages.get(i));
+            Segment seg = segmentOf(legacy, selfTalk, messages.get(i), sources);
             if (seg == Segment.SKIP) {
                 continue; // 工具类消息跟随当前段，不注入标签
             }
@@ -924,11 +929,22 @@ public final class SelfTalkContexts {
         messages.set(0, withContent(first, first.message() + SYSTEM_TAG_SUFFIX));
     }
 
-    /** 单条消息的段归属：legacy 优先（老自话也段外），其次自话指纹，其余主人段 */
-    private static Segment segmentOf(Set<String> legacy, Set<String> selfTalk, LLMMessage message) {
+    /**
+     * 单条消息的段归属。
+     * <p>
+     * 本次请求的<b>显式来源标记</b>最优先：独立自话／欢迎语／互聊记录在并入请求副本时按对象身份登记
+     * （见 {@link SelfTalkHistoryAssembler.SourceIndex}），这里按身份命中即归自话段——
+     * 不依赖正文相等，也不受清洗、筛选、重排影响（它们只搬运同一批消息引用）。
+     * 其次是 legacy 快照（老自话段外）与旧自话指纹（读档兼容），其余归主人段。
+     */
+    private static Segment segmentOf(Set<String> legacy, Set<String> selfTalk, LLMMessage message,
+                                     SelfTalkHistoryAssembler.SourceIndex sources) {
         if ((message.toolCalls() != null && !message.toolCalls().isEmpty())
                 || message.role() == Role.TOOL || message.role() == Role.SYSTEM) {
             return Segment.SKIP;
+        }
+        if (sources != null && sources.sourceOf(message) != null) {
+            return Segment.SELF;
         }
         String fp = SelfTalkProvenance.fingerprint(message);
         if (legacy.contains(fp)) {

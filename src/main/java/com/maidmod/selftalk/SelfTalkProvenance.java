@@ -42,17 +42,10 @@ public final class SelfTalkProvenance {
     }
 
     /**
-     * 登记一条自话回复的指纹（写入历史后、同一响应线程调用）。
-     */
-    public static void registerSelfTalk(EntityMaid maid, LLMMessage message) {
-        if (maid == null || message == null) {
-            return;
-        }
-        ((SelfTalkProvenanceHost) maid).maid_self_talk$selfFingerprints().add(fingerprint(message));
-    }
-
-    /**
-     * 按消息集合删除指纹（与历史消息从 deque 移除同步：自话 trim、TLM 压缩）。
+     * 按消息集合删除指纹（与历史消息从 deque 移除同步：TLM 压缩）。
+     * <p>
+     * 自话／欢迎语的新回复已改存独立档案（{@link AutonomousChatHistory}），
+     * 不再往本集合登记，因此这里处理的只剩迁移前留下的旧指纹。
      */
     public static void removeByMessages(EntityMaid maid, Collection<LLMMessage> messages) {
         if (maid == null || messages == null || messages.isEmpty()) {
@@ -61,6 +54,22 @@ public final class SelfTalkProvenance {
         var fingerprints = ((SelfTalkProvenanceHost) maid).maid_self_talk$selfFingerprints();
         for (LLMMessage message : messages) {
             fingerprints.remove(fingerprint(message));
+        }
+    }
+
+    /**
+     * 按指纹串直接删除（旧数据迁移：消息已搬进独立档案，其旧指纹随之作废）。
+     * <p>
+     * 与 {@link #removeByMessages} 的区别是入参已经是算好的指纹——迁移路径上消息随即被移出
+     * TLM 队列，此处只需按迁移前算出的那批指纹精确清理，不必重新读队列。
+     */
+    public static void removeFingerprints(EntityMaid maid, Collection<String> fingerprints) {
+        if (maid == null || fingerprints == null || fingerprints.isEmpty()) {
+            return;
+        }
+        Set<String> known = ((SelfTalkProvenanceHost) maid).maid_self_talk$selfFingerprints();
+        for (String fp : fingerprints) {
+            known.remove(fp);
         }
     }
 
