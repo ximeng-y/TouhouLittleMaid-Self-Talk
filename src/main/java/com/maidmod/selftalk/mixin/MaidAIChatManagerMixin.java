@@ -4,13 +4,16 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatMana
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.UserPromptContexts;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.AutonomousChatHistoryMigration;
 import com.maidmod.selftalk.InterChatChain;
 import com.maidmod.selftalk.InterChatRequest;
 import com.maidmod.selftalk.MaidInterChatService;
 import com.maidmod.selftalk.MaidSelfTalkService;
 import com.maidmod.selftalk.SelfTalkContexts;
 import com.maidmod.selftalk.SelfTalkDispatcher;
+import com.maidmod.selftalk.SelfTalkHistoryAssembler;
 import com.maidmod.selftalk.SelfTalkPrompts;
 import com.maidmod.selftalk.SelfTalkState;
 import com.maidmod.selftalk.SegmentTags;
@@ -21,6 +24,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 
@@ -54,6 +58,9 @@ public abstract class MaidAIChatManagerMixin {
                                                        LLMClient chatClient, CallbackInfo ci) {
         MaidAIChatManager self = (MaidAIChatManager) (Object) this;
         EntityMaid maid = self.getMaid();
+        // 旧数据迁移：本次请求的历史区即将被组装，先把旧指纹标明的自话搬进独立档案，
+        // 再开始合并——迁移必须发生在读取 TLM 历史之前，否则旧自话会被重复注入（幂等）
+        AutonomousChatHistoryMigration.ensureMigratedOnServerThread(maid);
         // 主人插话：真实派发的主动聊天会立即终止该女仆所在的连续互聊链，
         // 必须在注入互聊窗口之前处理，否则被丢弃的旧回复会随窗口重新进入本次请求
         InterChatChain chain = InterChatChain.activeFor(maid);
@@ -83,11 +90,25 @@ public abstract class MaidAIChatManagerMixin {
                 leftover.cancel();
             }
         }
-        int historyCount = messages.size();
-        MaidInterChatService.injectPlayerChatContext(maid, messages);
-        int windowCount = messages.size() - historyCount;
+        // 玩家 chat 与自话／互聊共用同一份来源口径：TLM 历史 + 按持久顺序号合并的有效自话。
+        // 独立记录不进 TLM deque，这里只写本次请求的副本；来源索引随合并一并登记，
+        // 段标签据此按对象身份把独立记录归入自话段
+        int prefixEnd = 0;
+        while (prefixEnd < messages.size() && messages.get(prefixEnd).role() == Role.SYSTEM) {
+            prefixEnd++;
+        }
+        SelfTalkHistoryAssembler.SourceIndex sources = new SelfTalkHistoryAssembler.SourceIndex();
+        List<LLMMessage> mergedHistory = SelfTalkHistoryAssembler.mergeValidSelfTalk(
+                maid, List.copyOf(messages.subList(prefixEnd, messages.size())), sources);
+        List<LLMMessage> rebuilt = new ArrayList<>(messages.subList(0, prefixEnd));
+        rebuilt.addAll(mergedHistory);
+        int historyCount = rebuilt.size();
+        MaidInterChatService.injectPlayerChatContext(maid, rebuilt);
+        int windowCount = rebuilt.size() - historyCount;
         // 就地写回（TLM 随后仍在同一列表上 append 玩家消息）
-        SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowCount);
+        messages.clear();
+        messages.addAll(rebuilt);
+        SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowCount, sources);
     }
 
     /**

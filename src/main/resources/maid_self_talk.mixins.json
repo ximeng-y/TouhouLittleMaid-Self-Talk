@@ -14,7 +14,8 @@
     "GameContextRegisterAccessor"
   ],
   "client": [
-    "AIChatScreenMixin"
+    "AIChatScreenMixin",
+    "HistoryAIChatScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1

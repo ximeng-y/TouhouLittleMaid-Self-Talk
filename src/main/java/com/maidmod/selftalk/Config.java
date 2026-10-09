@@ -90,6 +90,10 @@ public final class Config {
     /** 受伤事件有效期（秒）：玩家受伤与自身受伤记录共用的有效时长 */
     public static ModConfigSpec.IntValue EVENT_CONTEXT_HURT_MAX_AGE_SECONDS;
 
+    // ===== 独立聊天档案 =====
+    /** 自话／欢迎语／互聊独立展示档案的总保留条数（每只女仆各自计算） */
+    public static ModConfigSpec.IntValue CHAT_HISTORY_MAX_STORED;
+
     // ===== 附近女仆身份 =====
     /** 附近女仆身份上下文注入开关（仅启动时读取，改动需重启） */
     public static ModConfigSpec.BooleanValue MAID_IDENTITY_ENABLED;
@@ -238,6 +242,15 @@ public final class Config {
                 为避免积压，同一只女仆记录受伤的最小间隔固定为 1 秒（不可配置），
                 短时间内多次受击只会保留其中一部分。""")
                 .defineInRange("hurtMaxAgeSeconds", 60, 1, 600);
+        builder.pop();
+
+        builder.push("chat_history");
+        CHAT_HISTORY_MAX_STORED = builder.comment("""
+                自话、欢迎语与女仆互聊的独立展示档案总保留条数（每只女仆各自计算，包含已被手动隐藏的记录）。
+                它只控制原版聊天记录界面里这些消息的保留上限，超出后按最旧顺序淘汰；
+                不控制模型上下文——自话参与模型请求的条数上限固定为 512，不受此项影响。
+                只允许在此配置文件修改，游戏内设置界面不提供该项。""")
+                .defineInRange("maxStoredMessages", 1000, 1, 100000);
         builder.pop();
 
         builder.push("maid_identity");

@@ -43,6 +43,8 @@ import java.util.UUID;
 public class InterChatCallback extends LLMCallback {
 
     private final EntityMaid peer;
+    /** 本次需要回应的对方发言的消息身份（非 responder 时为 null） */
+    private final UUID peerMessageId;
     private final String peerText;
     private final double broadcastRange;
     private final boolean isResponder;
@@ -53,36 +55,36 @@ public class InterChatCallback extends LLMCallback {
     /** 本轮请求身份（正式派发时绑定；为 null 表示回调早于请求登记——正常互聊流程不应出现） */
     private final InterChatRequest request;
     /**
-     * 本轮工具过程写入 TLM 历史的消息引用（与 SelfTalkCallback 同构）。
-     * 最终回答后成对全删——assistant(tool_calls) 与 tool 结果必须配对删除，
-     * 孤立记录会让后续请求被 LLM 服务端 400 拒绝。
-     * 注：TLM 1.5.3 的 HistoryMessagesCheck 已含 removeUnpairedToolCalls（能剥离未配对 tool_calls
-     * 并删除其后孤儿 TOOL），但每次发送前的清洗依赖 TLM 实现细节，本 mod 直接成对删除更稳妥，
-     * 且能覆盖「窗口裁剪切对」这类 TLM 清洗不到的边界。
+     * 本次请求的清空世代令牌：被清空女仆的迟到结果不写档案、不写窗口、不发气泡/广播、
+     * 不同步对方、不续接下一轮。
      */
-    private final List<LLMMessage> toolHistoryMessages = new ArrayList<>();
+    private final SelfTalkRequestToken token;
 
     public InterChatCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
-                             EntityMaid peer, String peerText,
+                             EntityMaid peer, UUID peerMessageId, String peerText,
                              double broadcastRange, boolean isResponder, int chainRound, boolean toolEnabled,
-                             InterChatChain chain, InterChatRequest request) {
+                             InterChatChain chain, InterChatRequest request, SelfTalkRequestToken token) {
         super(chatManager, messages);
         this.peer = peer;
+        this.peerMessageId = peerMessageId;
         this.peerText = peerText;
         this.broadcastRange = broadcastRange;
         this.isResponder = isResponder;
         this.chainRound = chainRound;
         this.chain = chain;
         this.request = request;
+        this.token = token;
         this.needAddTools = toolEnabled;
     }
 
     /**
      * 本次请求是否已被业务作废：迟到结果（成功/失败/工具连锁）必须沉默清理，不产生任何可见副作用。
      * 公开供 {@link com.maidmod.selftalk.mixin.InterChatToolLifecycleMixin} 在响应线程读取。
+     * <p>
+     * 清空作废（{@link SelfTalkRequestToken}）与主人插话作废同语义，且可在响应线程安全读取。
      */
     public boolean isCancelled() {
-        return request != null && request.isCancelled();
+        return (request != null && request.isCancelled()) || (token != null && !token.isValid());
     }
 
     /**
@@ -95,7 +97,10 @@ public class InterChatCallback extends LLMCallback {
         return !isCancelled() && (chain == null || chain.canChain());
     }
 
-    /** 工具轮次：请求作废/链中断后不再执行新的工具批次；父类写 assistant(tool_calls) 历史后捕获队头引用 */
+    /**
+     * 工具轮次：请求作废/链中断后不再执行新的工具批次；历史写入已由
+     * {@code InterChatToolLifecycleMixin} 的重定向跳过，这里不再捕获队头。
+     */
     @Override
     public void onFunctionCall(Message choice, LLMClient client) {
         if (!isStillAllowed()) {
@@ -117,36 +122,18 @@ public class InterChatCallback extends LLMCallback {
             return;
         }
         super.onFunctionCall(choice, client);
-        captureToolHistoryHead(Role.ASSISTANT);
     }
 
-    /** 工具结果：捕获队头引用并刷新互聊 pending 心跳（超时语义改为「最后一次工具活动后 5 分钟」） */
+    /** 工具结果：刷新互聊 pending 心跳（超时语义改为「最后一次工具活动后 5 分钟」） */
     @Override
     public LLMCallback addToolResult(String result, String toolId) {
         if (isCancelled()) {
-            // 作废后工具结果不再写入历史、不再刷新心跳：本回调即将收敛，不应留下任何可配对记录
+            // 作废后工具结果不再写入请求上下文、不再刷新心跳：本回调即将收敛，不应留下任何可配对记录
             return this;
         }
         LLMCallback cb = super.addToolResult(result, toolId);
-        captureToolHistoryHead(Role.TOOL);
         refreshPendingHeartbeat();
         return cb;
-    }
-
-    private void captureToolHistoryHead(Role expected) {
-        LLMMessage head = getChatManager().getHistory().getDeque().peekFirst();
-        if (head != null && head.role() == expected) {
-            toolHistoryMessages.add(head);
-        }
-    }
-
-    /** 最终回答（或失败）后删除本轮全部工具过程消息（成对删除，绝不留下孤立半截记录） */
-    private void discardToolHistory() {
-        if (toolHistoryMessages.isEmpty()) {
-            return;
-        }
-        getChatManager().getHistory().getDeque().removeAll(toolHistoryMessages);
-        toolHistoryMessages.clear();
     }
 
     /** 工具轮次心跳：刷新互聊 pending 起始 tick（须在服务端主线程写状态） */
@@ -203,7 +190,6 @@ public class InterChatCallback extends LLMCallback {
     void cancelLocally() {
         EntityMaid maid = getMaid();
         if (maid != null && maid.isAlive()) {
-            discardToolHistory();
             discardWaitingBubble(maid);
         }
         resetInterChatPending();
@@ -227,14 +213,12 @@ public class InterChatCallback extends LLMCallback {
         Runnable finish = () -> {
             if (isCancelled()) {
                 // 请求作废：迟到成功不产生任何可见副作用，只清本请求自己的资源
-                discardToolHistory();
                 discardWaitingBubble(maid);
                 resetInterChatPending();
                 endChainAndComplete(null);
                 return;
             }
             boolean deliver = chain == null || chain.canDeliver(maid);
-            discardToolHistory();
             resetInterChatPending();
             if (!deliver) {
                 // 被主人插话的目标：不显示、不播报、不广播、不写窗口、不同步对方；只清掉自己的等待气泡。
@@ -248,21 +232,17 @@ public class InterChatCallback extends LLMCallback {
             } else if (maid.level() instanceof ServerLevel serverLevel) {
                 serverLevel.getServer().submit(() -> maid.getChatBubbleManager().addLLMChatText(chatText, waitingChatBubbleId));
             }
-            if (isResponder && peerText != null && !peerText.isBlank()) {
-                boolean needSync = true;
-                if (!state().windowInterChatMsgs.isEmpty()) {
-                    String last = state().windowInterChatMsgs.get(state().windowInterChatMsgs.size() - 1).message();
-                    if (peerText.equals(last)) needSync = false;
-                }
-                if (needSync) {
-                    MaidInterChatService.syncPeerMessageToWindow(maid, peerText);
-                }
+            // 顺序：先补入需要回应的对方发言，再写入本人回复——窗口按真实发生顺序排列。
+            // 两者都按消息身份判定，重复说出相同文字属于不同消息，绝不做正文去重。
+            if (isResponder && peerText != null && !peerText.isBlank() && peerMessageId != null) {
+                // 只补窗口，不再次归档：该发言已由对方（或其投递）写进本人档案
+                MaidInterChatService.syncPeerMessageToWindow(maid, peerMessageId, peerText);
             }
-            MaidInterChatService.addInterChatMessage(maid, chatText);
-            if (peer != null && peer.isAlive() && peer.level() instanceof ServerLevel) {
-                // 不重新同步回已被主人插话、已开启新聊天的对方窗口
+            AutonomousChatRecord own = MaidInterChatService.addInterChatMessage(maid, chatText);
+            if (own != null && peer != null && peer.isAlive() && peer.level() instanceof ServerLevel) {
+                // 不往已被主人插话、已开启新聊天的对方档案与窗口补写它未收到的发言
                 if (chain == null || chain.canDeliver(peer)) {
-                    MaidInterChatService.syncPeerMessageToWindow(peer, chatText);
+                    MaidInterChatService.deliverToPeer(peer, own);
                 }
             }
             broadcastToNearby(maid, chatText);
@@ -273,16 +253,17 @@ public class InterChatCallback extends LLMCallback {
                 endChainAndComplete(maid);
                 return;
             }
-            if (peer != null && peer.isAlive() && peer.level() instanceof ServerLevel) {
+            if (own != null && peer != null && peer.isAlive() && peer.level() instanceof ServerLevel) {
                 double prob = Config.INTER_CHAT_CHAIN_PROBABILITY.get();
                 if (maid.getRandom().nextDouble() < prob) {
-                    tryChain(peer, maid, chatText);
+                    tryChain(peer, maid, own.id(), chatText);
                 } else {
                     // 概率抽签不续接：链自然结束，解除互聊对锁（tryChain 各提前返回路径也会解锁）
                     endChainAndComplete(maid);
                 }
             } else {
-                // 对方不可用（死亡/卸载/非服务端维度）：链终止，解除对锁；回复已交付仍算正常终态
+                // 对方不可用（死亡/卸载/非服务端维度）或本人回复未归档：链终止，解除对锁；
+                // 回复已交付仍算正常终态
                 endChainAndComplete(maid);
             }
         };
@@ -298,7 +279,7 @@ public class InterChatCallback extends LLMCallback {
         return SelfTalkState.get(getMaid().getId());
     }
 
-    private void tryChain(EntityMaid nextSpeaker, EntityMaid lastSpeaker, String lastText) {
+    private void tryChain(EntityMaid nextSpeaker, EntityMaid lastSpeaker, UUID lastMessageId, String lastText) {
         if (!(nextSpeaker.level() instanceof ServerLevel level)) { endChainAndComplete(null); return; }
         // 热重载下中途关闭互聊时立即终止在途链
         if (!Config.INTER_CHAT_ENABLED.get()) { endChainAndComplete(null); return; }
@@ -325,8 +306,8 @@ public class InterChatCallback extends LLMCallback {
         // 链式续接是发起者回复后的单条连续请求，天然串行、每轮隔一次 LLM 往返，
         // 不走 5~8s 全局节流桶（发起者派发已占用该桶），否则 responder 路径永远被退避。
         // 若对方忙（自话/玩家 chat 在途），dispatcher 会顺延本次回应；对锁保持，链仅暂停不终止。
-        SelfTalkDispatcher.requestInterChatResponder(nextSpeaker, lastSpeaker, lastText, broadcastRange,
-                chainRound + 1, chain == null ? 0 : chain.id());
+        SelfTalkDispatcher.requestInterChatResponder(nextSpeaker, lastSpeaker, lastMessageId, lastText,
+                broadcastRange, chainRound + 1, chain == null ? 0 : chain.id());
         // 本轮已成功交付并交棒给下一轮：解除本轮请求登记（成功后续接同属正常终态），
         // 释放 session/回调引用；链不释放（仍在续接），对锁保持由后续轮次维护
         if (request != null && !request.isCancelled()) {
@@ -387,14 +368,12 @@ public class InterChatCallback extends LLMCallback {
         // 被作废 → 只清资源绝不显示；未被作废 → 复用 TLM 的错误文本生成逻辑后收敛。
         Runnable finish = () -> {
             if (isCancelled()) {
-                discardToolHistory();
                 discardWaitingBubble(getMaid());
                 resetInterChatPending();
                 endChainAndComplete(null);
                 return;
             }
             // 复用 TLM 父类 onFailure 的文本生成（红色错误 + 收起等待气泡），但全程在本任务内完成
-            discardToolHistory();
             EntityMaid maid = getMaid();
             // 复用 TLM 父类 onFailure 的文本生成：红色错误文本发送给主人 + 收起该回调持有的等待气泡。
             // 全程在当前任务内完成，不再另投递服务端任务（父类实现会再 submit 一次）

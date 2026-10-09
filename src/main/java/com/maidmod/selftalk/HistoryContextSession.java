@@ -4,7 +4,6 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatMana
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMSite;
-import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.history.DialogueBlock;
 
@@ -58,10 +57,31 @@ public final class HistoryContextSession {
 
     /** 前导 SYSTEM 段（设定 + 可选摘要），三种模式都原样保留 */
     private final List<LLMMessage> systemPrefix;
-    /** 原始历史区（三种模式共用的输入；全量模式下原样注入） */
+    /**
+     * 历史区（三种模式共用的输入；全量模式下原样注入）。
+     * <p>
+     * 它<b>只含 TLM 普通玩家历史</b>：自话／欢迎语已改存独立档案，合并由
+     * {@link #rebuildHistoryWithSelfTalk()} 在需要时临时拼接，检索库与「最近玩家对话」
+     * 始终以这一份为输入（独立记录不进检索库）。
+     */
     private final List<LLMMessage> fullHistory;
     /** 互聊窗口 + 本次需要回应的对方发言（三种模式都原样注入） */
     private final List<LLMMessage> windowMessages;
+    /**
+     * 本次会话说出的独立消息副本，由 {@link #rebuildHistoryWithSelfTalk()} 生成：
+     * 合并视图按持久顺序号把有效自话插进历史区，来源索引随即登记，
+     * 供段标签把独立记录归入自话段（按对象身份，不按正文相等）。
+     */
+    private final List<LLMMessage> selfTalkMessages = new ArrayList<>();
+    /**
+     * 本会话请求副本中独立记录的来源索引（见 {@link SelfTalkHistoryAssembler.SourceIndex}）。
+     * <p>
+     * 每个会话一份：合并视图与「最近一条自话」登记的都是本会话实际发出的消息对象，
+     * 段标签包裹时据此按身份归段——与展示档案、有效上下文的存储对象彼此独立，
+     * 不会跨请求串味。
+     */
+    private final SelfTalkHistoryAssembler.SourceIndex sourceIndex =
+            new SelfTalkHistoryAssembler.SourceIndex();
     /** 链上已完成的首次检索结果；非 null 表示不再规划、不再跑 BM25 */
     private final CachedRecall cachedRecall;
     /** 派发许可：插话中断、请求作废等情况下返回 false 即放弃 */
@@ -220,14 +240,15 @@ public final class HistoryContextSession {
      * 前一跳尚未交付时就派发，破坏串行语义。
      */
     private void dispatchFull() {
+        List<LLMMessage> history = rebuildHistoryWithSelfTalk();
         List<LLMMessage> messages = new ArrayList<>(systemPrefix);
-        messages.addAll(fullHistory);
+        messages.addAll(history);
         messages.addAll(windowMessages);
-        String prompt = basePrompt + SelfTalkContexts.latestSelfTalkNote(language, false)
+        String prompt = basePrompt + SelfTalkContexts.latestSelfTalkNote(language, !selfTalkMessages.isEmpty())
                 + SelfTalkContexts.recalledHistoryNote(language, false);
         messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt)));
-        int historyCount = systemPrefix.size() + fullHistory.size();
-        SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowMessages.size());
+        int historyCount = systemPrefix.size() + history.size();
+        SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowMessages.size(), sourceIndex);
         deliver(messages);
     }
 
@@ -241,6 +262,8 @@ public final class HistoryContextSession {
      * @param recallNote     是否追加「召回片段是历史资料」的说明（仅检索模式）
      */
     private void dispatchReduced(List<LLMMessage> recalledBlocks, boolean recallNote) {
+        // 合并视图先建：最新一条自话与它取自同一条记录，两条路径的段标签判据一致
+        rebuildHistoryWithSelfTalk();
         LLMMessage latestSelfTalk = latestSelfTalkMessage();
         List<LLMMessage> messages = new ArrayList<>(systemPrefix);
         if (recalledBlocks != null) {
@@ -257,7 +280,7 @@ public final class HistoryContextSession {
                 + SelfTalkContexts.recalledHistoryNote(language,
                 recallNote && recalledBlocks != null && !recalledBlocks.isEmpty());
         messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt)));
-        SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowMessages.size());
+        SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowMessages.size(), sourceIndex);
         deliver(messages);
     }
 
@@ -270,33 +293,43 @@ public final class HistoryContextSession {
     }
 
     /**
-     * 最近一条可识别的自话／欢迎语回复。
+     * 把有效自话上下文按持久顺序号并进历史区，返回本次请求使用的合并历史副本。
      * <p>
-     * 它同时是「本轮直接上下文」与段标签的判据：注入的是原历史消息本身（不是副本），
-     * 因此指纹一致、会被归入自话段；也不进检索库、不新增持久记录。
+     * 每次组装前重新生成：合并时登记的消息对象就是随后交给请求的那一批，
+     * 段标签据此按<b>对象身份</b>把独立记录归入自话段（清洗只增删元素、不重建对象）。
+     * {@link #fullHistory} 始终保持只含 TLM 玩家历史，检索库与「最近玩家对话」不受影响。
+     */
+    private List<LLMMessage> rebuildHistoryWithSelfTalk() {
+        List<LLMMessage> merged = SelfTalkHistoryAssembler.mergeValidSelfTalk(maid, fullHistory, sourceIndex);
+        if (merged != fullHistory) {
+            selfTalkMessages.clear();
+            for (LLMMessage message : merged) {
+                if (sourceIndex.sourceOf(message) != null) {
+                    selfTalkMessages.add(message);
+                }
+            }
+        }
+        return merged;
+    }
+
+    /**
+     * 最近一条自话／欢迎语（记入模型上下文的原消息）。
+     * <p>
+     * 只读<b>有效自话快照</b>：不扫描 TLM 历史、不扫描展示档案——自动遗忘掉的旧自话已不在有效上下文里，
+     * 不能在精简模式下复活；展示档案被容量淘汰也不影响仍在有效上下文里的记录。
+     * <p>
+     * 与合并视图插进历史区的是<b>同一条记录</b>，因此精简模式下这段上下文同样带自话段标签。
      */
     private LLMMessage latestSelfTalkMessage() {
-        var fingerprints = SelfTalkHistoryAssembler.selfTalkFingerprints(maid);
-        if (fingerprints.isEmpty()) {
+        AutonomousChatHistory archive = AutonomousChatHistoryHost.of(maid);
+        if (archive == null) {
             return null;
         }
-        for (int i = fullHistory.size() - 1; i >= 0; i--) {
-            LLMMessage message = fullHistory.get(i);
-            if (message.role() != Role.ASSISTANT
-                    || (message.toolCalls() != null && !message.toolCalls().isEmpty())) {
-                continue;
-            }
-            String text = message.message() == null ? "" : message.message();
-            if (text.isBlank()) {
-                continue;
-            }
-            String fingerprint = com.maidmod.selftalk.history.HistoryFingerprint
-                    .of(message.role().name(), text, message.gameTime());
-            if (fingerprints.contains(fingerprint)) {
-                return message;
-            }
+        AutonomousChatRecord record = archive.latestValidSelfTalk();
+        if (record == null || record.message() == null || record.message().isBlank()) {
+            return null;
         }
-        return null;
+        return SelfTalkHistoryAssembler.asRequestMessage(record, sourceIndex);
     }
 
     // ===== 检索模式 =====
