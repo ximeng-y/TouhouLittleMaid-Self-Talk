@@ -158,21 +158,35 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         int rightX = this.rightX;
         int colTop = this.colTop;
 
-        // 组内 0 间隙（步进 20）、组间 8px（步进 28）；现有四组相对顺序不变，Tool 组追加在最后
-        this.globalButton = addLeftButton(leftX, colTop, 0, buttonW, 20,
-                "config.maid_self_talk.screen.player_settings.global", globalEnabled, b -> toggleGlobal());
-        this.maidButton = addLeftButton(leftX, colTop, 20, buttonW, 20,
-                "config.maid_self_talk.screen.player_settings.maid_toggle", maidEnabled, b -> toggleMaid());
-        this.interGlobalButton = addLeftButton(leftX, colTop, 48, buttonW, 20,
-                "config.maid_self_talk.screen.player_settings.inter_global", interGlobalEnabled, b -> toggleInterGlobal());
-        this.interMaidButton = addLeftButton(leftX, colTop, 68, buttonW, 20,
-                "config.maid_self_talk.screen.player_settings.inter_maid_toggle", interMaidEnabled, b -> toggleInterMaid());
-        this.sleepGlobalButton = addLeftButton(leftX, colTop, 96, buttonW, 20,
-                "config.maid_self_talk.screen.player_settings.sleep_global", sleepGlobalEnabled, b -> toggleSleepGlobal());
-        this.sleepMaidButton = addLeftButton(leftX, colTop, 116, buttonW, 20,
-                "config.maid_self_talk.screen.player_settings.sleep_maid_toggle", sleepMaidEnabled, b -> toggleSleepMaid());
+        // 组内 0 间隙（步进 20）、组间 8px（步进 28）；现有四组相对顺序不变，Tool 组追加在最后。
+        // Tool 组的两枚按钮共用一条提示，与本列其余按钮一样在调用后挂 tooltip
         Tooltip toolTooltip = Tooltip.create(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.tool_cache_tooltip"));
+        this.globalButton = addLeftButton(leftX, colTop, 0, buttonW, 20,
+                "config.maid_self_talk.screen.player_settings.global", globalEnabled, b -> toggleGlobal());
+        this.globalButton.setTooltip(Tooltip.create(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.global.tooltip")));
+        this.maidButton = addLeftButton(leftX, colTop, 20, buttonW, 20,
+                "config.maid_self_talk.screen.player_settings.maid_toggle", maidEnabled, b -> toggleMaid());
+        this.maidButton.setTooltip(Tooltip.create(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.maid_toggle.tooltip")));
+        this.interGlobalButton = addLeftButton(leftX, colTop, 48, buttonW, 20,
+                "config.maid_self_talk.screen.player_settings.inter_global", interGlobalEnabled, b -> toggleInterGlobal());
+        this.interGlobalButton.setTooltip(Tooltip.create(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.inter_global.tooltip")));
+        this.interMaidButton = addLeftButton(leftX, colTop, 68, buttonW, 20,
+                "config.maid_self_talk.screen.player_settings.inter_maid_toggle", interMaidEnabled, b -> toggleInterMaid());
+        this.interMaidButton.setTooltip(Tooltip.create(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.inter_maid_toggle.tooltip")));
+        // 注意极性：全局「开启」= 安静，故提示文案是「开启后不说话」而非「开启后说话」
+        this.sleepGlobalButton = addLeftButton(leftX, colTop, 96, buttonW, 20,
+                "config.maid_self_talk.screen.player_settings.sleep_global", sleepGlobalEnabled, b -> toggleSleepGlobal());
+        this.sleepGlobalButton.setTooltip(Tooltip.create(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.sleep_global.tooltip")));
+        this.sleepMaidButton = addLeftButton(leftX, colTop, 116, buttonW, 20,
+                "config.maid_self_talk.screen.player_settings.sleep_maid_toggle", sleepMaidEnabled, b -> toggleSleepMaid());
+        this.sleepMaidButton.setTooltip(Tooltip.create(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.sleep_maid_toggle.tooltip")));
         this.toolGlobalButton = addLeftButton(leftX, colTop, 144, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.tool_global", toolGlobalEnabled, b -> toggleToolGlobal());
         this.toolGlobalButton.setTooltip(toolTooltip);
@@ -217,6 +231,8 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                         Component.translatable("config.maid_self_talk.screen.player_settings.context.entry"),
                         b -> openEnvironmentContextPanel())
                 .bounds(rightX, colTop + 172, panelW, 20)
+                .tooltip(Tooltip.create(Component.translatable(
+                        "config.maid_self_talk.screen.player_settings.context.entry.tooltip")))
                 .build());
         this.environmentContextPanel.layout(this.width, this.height);
         refreshButtonState();

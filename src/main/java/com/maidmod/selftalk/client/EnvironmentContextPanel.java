@@ -15,6 +15,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -67,6 +68,8 @@ public final class EnvironmentContextPanel {
     private static final int EXPERIMENT_COLOR = 0xFFFFAA00;
 
     private static final int HEADER_HEIGHT = 102;
+    /** 常驻说明与可滚动列表之间的间距 */
+    private static final int DESCRIPTION_GAP = 6;
     private static final int FOOTER_HEIGHT = 30;
     private static final int ROW_HEIGHT = 24;
     private static final int BUTTON_HEIGHT = 20;
@@ -103,6 +106,8 @@ public final class EnvironmentContextPanel {
     private static final int FOCUS_MODE = -3;
 
     private final Font font;
+    /** 随面板宽度重新换行，说明不随列表滚动 */
+    private List<FormattedCharSequence> descriptionLines = List.of();
 
     // ===== 会话与同步状态（resize 保留，关闭重开时重置） =====
     private boolean open;
@@ -229,7 +234,11 @@ public final class EnvironmentContextPanel {
         this.panelHeight = Math.min(PANEL_MAX_HEIGHT, screenHeight - SCREEN_MARGIN);
         this.panelX = (screenWidth - panelWidth) / 2;
         this.panelY = (screenHeight - panelHeight) / 2;
-        this.listTop = panelY + HEADER_HEIGHT;
+        this.descriptionLines = font.split(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.context.description"),
+                Math.max(1, panelWidth - NAME_MARGIN * 2));
+        // 按实际换行高度为说明留位，只收缩列表视口，不把文字追加到屏幕底部。
+        this.listTop = panelY + HEADER_HEIGHT + descriptionLines.size() * font.lineHeight + DESCRIPTION_GAP;
         this.listBottom = panelY + panelHeight - FOOTER_HEIGHT;
         this.viewportHeight = Math.max(0, listBottom - listTop);
         this.contentHeight = EnvironmentContextOption.ALL.size() * ROW_HEIGHT;
@@ -514,6 +523,23 @@ public final class EnvironmentContextPanel {
         return "config.maid_self_talk.screen.player_settings.context.close";
     }
 
+    /**
+     * 可点行的悬停说明键：四项环境事件／状态各有专属说明，其余行共用三态通用说明。
+     * <p>
+     * 其余 28 行的名称本身已是自然语言（「女仆主手物品」……），逐条写描述只会变成 28 条冗余文案。
+     */
+    private static String rowTooltipKey(EnvironmentContextOption option) {
+        String key = switch (option.key()) {
+            case EnvironmentContextOption.KEY_IDENTITY -> "identity";
+            case EnvironmentContextOption.KEY_DEATHS -> "deaths";
+            case EnvironmentContextOption.KEY_PLAYER_HURT -> "player_hurt";
+            case EnvironmentContextOption.KEY_SELF_HURT -> "self_hurt";
+            default -> null;
+        };
+        return "config.maid_self_talk.screen.player_settings.context.row."
+                + (key == null ? "mode" : key);
+    }
+
     private static String modeKey(EnvironmentContextMode mode) {
         return "config.maid_self_talk.screen.player_settings.context.mode." + mode.id();
     }
@@ -558,6 +584,11 @@ public final class EnvironmentContextPanel {
                     "config.maid_self_talk.screen.player_settings.context.natural_language");
             renderHeaderRow(graphics, mouseX, mouseY, historyModeButton, historyModeY(),
                     "config.maid_self_talk.screen.player_settings.context.history");
+            int descriptionY = panelY + HEADER_HEIGHT;
+            for (FormattedCharSequence line : descriptionLines) {
+                graphics.drawString(font, line, panelX + NAME_MARGIN, descriptionY, SUBTITLE_COLOR, false);
+                descriptionY += font.lineHeight;
+            }
 
             renderList(graphics, mouseX, mouseY);
             renderFooter(graphics);
@@ -587,11 +618,14 @@ public final class EnvironmentContextPanel {
             String reason = disabledReasonKey(option);
             if (reason != null) {
                 graphics.renderTooltip(font, wrap(reason), mouseX, mouseY);
-            } else if (nameTruncated(option)) {
-                // 名称省略号截断时，悬停给出完整自然语言名称
-                graphics.renderTooltip(font,
-                        font.split(Component.translatable(nameKey(option)), Math.min(260, panelWidth - 40)),
-                        mouseX, mouseY);
+            } else {
+                // 可点行：三态说明（或该行的专属说明）+ 名称被截断时的完整名称，合成一个多行 tooltip。
+                // 走 wrap 按面板宽度硬换行，说明文案可长可短，不必在译文里写死换行
+                List<FormattedCharSequence> lines = new ArrayList<>(wrap(rowTooltipKey(option)));
+                if (nameTruncated(option)) {
+                    lines.addAll(wrap(nameKey(option)));
+                }
+                graphics.renderTooltip(font, lines, mouseX, mouseY);
             }
         }
     }
@@ -710,7 +744,7 @@ public final class EnvironmentContextPanel {
     }
 
     /** tooltip 文本按面板宽度硬换行（本 mod 的禁用说明都比较长） */
-    private List<net.minecraft.util.FormattedCharSequence> wrap(String key) {
+    private List<FormattedCharSequence> wrap(String key) {
         return font.split(Component.translatable(key), Math.min(260, panelWidth - 40));
     }
 
