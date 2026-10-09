@@ -695,11 +695,6 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                     Component.translatable("config.maid_self_talk.screen.player_settings.custom_prompt.overridden_hint"),
                     this.globalPromptBox.getX(), colTop + 158, 0xAAAAAA);
         }
-        // 常驻说明行：与下面的状态提示链分开各占一行——同一条 else-if 链最多显示一条，
-        // 塞进链里会被状态提示顶掉，而这条说明要求常驻可见
-        graphics.drawCenteredString(this.font,
-                Component.translatable("config.maid_self_talk.screen.player_settings.defaults_hint"),
-                this.width / 2, colTop + 212, 0xAAAAAA);
         int hintY = colTop + 200;
         if (!this.adminEnabled) {
             graphics.drawCenteredString(this.font,

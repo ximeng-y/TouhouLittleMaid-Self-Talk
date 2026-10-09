@@ -68,6 +68,8 @@ public final class EnvironmentContextPanel {
     private static final int EXPERIMENT_COLOR = 0xFFFFAA00;
 
     private static final int HEADER_HEIGHT = 102;
+    /** 常驻说明与可滚动列表之间的间距 */
+    private static final int DESCRIPTION_GAP = 6;
     private static final int FOOTER_HEIGHT = 30;
     private static final int ROW_HEIGHT = 24;
     private static final int BUTTON_HEIGHT = 20;
@@ -104,6 +106,8 @@ public final class EnvironmentContextPanel {
     private static final int FOCUS_MODE = -3;
 
     private final Font font;
+    /** 随面板宽度重新换行，说明不随列表滚动 */
+    private List<FormattedCharSequence> descriptionLines = List.of();
 
     // ===== 会话与同步状态（resize 保留，关闭重开时重置） =====
     private boolean open;
@@ -230,7 +234,11 @@ public final class EnvironmentContextPanel {
         this.panelHeight = Math.min(PANEL_MAX_HEIGHT, screenHeight - SCREEN_MARGIN);
         this.panelX = (screenWidth - panelWidth) / 2;
         this.panelY = (screenHeight - panelHeight) / 2;
-        this.listTop = panelY + HEADER_HEIGHT;
+        this.descriptionLines = font.split(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.context.description"),
+                Math.max(1, panelWidth - NAME_MARGIN * 2));
+        // 按实际换行高度为说明留位，只收缩列表视口，不把文字追加到屏幕底部。
+        this.listTop = panelY + HEADER_HEIGHT + descriptionLines.size() * font.lineHeight + DESCRIPTION_GAP;
         this.listBottom = panelY + panelHeight - FOOTER_HEIGHT;
         this.viewportHeight = Math.max(0, listBottom - listTop);
         this.contentHeight = EnvironmentContextOption.ALL.size() * ROW_HEIGHT;
@@ -576,6 +584,11 @@ public final class EnvironmentContextPanel {
                     "config.maid_self_talk.screen.player_settings.context.natural_language");
             renderHeaderRow(graphics, mouseX, mouseY, historyModeButton, historyModeY(),
                     "config.maid_self_talk.screen.player_settings.context.history");
+            int descriptionY = panelY + HEADER_HEIGHT;
+            for (FormattedCharSequence line : descriptionLines) {
+                graphics.drawString(font, line, panelX + NAME_MARGIN, descriptionY, SUBTITLE_COLOR, false);
+                descriptionY += font.lineHeight;
+            }
 
             renderList(graphics, mouseX, mouseY);
             renderFooter(graphics);
