@@ -29,9 +29,6 @@ public final class SelfTalkClothConfig {
                         Component.translatable("config.maid_self_talk.title"))
                 .setExpanded(true)
                 .setTooltip(Component.translatable("config.maid_self_talk.title.tooltip"));
-        // 首位放一行常驻说明：默认值即可用，不必逐项改（子分类展开即可看到，不用悬停）
-        main.add(0, entryBuilder.startTextDescription(
-                Component.translatable("config.maid_self_talk.title.description")).build());
         main.add(entryBuilder.startBooleanToggle(Component.translatable("config.maid_self_talk.enabled"),
                         Config.ENABLED.get())
                 .setDefaultValue(false)
