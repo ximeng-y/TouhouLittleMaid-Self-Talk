@@ -112,11 +112,7 @@ public final class AutonomousChatHistoryMigration {
         }
         SelfTalkProvenance.ensureLegacyInitialized(maid, deque);
         Set<String> fingerprints = SelfTalkProvenance.selfTalkFingerprints(maid);
-        if (fingerprints.isEmpty()) {
-            history.markMigrationDone();
-            return;
-        }
-        // 一次取同源快照：迁移要按这份顺序分配顺序号并从队列删除这些具体消息。
+        // 一次取同源快照：既用于全量补号，也用于按原次序迁出自话、从队列删除这些具体消息。
         // TLM 的 CappedQueue.add 用 offerFirst，队头是最新消息，直接迭代得到的是「新到旧」；
         // 必须用 descendingIterator 翻成真正的「旧到新」——否则递增序号会按时间倒序分配，
         // 档案与有效上下文被整体反转，latestValidSelfTalk() 甚至会把最旧的一条当成最新自话
@@ -127,12 +123,18 @@ public final class AutonomousChatHistoryMigration {
         List<LLMMessage> migrated = new ArrayList<>();
         List<String> migratedFingerprints = new ArrayList<>();
         history.runExclusive(() -> {
-            // 先为整条旧历史按旧到新补号，再搬出自话：旧存档读入时 TLM 直接调 CappedQueue.add，
-            // 不经过四个 add*History 的序号钩子，此时普通消息与自话都没有号。
-            // 若只给指纹命中的自话补号，普通消息要等 writeTag 才拿到更大的号，
-            // 原本的「普通 A → 自话 S → 普通 B」会持久化成「S(1) → A(2) → B(3)」，
-            // 自话被挤到它前面那条普通聊天之前。先补全整条历史即可保住相对位置。
+            // 先为整条旧历史按旧到新补号——无论有没有可迁移的旧自话都必须补号。
+            // 旧存档读入时 TLM 直接调 CappedQueue.add，不经过四个 add*History 的序号钩子，
+            // 此时普通消息与自话都没有号。若因「没有自话指纹」在补号前就提前返回，
+            // 之后第一条欢迎语/自话会先追加独立记录并取得较小的序号，而旧 TLM 历史要等
+            // writeTag 才按旧→新补更大的号，混合展示与模型上下文便永久呈现为
+            // 「新独立记录在前、旧普通历史在后」。先补全整条历史即可保住相对位置；
+            // 原本的「普通 A → 自话 S → 普通 B」才不会错位成「S(1) → A(2) → B(3)」。
             history.assignSeqsForLegacyHistory(snapshot);
+            if (fingerprints.isEmpty()) {
+                // 没有可迁移的旧自话：补号已完成，不再搬动任何消息
+                return;
+            }
             for (LLMMessage message : snapshot) {
                 if (!isMigratableSelfTalk(message, fingerprints)) {
                     continue;

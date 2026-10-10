@@ -12,6 +12,7 @@
     "MaidAIChatManagerMixin",
     "LLMCallbackMixin",
     "SelfTalkTtsMixin",
+    "SelfTalkSystemTtsMixin",
     "GameContextRegisterAccessor"
   ],
   "client": [

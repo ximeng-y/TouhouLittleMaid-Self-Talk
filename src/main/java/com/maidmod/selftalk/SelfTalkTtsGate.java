@@ -3,6 +3,9 @@ package com.maidmod.selftalk;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.server.level.ServerLevel;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 /**
  * 自话／欢迎语的清空令牌中转站：把请求令牌传进 TLM 在 {@code onSuccess} 期间新建的 TTS 回调。
  * <p>
@@ -26,6 +29,24 @@ import net.minecraft.server.level.ServerLevel;
 public final class SelfTalkTtsGate {
 
     private static final ThreadLocal<SelfTalkRequestToken> CURRENT = new ThreadLocal<>();
+
+    /**
+     * 系统 TTS 延迟任务的令牌中转：键为（女仆实体 id + 等待气泡 id），值为发起请求的令牌。
+     * <p>
+     * 系统 TTS（{@code TTSSystemServices} 分支）不新建 {@code TTSCallback}，而是在
+     * {@code MaidAIChatManager.onPlaySoundLocal} 内另投递一个主线程任务去发声并上屏；
+     * 该任务执行时 {@link #CURRENT} 这条登记早已随 {@link #runWith} 结束而清除，无法再读到令牌。
+     * 因此在 {@code onPlaySoundLocal} 的同步区间（仍在 {@code runWith} 内）把令牌按本请求的
+     * 气泡 id 寄存，延迟任务执行时再按同一键取走并判失效。
+     * <p>
+     * {@code MaidAIChatManager} 是每只女仆共享、跨请求复用的对象，不能用实例字段寄存
+     * （并发请求会相互覆盖）；气泡 id 由 {@code System.currentTimeMillis()} 生成、仅在单只女仆内近似唯一，
+     * 故键里带上女仆 id 以免跨女仆同毫秒碰撞。每次 arm 必有对应的 consume（延迟任务无条件投递），不积累。
+     */
+    private static final Map<SystemTtsKey, SelfTalkRequestToken> SYSTEM_PENDING = new ConcurrentHashMap<>();
+
+    private record SystemTtsKey(int maidId, long waitingChatBubbleId) {
+    }
 
     private SelfTalkTtsGate() {
     }
@@ -56,6 +77,34 @@ public final class SelfTalkTtsGate {
     /** 当前线程上正在发起 TTS 的请求令牌；不在登记区间内（玩家聊天等）返回 null */
     public static SelfTalkRequestToken currentToken() {
         return CURRENT.get();
+    }
+
+    /**
+     * 系统 TTS 发起时（{@code onPlaySoundLocal} HEAD，仍在 {@link #runWith} 同步区间内）寄存本请求令牌，
+     * 供随后投递的主线程发声任务取用。
+     * <p>
+     * 令牌为 null（普通玩家聊天等未登记路径）或气泡 id 为 0 时不寄存——延迟任务届时取不到令牌，
+     * 按「无令牌」正常交付，与未安装本 mod 时一致。
+     */
+    public static void armSystemTts(EntityMaid maid, long waitingChatBubbleId) {
+        SelfTalkRequestToken token = CURRENT.get();
+        if (token == null || maid == null || waitingChatBubbleId == 0) {
+            return;
+        }
+        SYSTEM_PENDING.put(new SystemTtsKey(maid.getId(), waitingChatBubbleId), token);
+    }
+
+    /**
+     * 系统 TTS 的主线程发声任务执行时（延迟任务 HEAD）取走并消费本请求令牌，判断是否已被清空作废。
+     * <p>
+     * 取走即移除（一次消费，不积累）；未寄存（玩家聊天）或令牌仍有效时返回 false，按原样交付。
+     */
+    public static boolean consumeSystemTtsInvalidated(EntityMaid maid, long waitingChatBubbleId) {
+        if (maid == null || waitingChatBubbleId == 0) {
+            return false;
+        }
+        SelfTalkRequestToken token = SYSTEM_PENDING.remove(new SystemTtsKey(maid.getId(), waitingChatBubbleId));
+        return token != null && !token.isValid();
     }
 
     /**
