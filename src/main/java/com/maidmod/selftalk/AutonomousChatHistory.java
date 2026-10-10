@@ -341,6 +341,16 @@ public final class AutonomousChatHistory {
      * @param snapshot 与本次 TLM 历史序列<b>同一份</b>快照（由调用方从 writeToTag 内部
      *                 实际序列化的那一份捕获），顺序元数据与之逐位对应
      */
+    /**
+     * 写入自定义 tag。
+     *
+     * @param snapshot 与本次 TLM 历史序列<b>同一份</b>快照（由调用方从 writeToTag 内部
+     *                 实际序列化的那一份捕获）。注意它的方向是 TLM 的序列化方向
+     *                 ——{@code CappedQueue.add} 用 {@code offerFirst}，
+     *                 {@code Lists.newArrayList(deque)} 按队头到队尾迭代，因此这份快照是「新到旧」；
+     *                 本档案的顺序表统一按「旧到新」存放（与 {@link #readTag} 的入参同向），
+     *                 下面反向遍历以完成这一步归一。
+     */
     public void writeTag(CompoundTag parent, List<LLMMessage> snapshot) {
         CompoundTag tag = new CompoundTag();
         synchronized (lock) {
@@ -350,13 +360,16 @@ public final class AutonomousChatHistory {
             tag.put(TAG_ARCHIVE, saveRecords(archive));
             tag.put(TAG_VALID_SELF_TALK, saveRecords(validSelfTalk));
             // 顺序元数据必须与本次序列化的 TLM 历史逐位对应：
-            // 只对同一份快照取值，绝不分别读取两次可变队列再假设下标一致
-            long[] order = snapshot == null ? new long[0] : new long[snapshot.size()];
-            for (int i = 0; snapshot != null && i < snapshot.size(); i++) {
-                LLMMessage message = snapshot.get(i);
+            // 只对同一份快照取值，绝不分别读取两次可变队列再假设下标一致。
+            // 反向遍历把「新到旧」翻成「旧到新」——两处方向不一致会让读档后每个序号
+            // 绑到相反的一端（正常重启／卸载重载即可触发），插在两者之间的自话合并位置随之错乱。
+            int count = snapshot == null ? 0 : snapshot.size();
+            long[] order = new long[count];
+            for (int i = 0; i < count; i++) {
+                LLMMessage message = snapshot.get(count - 1 - i);
                 Long seq = orderByMessage.get(message);
                 if (seq == null) {
-                    // 旧存档未补号的消息：按原队列旧到新的顺序一次性补号
+                    // 旧存档未补号的消息：按旧到新的顺序一次性补号（保持单调且与时间顺序一致）
                     seq = nextSeq++;
                     orderByMessage.put(message, seq);
                 }

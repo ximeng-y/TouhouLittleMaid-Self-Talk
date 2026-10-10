@@ -23,6 +23,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -53,13 +54,32 @@ import java.util.regex.Matcher;
 @Mixin(MaidAIChatManager.class)
 public abstract class MaidAIChatManagerMixin {
 
+    /**
+     * 旧数据迁移：必须在 TLM <b>第一次读取历史并构造副本之前</b>执行。
+     * <p>
+     * TLM 的路径是 {@code chat() → tryToChat() → getMessages() → buildMessage()}，
+     * {@code buildMessage} 会把历史 deque 拷贝进 {@code messages}；随后 {@code normalChat}
+     * 拿到的已是那份拷贝。若把迁移放在 {@code normalChat} 的 HEAD，删除只作用于 deque，
+     * 已经拷好的旧自话仍留在本次请求里，而下方 {@code mergeValidSelfTalk} 又把刚归档的同一条
+     * 插入一次——首个请求会重复包含旧自话，还可能分属不同段标签。
+     * <p>
+     * 此注入点对「玩家首次聊天发生在自话触发、保存/同步或压缩之前」这一加载路径同样有效，
+     * 是玩家 chat 侧唯一的保证点。幂等：迁移完成后立即返回。
+     */
+    @Inject(method = "getMessages", at = @At("HEAD"))
+    private void maid_self_talk$migrateBeforeHistorySnapshot(MaidAIChatManager chatManager, String language,
+                                                             CallbackInfoReturnable<List<LLMMessage>> cir) {
+        AutonomousChatHistoryMigration.ensureMigratedOnServerThread(
+                ((MaidAIChatManager) (Object) this).getMaid());
+    }
+
     @Inject(method = "normalChat", at = @At("HEAD"))
     private void maid_self_talk$injectInterChatContext(String message, List<LLMMessage> messages,
                                                        LLMClient chatClient, CallbackInfo ci) {
         MaidAIChatManager self = (MaidAIChatManager) (Object) this;
         EntityMaid maid = self.getMaid();
-        // 旧数据迁移：本次请求的历史区即将被组装，先把旧指纹标明的自话搬进独立档案，
-        // 再开始合并——迁移必须发生在读取 TLM 历史之前，否则旧自话会被重复注入（幂等）
+        // 迁移已由 getMessages 的 HEAD 完成（早于历史副本构造）；此处只做兜底，
+        // 覆盖 getMessages 未被调用的异常路径，幂等且不产生重复记录
         AutonomousChatHistoryMigration.ensureMigratedOnServerThread(maid);
         // 主人插话：真实派发的主动聊天会立即终止该女仆所在的连续互聊链，
         // 必须在注入互聊窗口之前处理，否则被丢弃的旧回复会随窗口重新进入本次请求

@@ -45,9 +45,13 @@ public final class AutonomousChatHistoryView {
      * 对不上的界面消息（理论上不该有）按原位置保留，不参与归并。
      */
     public static void mergeInto(EntityMaid maid, List<LLMMessage> display) {
-        if (maid == null || display == null || display.isEmpty()) {
+        if (maid == null || display == null) {
             return;
         }
+        // 空的普通聊天列表同样要展示独立档案：女仆已有欢迎语／自话或互聊、玩家却还没和她
+        // 普通聊天时，TLM 的 transformMessage 生成的就是空显示列表。此处若因空列表早退，
+        // 连 visibleArchive() 都不会读，实际已持久化的独立记录一条也看不到——
+        // 而「独立存储后先有自话／欢迎语、后有玩家聊天」正是本功能自然出现的状态。
         AutonomousChatHistory archive = AutonomousChatHistoryHost.of(maid);
         if (archive == null) {
             return;

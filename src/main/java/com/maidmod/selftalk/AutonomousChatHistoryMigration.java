@@ -116,8 +116,13 @@ public final class AutonomousChatHistoryMigration {
             history.markMigrationDone();
             return;
         }
-        // 一次取同源快照：迁移要按这份顺序分配顺序号并从队列删除这些具体消息
-        List<LLMMessage> snapshot = new ArrayList<>(deque); // 旧到新
+        // 一次取同源快照：迁移要按这份顺序分配顺序号并从队列删除这些具体消息。
+        // TLM 的 CappedQueue.add 用 offerFirst，队头是最新消息，直接迭代得到的是「新到旧」；
+        // 必须用 descendingIterator 翻成真正的「旧到新」——否则递增序号会按时间倒序分配，
+        // 档案与有效上下文被整体反转，latestValidSelfTalk() 甚至会把最旧的一条当成最新自话
+        // 注入精简／检索请求。该错误随迁移完成标记持久化，不是一次性的界面排序问题。
+        List<LLMMessage> snapshot = new ArrayList<>(deque.size()); // 旧到新
+        deque.descendingIterator().forEachRemaining(snapshot::add);
         String speakerName = AutonomousChatHistoryHost.displayNameOf(maid);
         List<LLMMessage> migrated = new ArrayList<>();
         List<String> migratedFingerprints = new ArrayList<>();
