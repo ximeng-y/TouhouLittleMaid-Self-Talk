@@ -93,7 +93,10 @@ public final class MaidSelfTalkService {
 
         // 互聊窗口手动拼接：让自话能读到最近保留的互聊上下文，但不进 TLM 历史
         SelfTalkState.State chatState = SelfTalkState.get(maid.getId());
-        List<LLMMessage> interWindow = new ArrayList<>(chatState.windowInterChatMsgs);
+        List<LLMMessage> interWindow = new ArrayList<>(chatState.windowInterChatMsgs.size());
+        for (SelfTalkState.InterChatWindowEntry entry : chatState.windowInterChatMsgs) {
+            interWindow.add(entry.message());
+        }
         for (LLMMessage wm : interWindow) {
             messages.add(wm);
         }
@@ -123,11 +126,14 @@ public final class MaidSelfTalkService {
         SelfTalkHistoryAssembler.HistoryLayout layout =
                 SelfTalkHistoryAssembler.split(messages, historyCount, interWindow.size());
         boolean toolEnabled = PlayerSettingsStore.isToolCallEnabledForMaid(maid.level().getServer(), maid);
+        // 令牌在会话开始这一刻捕获：检索模式的规划可能耗时很久，若等到正式派发时才取，
+        // 清空恰好发生在规划期间就会被漏掉（迟到结果会照常写档案）
+        SelfTalkRequestToken token = SelfTalkRequestToken.capture(maid.getId());
         HistoryContextSession session = new HistoryContextSession(maid, chatManager, site, selfTalkLanguage,
                 prompt, mode, environment, layout.systemPrefix(), layout.history(), layout.window(),
-                cachedRecall, () -> true,
+                cachedRecall, token::isValid,
                 prepared -> dispatchSelfTalk(maid, chatManager, site, prepared, welcome, keep, broadcastRange,
-                        toolEnabled),
+                        toolEnabled, token),
                 null,
                 welcome ? p -> UserPromptContexts.addContext(maid, p + SelfTalkContexts.buildRandomContext(maid))
                         : null);
@@ -143,7 +149,7 @@ public final class MaidSelfTalkService {
      */
     private static boolean dispatchSelfTalk(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
                                             List<LLMMessage> messages, boolean welcome, int keep,
-                                            double broadcastRange, boolean toolEnabled) {
+                                            double broadcastRange, boolean toolEnabled, SelfTalkRequestToken token) {
         // 标记进行中（防重入）
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.selfTalkPending = true;
@@ -151,12 +157,16 @@ public final class MaidSelfTalkService {
 
         LLMClient client = site.client();
         try {
-            client.chat(new SelfTalkCallback(chatManager, messages, welcome, keep, broadcastRange, toolEnabled));
+            SelfTalkCallback callback = new SelfTalkCallback(chatManager, messages, welcome, keep,
+                    broadcastRange, toolEnabled, token);
+            state.currentSelfTalkCallback = callback;
+            client.chat(callback);
         } catch (Throwable t) {
             // client.chat 同步阶段可能抛异常（如 site.url 非法导致 URI.create 失败、header 构造异常）：
             // 清掉进行中标记避免该女仆自话永久卡死，绝不向上抛（调用方可能处于实体 tick 路径）
             state.selfTalkPending = false;
             state.selfTalkPendingSinceTick = -1;
+            state.currentSelfTalkCallback = null;
             MaidSelfTalkMod.LOGGER.warn("Failed to dispatch self-talk request for maid {}", maid.getId(), t);
             return false;
         }
@@ -164,36 +174,42 @@ public final class MaidSelfTalkService {
     }
 
     /**
-     * 自话/欢迎回复返回后（服务端主线程）执行：记录本次回复并做遗忘检查。
+     * 自话/欢迎回复返回后（服务端主线程）执行：把本次回复并入自话计数窗口并做遗忘检查。
      * <p>
      * 遗忘规则：当前自话窗口（从玩家上一次正常 chat 起）内保留条数触碰上限时，
-     * 删除窗口内除本次外的全部自话记录，仅保留本次——防止自话记录无限撑大上下文。
-     * 玩家发起 chat 时窗口重置（旧自话记录"赦免"保留在上下文中，计数重新开始）。
+     * <b>只从有效自话上下文移除</b>窗口内除本次外的全部记录，仅保留本次——
+     * 展示档案完全不受影响（旧记录仍可在聊天记录界面里查看）。
+     * 玩家发起 chat 时窗口重置（旧自话记录"赦免"，继续留在有效上下文里，计数重新开始）。
+     *
+     * @param record 本次回复新建的独立记录；为空（无可写档案／已被清空作废）时只复位 pending
      */
-    public static void onSelfTalkFinished(EntityMaid maid, SelfTalkCallback callback) {
-        SelfTalkState.State state = SelfTalkState.get(maid.getId());
-        state.selfTalkPending = false;
-        state.selfTalkPendingSinceTick = -1;
-        // 自话回复已写入历史：原始历史变了，但自话不进检索库——只做失效标记，
-        // 下次检索时来源序列不变即复用，不白白重新分词（见 HistoryRetrievalCache）
+    public static void onSelfTalkFinished(EntityMaid maid, SelfTalkCallback callback, AutonomousChatRecord record) {
+        SelfTalkState.State state = SelfTalkState.peek(maid.getId());
+        if (state != null && state.currentSelfTalkCallback == callback) {
+            state.selfTalkPending = false;
+            state.selfTalkPendingSinceTick = -1;
+            state.currentSelfTalkCallback = null;
+        }
+        // 自话回复已进独立档案：原始 TLM 玩家历史没变，但“最近一条自话”变了——只做失效标记，
+        // 下次检索时来源序列不变即复用，不白白重新分词（见 HistoryRetrievalCache）。
+        // 注意：独立记录不进检索库，检索库仍只含玩家对话
         HistoryRetrievalCache.invalidate(maid);
-
-        // 本次回复的 assistant 消息：回调在响应线程写历史后立即捕获（CappedQueue 新消息在队头）
-        LLMMessage last = callback.getLastAssistantMessage();
-        if (last == null) {
+        if (record == null) {
             return;
         }
-        state.windowSelfTalkMsgs.add(last);
+        // 计数窗口记录的是本次已在有效上下文里的那条记录（按身份，便于精确移除）
+        state = SelfTalkState.get(maid.getId());
+        state.windowSelfTalkMsgs.add(record);
 
         int keep = callback.getKeepSelfTalkCount();
         if (state.windowSelfTalkMsgs.size() >= keep && state.windowSelfTalkMsgs.size() > 1) {
-            // 删除窗口内除本次外的所有自话记录（仅保留本次）
-            Deque<LLMMessage> deque = callback.getChatManager().getHistory().getDeque();
-            List<LLMMessage> toRemove = new ArrayList<>(
+            // 从有效自话上下文移除窗口内除本次外的全部记录（仅保留本次）；展示档案不动
+            List<AutonomousChatRecord> toRemove = new ArrayList<>(
                     state.windowSelfTalkMsgs.subList(0, state.windowSelfTalkMsgs.size() - 1));
-            deque.removeAll(toRemove);
-            // 指纹随消息同删，保证判定与历史内容始终同步
-            SelfTalkProvenance.removeByMessages(maid, toRemove);
+            AutonomousChatHistory archive = AutonomousChatHistoryHost.of(maid);
+            if (archive != null) {
+                archive.removeFromValidContext(toRemove);
+            }
             state.windowSelfTalkMsgs.removeAll(toRemove);
         }
     }
@@ -202,9 +218,10 @@ public final class MaidSelfTalkService {
      * 玩家发起 chat（请求已真实派发）：清空自话/互聊计数窗口（打断连续，计数重新开始），
      * 并重新计时自话与互聊冷却。
      * <p>
-     * 内容保留：自话记录已随 TLM 回调写入历史 deque，互聊记录已在 normalChat HEAD
-     * 注入本次请求的上下文（见 {@link com.maidmod.selftalk.mixin.MaidAIChatManagerMixin}），
-     * 清空只重置计数，不丢已注入内容。
+     * 内容保留：自话记录已写进独立档案（自动遗忘只影响有效上下文，展示档案不动），
+     * 互聊记录已在 normalChat HEAD 注入本次请求的上下文
+     * （见 {@link com.maidmod.selftalk.mixin.MaidAIChatManagerMixin}），
+     * 这里清空的只是运行时计数窗口，不丢已注入内容、也不动已建立的有效自话。
      */
     public static void onPlayerChatStart(EntityMaid maid) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
@@ -260,5 +277,51 @@ public final class MaidSelfTalkService {
     private static boolean isOwnerNearby(EntityMaid maid) {
         var owner = maid.getOwner();
         return owner != null && maid.distanceToSqr(owner) <= OWNER_NEARBY_RANGE * OWNER_NEARBY_RANGE;
+    }
+
+    /**
+     * 手动清空记忆（{@code clearAllChatMemory}）后的服务端收尾：作废本 mod 在途请求
+     * （服务端主线程调用）。
+     * <p>
+     * 做法是推进清空世代（见 {@link SelfTalkRequestToken}），令清空前捕获的一切令牌失效：
+     * <ul>
+     *   <li>本女仆在途的自话／欢迎语：迟到结果不写档案、不进有效上下文、不发事件、不广播，
+     *       pending 复位也按回调归属校验，不会清掉清空之后新请求的状态；</li>
+     *   <li>本女仆在途的互聊请求：作废会话与已派发的正式回调，并作废本女仆所在链——
+     *       与主人插话同语义（目标禁言 + 链终止），确保另一侧的旧链不能重新向被清空女仆投递消息。</li>
+     * </ul>
+     * 只处理本 mod 的请求，不扩展为全面重写 TLM 普通玩家请求的取消机制。
+     */
+    public static void invalidateRequestsOnClear(EntityMaid maid) {
+        SelfTalkState.State state = SelfTalkState.get(maid.getId());
+        state.clearGeneration++;
+        SelfTalkRequestToken.advanceClearedUpTo(maid.getId(), state.clearGeneration);
+        // 清空后旧窗口/计数一律不保留：它们引用的是已被隐藏的旧记录
+        state.windowSelfTalkMsgs.clear();
+        state.windowInterChatMsgs.clear();
+        state.currentSelfTalkCallback = null;
+        // 互聊：走主人插话同一套收尾（禁言 + 中断链 + 丢弃顺延），另一侧不会再把消息投递进来
+        InterChatChain chain = InterChatChain.activeFor(maid);
+        if (chain != null) {
+            long chainId = chain.id();
+            chain.interruptByOwnerChat(maid);
+            SelfTalkDispatcher.dropQueuedForChain(maid, chainId);
+            InterChatRequest request = chain.requestOf(maid);
+            if (request != null) {
+                request.cancel();
+            }
+            InterChatChain.release(chain);
+        } else {
+            InterChatRequest leftover = state.currentInterChatRequest;
+            if (leftover != null) {
+                SelfTalkDispatcher.dropQueuedForChain(maid, leftover.chainId());
+                leftover.cancel();
+            }
+        }
+        // 牌面（pending）随作废的请求一并复位：作废回调不会再走正常终态回来清它
+        state.selfTalkPending = false;
+        state.selfTalkPendingSinceTick = -1;
+        state.interChatPending = false;
+        state.interChatPendingSinceTick = -1;
     }
 }

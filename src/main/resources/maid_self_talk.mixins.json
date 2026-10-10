@@ -11,10 +11,13 @@
     "MaidAIChatManagerAccessor",
     "MaidAIChatManagerMixin",
     "LLMCallbackMixin",
+    "SelfTalkTtsMixin",
+    "SelfTalkSystemTtsMixin",
     "GameContextRegisterAccessor"
   ],
   "client": [
-    "AIChatScreenMixin"
+    "AIChatScreenMixin",
+    "HistoryAIChatScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1

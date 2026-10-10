@@ -10,6 +10,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 女仆互聊服务：发起、回应与互聊窗口维护。
@@ -26,17 +27,20 @@ public final class MaidInterChatService {
     /** 发起者消息为链上第 1 条 */
     public static boolean triggerInitiator(EntityMaid initiator, EntityMaid responder,
                                            double broadcastRange, InterChatChain chain) {
-        return triggerInternal(initiator, responder, null, false, broadcastRange, 1, chain);
+        return triggerInternal(initiator, responder, null, null, false, broadcastRange, 1, chain);
     }
 
-    /** 回答者（链式续接），沿用本链的 chainId */
-    public static boolean triggerResponder(EntityMaid responder, EntityMaid initiator, String peerText,
-                                           double broadcastRange, int chainRound, InterChatChain chain) {
-        return triggerInternal(responder, initiator, peerText, true, broadcastRange, chainRound, chain);
+    /** 回答者（链式续接），沿用本链的 chainId；{@code peerMessageId} 为对方那条发言的消息身份 */
+    public static boolean triggerResponder(EntityMaid responder, EntityMaid initiator, UUID peerMessageId,
+                                           String peerText, double broadcastRange, int chainRound,
+                                           InterChatChain chain) {
+        return triggerInternal(responder, initiator, peerMessageId, peerText, true, broadcastRange,
+                chainRound, chain);
     }
 
-    private static boolean triggerInternal(EntityMaid maid, EntityMaid peer, String peerText, boolean isResponder,
-                                           double broadcastRange, int chainRound, InterChatChain chain) {
+    private static boolean triggerInternal(EntityMaid maid, EntityMaid peer, UUID peerMessageId, String peerText,
+                                           boolean isResponder, double broadcastRange, int chainRound,
+                                           InterChatChain chain) {
         MaidAIChatManager chatManager = maid.getAiChatManager();
         if (chatManager == null) return false;
         if (!AIConfig.LLM_ENABLED.get()) return false;
@@ -50,11 +54,16 @@ public final class MaidInterChatService {
         int historyCount = messages.size();
         int windowCount = 0;
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
-        List<LLMMessage> windowCopy = new ArrayList<>(state.windowInterChatMsgs);
+        List<LLMMessage> windowCopy = new ArrayList<>(state.windowInterChatMsgs.size());
+        for (SelfTalkState.InterChatWindowEntry entry : state.windowInterChatMsgs) {
+            windowCopy.add(entry.message());
+        }
         for (LLMMessage wm : windowCopy) { messages.add(wm); }
         windowCount += windowCopy.size();
         if (isResponder && peerText != null && !peerText.isBlank()) {
-            boolean alreadyInWindow = !windowCopy.isEmpty() && windowCopy.get(windowCopy.size() - 1).message().equals(peerText);
+            // 按消息身份判定是否已在窗口里（本轮之前可能已由对方投递写入）；
+            // 不能按正文相等判定——双方重复说出相同文字属于不同消息
+            boolean alreadyInWindow = peerMessageId != null && containsMessageId(state, peerMessageId);
             if (!alreadyInWindow) {
                 messages.add(LLMMessage.assistantChat(maid, peerText));
                 windowCount++;
@@ -72,6 +81,9 @@ public final class MaidInterChatService {
         HistoryContextMode mode = PlayerSettingsStore.getHistoryContextModeForMaid(maid.level().getServer(), maid);
         SelfTalkContexts.EnvironmentSnapshot environment =
                 SelfTalkContexts.collectEnvironment(maid, language);
+        // 有效自话的按序合并不在这里做：切出的历史区<b>只含 TLM 玩家历史</b>，
+        // 三种模式下的合并与来源登记统一由 {@link HistoryContextSession} 完成，
+        // 避免同一批自话被注入两次
         SelfTalkHistoryAssembler.HistoryLayout layout =
                 SelfTalkHistoryAssembler.split(messages, historyCount, windowCount);
         // Tool 判定在派发时取（dispatcher 顺延队列是延迟派发的，入队时不判定）
@@ -90,7 +102,7 @@ public final class MaidInterChatService {
                 // 迟到结果不再派发
                 () -> !chain.interrupted() && !request.isCancelled(),
                 // 正式派发（服务端主线程）：把本轮请求身份带上，标记正式阶段并登记回调
-                prepared -> dispatchInterChat(maid, chatManager, site, prepared, peer, peerText,
+                prepared -> dispatchInterChat(maid, chatManager, site, prepared, peer, peerMessageId, peerText,
                         broadcastRange, isResponder, chainRound, toolEnabled, chain, request),
                 // 检索成品回报：链上后续轮次据此判断「首次检索已完成」（空结果同样算完成）
                 blocks -> recordChainRecall(chain, maid, blocks),
@@ -117,14 +129,16 @@ public final class MaidInterChatService {
      * 否则该身份会被后续迟到结果误用。
      */
     private static boolean dispatchInterChat(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
-                                             List<LLMMessage> messages, EntityMaid peer, String peerText,
+                                             List<LLMMessage> messages, EntityMaid peer, UUID peerMessageId,
+                                             String peerText,
                                              double broadcastRange, boolean isResponder, int chainRound,
                                              boolean toolEnabled, InterChatChain chain, InterChatRequest request) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.interChatPending = true;
         state.interChatPendingSinceTick = maid.level().getServer().getTickCount();
-        InterChatCallback callback = new InterChatCallback(chatManager, messages, peer, peerText,
-                broadcastRange, isResponder, chainRound, toolEnabled, chain, request);
+        InterChatCallback callback = new InterChatCallback(chatManager, messages, peer, peerMessageId, peerText,
+                broadcastRange, isResponder, chainRound, toolEnabled, chain, request,
+                SelfTalkRequestToken.capture(maid.getId()));
         // 构造器已创建等待气泡：先登记资源，再调用可能同步失败的外部客户端。
         request.attachFormalCallback(callback);
         try {
@@ -157,21 +171,88 @@ public final class MaidInterChatService {
         }
     }
 
-    public static void addInterChatMessage(EntityMaid maid, String text) {
+    /**
+     * 本女仆自己说出的一句话：<b>归档 + 写入运行时窗口</b>，返回新建的档案记录。
+     * <p>
+     * 顺序不可颠倒：先归档拿到消息身份，再写窗口——窗口条目带着同一条消息的 UUID，
+     * 后续入站补齐与去重都按身份判定。本方法只写本人视角，对方视角由
+     * {@link #deliverToPeer} 按同一消息身份写入。
+     *
+     * @return 新建的档案记录；女仆无可写档案时返回 null（调用方据此放弃续接）
+     */
+    public static AutonomousChatRecord addInterChatMessage(EntityMaid maid, String text) {
+        return archive(maid, maid.getUUID(), AutonomousChatHistoryHost.displayNameOf(maid), text);
+    }
+
+    /**
+     * 把一条消息（身份已定）投递给对方：写入对方档案与对方运行时窗口。
+     * <p>
+     * 用的是<b>同一条消息身份</b>——双方档案里这条消息 UUID 相同、顺序号按各自视角分别分配；
+     * 对方被主人插话后不得为「双方记录一致」而补写它未收到的发言（由调用方判定许可）。
+     */
+    public static void deliverToPeer(EntityMaid peer, AutonomousChatRecord message) {
+        if (peer == null || message == null) {
+            return;
+        }
+        AutonomousChatHistory archive = AutonomousChatHistoryHost.of(peer);
+        if (archive == null) {
+            return;
+        }
+        AutonomousChatRecord copy = archive.appendCopy(message);
+        if (copy != null) {
+            addWindowEntry(peer, copy);
+        }
+    }
+
+    /**
+     * 补齐需要回应的对方发言到本人运行时窗口（只补窗口，<b>不再归档</b>——
+     * 该发言已由对方或它的投递写进本人档案）。
+     * <p>
+     * 按消息身份判定是否已在窗口里：同一条消息重复补齐无意义，
+     * 而重复说出相同文字属于不同消息，必须各自保留。
+     */
+    public static void syncPeerMessageToWindow(EntityMaid maid, UUID messageId, String peerText) {
+        if (peerText == null || peerText.isBlank() || messageId == null) return;
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
-        state.windowInterChatMsgs.add(LLMMessage.assistantChat(maid, text));
+        if (containsMessageId(state, messageId)) {
+            return;
+        }
+        state.windowInterChatMsgs.add(new SelfTalkState.InterChatWindowEntry(messageId,
+                LLMMessage.assistantChat(maid, peerText)));
         trimInterChatWindow(state);
     }
 
-    public static void syncPeerMessageToWindow(EntityMaid maid, String peerText) {
-        if (peerText == null || peerText.isBlank()) return;
+    /** 把一条档案记录对应的消息写进本人运行时窗口 */
+    private static void addWindowEntry(EntityMaid maid, AutonomousChatRecord record) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
-        if (!state.windowInterChatMsgs.isEmpty()) {
-            String last = state.windowInterChatMsgs.get(state.windowInterChatMsgs.size() - 1).message();
-            if (peerText.equals(last)) return;
-        }
-        state.windowInterChatMsgs.add(LLMMessage.assistantChat(maid, peerText));
+        state.windowInterChatMsgs.add(new SelfTalkState.InterChatWindowEntry(record.id(),
+                LLMMessage.assistantChat(maid, record.chatText())));
         trimInterChatWindow(state);
+    }
+
+    /** 该消息身份是否已在本人运行时窗口中 */
+    private static boolean containsMessageId(SelfTalkState.State state, UUID messageId) {
+        if (messageId == null) {
+            return false;
+        }
+        for (SelfTalkState.InterChatWindowEntry entry : state.windowInterChatMsgs) {
+            if (messageId.equals(entry.id())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 归档一条互聊消息并返回记录（无档案时为 null） */
+    private static AutonomousChatRecord archive(EntityMaid maid, UUID speakerId, String speakerName, String text) {
+        AutonomousChatHistory archive = AutonomousChatHistoryHost.of(maid);
+        if (archive == null) {
+            return null;
+        }
+        AutonomousChatRecord record = archive.append(AutonomousChatRecord.Source.INTER_CHAT, speakerId, speakerName,
+                maid.level().getGameTime(), text, text);
+        addWindowEntry(maid, record);
+        return record;
     }
 
     /**
@@ -186,7 +267,9 @@ public final class MaidInterChatService {
         if (state.windowInterChatMsgs.isEmpty()) {
             return;
         }
-        messages.addAll(new ArrayList<>(state.windowInterChatMsgs));
+        for (SelfTalkState.InterChatWindowEntry entry : state.windowInterChatMsgs) {
+            messages.add(entry.message());
+        }
     }
 
     /** 超出 keepRounds 轮时仅保留最近 1 条消息（与自言自语「仅保留最近一次」的抛弃逻辑一致） */
@@ -194,7 +277,8 @@ public final class MaidInterChatService {
         int keepRounds = Config.INTER_CHAT_KEEP_ROUNDS.get();
         int rounds = (state.windowInterChatMsgs.size() + 1) / 2;
         if (rounds >= keepRounds && state.windowInterChatMsgs.size() > 1) {
-            LLMMessage last = state.windowInterChatMsgs.get(state.windowInterChatMsgs.size() - 1);
+            SelfTalkState.InterChatWindowEntry last =
+                    state.windowInterChatMsgs.get(state.windowInterChatMsgs.size() - 1);
             state.windowInterChatMsgs.clear();
             state.windowInterChatMsgs.add(last);
         }
