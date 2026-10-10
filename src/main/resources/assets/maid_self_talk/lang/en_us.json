@@ -174,5 +174,10 @@
   "config.maid_self_talk.screen.player_settings.context.history.mode.full": "Full",
   "config.maid_self_talk.screen.player_settings.context.history.mode.compact": "Compact",
   "config.maid_self_talk.screen.player_settings.context.history.mode.retrieval": "Retrieval",
-  "config.maid_self_talk.screen.player_settings.context.history.warning": "Switching modes changes the request structure and may lower the prefix cache hit rate. Retrieval mode also sends extra requests; the real cost depends on model pricing, hit rate and recall length, so pick one and keep using it rather than switching often.\nRetrieval is independent of the normal Tool toggle. In a continuous inter-chat, each maid plans only once, on her own first line."
+  "config.maid_self_talk.screen.player_settings.context.history.warning": "Switching modes changes the request structure and may lower the prefix cache hit rate. Retrieval mode also sends extra requests; the real cost depends on model pricing, hit rate and recall length, so pick one and keep using it rather than switching often.\nRetrieval is independent of the normal Tool toggle. In a continuous inter-chat, each maid plans only once, on her own first line.",
+  "chat.maid_self_talk.history.entry": "[Self-talk] %2$s",
+  "chat.maid_self_talk.history.entry.inter_chat": "[Inter-chat · %2$s] %3$s",
+  "chat.maid_self_talk.history.source.self_talk": "Self-talk",
+  "chat.maid_self_talk.history.source.welcome": "Welcome",
+  "chat.maid_self_talk.history.source.inter_chat": "Chat with other maids"
 }

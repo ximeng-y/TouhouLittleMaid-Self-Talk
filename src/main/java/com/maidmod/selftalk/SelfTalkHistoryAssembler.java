@@ -10,7 +10,9 @@ import com.maidmod.selftalk.history.PlayerDialogueLibrary;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -45,6 +47,104 @@ public final class SelfTalkHistoryAssembler {
         public int windowCount() {
             return window.size();
         }
+    }
+
+    /**
+     * 本次请求副本中独立记录的来源索引。
+     * <p>
+     * {@code LLMMessage} 是 TLM 的 record，无法附加字段，因此来源信息按<b>对象身份</b>
+     * 旁路登记：请求清洗只增删列表元素、不重建消息对象（{@code withContent} 除外，它只用于
+     * 段标签包裹之后），重排也搬运同一批引用，因此登记在整个请求组装期间与消息一一对应。
+     * 绝不按正文相等识别——相同正文、相同 tick 的不同消息（含双方重复说出同一句）必须各自归属。
+     */
+    public static final class SourceIndex {
+
+        private final Map<LLMMessage, AutonomousChatRecord.Source> byMessage = new IdentityHashMap<>();
+
+        /** 登记一条独立记录消息的来源（同一对象只可能有一种来源，重复登记以首次为准） */
+        void mark(LLMMessage message, AutonomousChatRecord.Source source) {
+            if (message != null && source != null) {
+                byMessage.putIfAbsent(message, source);
+            }
+        }
+
+        /** 该消息是否来自独立档案（自话／欢迎语／互聊）；不是则返回 null */
+        public AutonomousChatRecord.Source sourceOf(LLMMessage message) {
+            return message == null ? null : byMessage.get(message);
+        }
+
+        /** 本次请求副本里的独立记录条数（全量模式据此决定是否追加「最近一次自言自语」说明） */
+        public int size() {
+            return byMessage.size();
+        }
+
+        public boolean isEmpty() {
+            return byMessage.isEmpty();
+        }
+    }
+
+    /**
+     * 把「有效自话上下文」按持久顺序号合并进 TLM 历史区，返回合并后的历史区副本，
+     * 并把插入的每条消息登记进 {@code index}。
+     * <p>
+     * 独立记录与 TLM 历史消息共用同一套单调顺序号（见 {@link AutonomousChatHistory}），
+     * 合并出的是<b>一条按真实发生顺序排列的对话流</b>——各维度 {@code gameTime} 独立计数，
+     * 不能拿来跨维度排序。展示档案与有效上下文是两套生命周期，这里只读有效自话快照。
+     * <p>
+     * 返回的是本次请求的副本：既不写回 TLM deque，也不改动任何存储，输入列表原样不动
+     * （调用方另有只含 TLM 玩家历史的输入，检索库与「最近玩家对话」仍以那份为准）。
+     *
+     * @param history TLM 历史区（旧到新，不含前导 SYSTEM）；可为空列表
+     * @return 合并后的历史区；没有可合并内容时返回 {@code history} 本身
+     */
+    public static List<LLMMessage> mergeValidSelfTalk(EntityMaid maid, List<LLMMessage> history,
+                                                      SourceIndex index) {
+        AutonomousChatHistory archive = AutonomousChatHistoryHost.of(maid);
+        if (archive == null) {
+            return history;
+        }
+        // 允许空历史参与合并：新女仆已有欢迎语／自话、玩家却还没和她聊过时，
+        // TLM 历史区为空而有效自话非空。此处若因 history 为空直接返回，
+        // 默认全量模式就完全看不到仍有效的自话（精简／检索模式经 latestValidSelfTalk
+        // 反而能看到最新一条），默认模式与其它模式的可见性自相矛盾。
+        List<LLMMessage> base = history == null ? List.of() : history;
+        List<AutonomousChatRecord> valid = archive.validSelfTalkSnapshot();
+        if (valid.isEmpty()) {
+            return base;
+        }
+        List<LLMMessage> merged = new ArrayList<>(base.size() + valid.size());
+        int cursor = 0;
+        for (LLMMessage message : base) {
+            // 未登记顺序号的 TLM 消息（尚未补号的旧存档）视作最旧：排在全部独立记录之前
+            Long seq = archive.seqOf(message);
+            long boundary = seq == null ? 0L : seq;
+            while (cursor < valid.size() && valid.get(cursor).seq() <= boundary) {
+                merged.add(asRequestMessage(valid.get(cursor++), index));
+            }
+            merged.add(message);
+        }
+        // 顺序号大于全部 TLM 历史（最新发生的自话）：接在历史之后；历史为空时即全部有效自话
+        while (cursor < valid.size()) {
+            merged.add(asRequestMessage(valid.get(cursor++), index));
+        }
+        return List.copyOf(merged);
+    }
+
+    /**
+     * 独立记录 → 本次请求副本里的 ASSISTANT 消息。
+     * <p>
+     * 正文取自 {@link AutonomousChatRecord#message()}（自话保留原 {@code ResponseChat.toString()} 形态，
+     * 与玩家 chat 路径写入 TLM 历史的形态一致；互聊为纯聊天文本）。
+     * 记录本身没有可读的来源标记，来源在同一批消息上按对象身份登记进 {@link SourceIndex}，
+     * 供段标签使用——绝不按正文相等识别。
+     */
+    static LLMMessage asRequestMessage(AutonomousChatRecord record, SourceIndex index) {
+        LLMMessage message = new LLMMessage(Role.ASSISTANT,
+                record.message() == null ? "" : record.message(), record.gameTime(), null, null);
+        if (index != null) {
+            index.mark(message, record.source());
+        }
+        return message;
     }
 
     /**
@@ -96,34 +196,6 @@ public final class SelfTalkHistoryAssembler {
      */
     public static Set<String> selfTalkFingerprints(EntityMaid maid) {
         return ((SelfTalkProvenanceHost) maid).maid_self_talk$selfFingerprints();
-    }
-
-    /**
-     * 最近一条<b>可识别</b>的自话／欢迎语回复（按原历史顺序取最新的一条）。
-     * <p>
-     * 只认指纹命中项：没有来源标记的旧消息不予猜测——把普通玩家聊天回复当成自话，
-     * 会让精简模式凭空多出一条错误上下文。
-     */
-    public static String latestSelfTalk(List<LLMMessage> history, Set<String> selfTalkFingerprints) {
-        if (history.isEmpty() || selfTalkFingerprints == null || selfTalkFingerprints.isEmpty()) {
-            return null;
-        }
-        for (int i = history.size() - 1; i >= 0; i--) {
-            LLMMessage message = history.get(i);
-            if (message.role() != Role.ASSISTANT
-                    || (message.toolCalls() != null && !message.toolCalls().isEmpty())) {
-                continue;
-            }
-            String text = message.message() == null ? "" : message.message();
-            if (text.isBlank()) {
-                continue;
-            }
-            String fingerprint = HistoryFingerprint.of(message.role().name(), text, message.gameTime());
-            if (selfTalkFingerprints.contains(fingerprint)) {
-                return text;
-            }
-        }
-        return null;
     }
 
     /**

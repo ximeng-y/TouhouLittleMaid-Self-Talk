@@ -174,5 +174,10 @@
   "config.maid_self_talk.screen.player_settings.context.history.mode.full": "全量",
   "config.maid_self_talk.screen.player_settings.context.history.mode.compact": "精简",
   "config.maid_self_talk.screen.player_settings.context.history.mode.retrieval": "检索",
-  "config.maid_self_talk.screen.player_settings.context.history.warning": "切换模式会改变请求结构，可能降低前缀缓存命中率。检索模式还会产生额外请求；实际费用取决于模型价格、命中率与召回长度，建议选择后保持使用，避免频繁切换。\n检索不受普通 Tool 开关影响。连续互聊时每只女仆只在自己第一次发言时做一次规划。"
+  "config.maid_self_talk.screen.player_settings.context.history.warning": "切换模式会改变请求结构，可能降低前缀缓存命中率。检索模式还会产生额外请求；实际费用取决于模型价格、命中率与召回长度，建议选择后保持使用，避免频繁切换。\n检索不受普通 Tool 开关影响。连续互聊时每只女仆只在自己第一次发言时做一次规划。",
+  "chat.maid_self_talk.history.entry": "[自话] %2$s",
+  "chat.maid_self_talk.history.entry.inter_chat": "[互聊 · %2$s] %3$s",
+  "chat.maid_self_talk.history.source.self_talk": "自言自语",
+  "chat.maid_self_talk.history.source.welcome": "欢迎语",
+  "chat.maid_self_talk.history.source.inter_chat": "与其他女仆的互聊"
 }

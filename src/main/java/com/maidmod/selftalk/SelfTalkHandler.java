@@ -122,6 +122,7 @@ public final class SelfTalkHandler {
             MaidSelfTalkMod.LOGGER.warn("Self-talk pending timed out for maid {}, force reset", maid.getId());
             state.selfTalkPending = false;
             state.selfTalkPendingSinceTick = -1;
+            state.currentSelfTalkCallback = null;
         }
         if (state.interChatPending && state.interChatPendingSinceTick >= 0
                 && serverTick - state.interChatPendingSinceTick > PENDING_TIMEOUT_TICKS) {
