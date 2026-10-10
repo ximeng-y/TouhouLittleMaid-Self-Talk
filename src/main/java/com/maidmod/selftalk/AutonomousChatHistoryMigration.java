@@ -127,6 +127,12 @@ public final class AutonomousChatHistoryMigration {
         List<LLMMessage> migrated = new ArrayList<>();
         List<String> migratedFingerprints = new ArrayList<>();
         history.runExclusive(() -> {
+            // 先为整条旧历史按旧到新补号，再搬出自话：旧存档读入时 TLM 直接调 CappedQueue.add，
+            // 不经过四个 add*History 的序号钩子，此时普通消息与自话都没有号。
+            // 若只给指纹命中的自话补号，普通消息要等 writeTag 才拿到更大的号，
+            // 原本的「普通 A → 自话 S → 普通 B」会持久化成「S(1) → A(2) → B(3)」，
+            // 自话被挤到它前面那条普通聊天之前。先补全整条历史即可保住相对位置。
+            history.assignSeqsForLegacyHistory(snapshot);
             for (LLMMessage message : snapshot) {
                 if (!isMigratableSelfTalk(message, fingerprints)) {
                     continue;

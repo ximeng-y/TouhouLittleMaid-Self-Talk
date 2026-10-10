@@ -133,8 +133,12 @@ public class SelfTalkCallback extends LLMCallback {
                 discardWaitingBubble();
                 return;
             }
-            // TLM 默认行为：显示气泡并给主人发送聊天栏消息（历史写入已被重定向跳过）、空白回复转 onFailure
-            super.onSuccess(responseChat);
+            // TLM 默认行为：显示气泡并给主人发送聊天栏消息（历史写入已被重定向跳过）、空白回复转 onFailure。
+            // 父类在此处只「发起」TTS：远程 TTS 要等一次网络往返、系统 TTS 要等任务被调度，
+            // 真正交付都在接下来这段时间之后。用本请求的令牌把这段同步区间登记起来，
+            // 让 TLM 在该区间内构造的 TTS 回调／任务也带上清空判定，
+            // 否则「回复已返回并开始合成 → 玩家清空 → 合成结果到达」仍会把旧内容送到主人眼前。
+            SelfTalkTtsGate.runWith(token, () -> super.onSuccess(responseChat));
             // 父类对空白回复内部转调 onFailure（本类重写已复位 pending 并沉默），此处直接收敛
             if (responseChat.getChatText() == null || responseChat.getChatText().isBlank()) {
                 return;

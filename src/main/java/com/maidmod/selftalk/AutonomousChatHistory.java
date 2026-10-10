@@ -316,6 +316,32 @@ public final class AutonomousChatHistory {
     }
 
     /**
+     * 迁移前：为整条 TLM 历史按「旧到新」一次性建立顺序号，只补未登记过的消息。
+     * <p>
+     * 旧存档不含本档案的 NBT 时，TLM 的 {@code readFromTag} 直接调 {@code CappedQueue.add} 恢复历史，
+     * 不经过四个 {@code add*History} 的序号钩子，因此旧普通聊天与旧自话都没有序号。
+     * 若迁移只给指纹命中的自话补号，普通消息就要等到 {@code writeTag} 才补到更大的号——
+     * 原本的 {@code 普通 A → 自话 S → 普通 B} 会持久化成 {@code S(1) → A(2) → B(3)}，
+     * 自话被挤到了它前面那条普通聊天之前，混合展示与模型历史都错序。
+     * <p>
+     * 因此在迁移真正搬动任何消息<b>之前</b>，按完整 deque 的旧到新顺序为所有消息补号；
+     * 这样自话拿到的是它在原次序里的位置，与前后普通聊天保持相对顺序。
+     * 已在钩子里登记过的消息保留原号（幂等，不重排既有次序）。
+     */
+    void assignSeqsForLegacyHistory(List<LLMMessage> dequeOldToNew) {
+        if (dequeOldToNew == null || dequeOldToNew.isEmpty()) {
+            return;
+        }
+        synchronized (lock) {
+            for (LLMMessage message : dequeOldToNew) {
+                if (message != null) {
+                    assignSeqForMigration(message);
+                }
+            }
+        }
+    }
+
+    /**
      * 迁移专用：以指定顺序号插入一条独立记录，保持与 TLM 历史的相对先后。
      * <p>
      * 迁移记录必须占用其源消息原有的顺序位置（按队列顺序分配），不能用当前分配器末尾的号——
