@@ -5,7 +5,8 @@
   "compatibilityLevel": "JAVA_17",
   "refmap": "maid_self_talk.refmap.json",
   "mixins": ["MaidAIChatManagerAccessor", "MaidAIChatManagerMixin", "LLMCallbackMixin", "SelfTalkTtsMixin",
-    "EntityMaidProvenanceMixin", "HistorySummaryManagerAccessor", "HistorySummaryManagerMixin", "MaidAIChatDataMixin",
+    "SelfTalkSystemTtsMixin", "EntityMaidProvenanceMixin", "HistorySummaryManagerAccessor",
+    "HistorySummaryManagerMixin", "MaidAIChatDataMixin",
     "GameContextRegisterAccessor", "InterChatToolLifecycleMixin"],
   "client": ["AIChatScreenMixin", "HistoryAIChatScreenMixin"],
   "injectors": { "defaultRequire": 1 }
