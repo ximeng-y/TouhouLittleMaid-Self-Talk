@@ -114,35 +114,63 @@ public class SelfTalkCallback extends LLMCallback {
         return state.currentSelfTalkCallback == this;
     }
 
+    /**
+     * 成功交付。
+     * <p>
+     * <b>清空作废判定先于父类的玩家可见副作用</b>：父类 {@code onSuccess} 会提交 TTS 或
+     * 气泡／主人聊天栏输出，而清空与响应返回之间存在竞态——若先调父类再判令牌，
+     * 清空前的旧内容已经送达玩家，与本次新增的作废语义相违背。
+     * 因此这里把「判令牌 + 调父类 + 写档案 + 发事件 + 广播」收进<b>同一个服务端主线程任务</b>，
+     * 交付前一步判定；作废时只清理本请求自己的等待气泡与 pending。
+     */
     @Override
     public void onSuccess(ResponseChat responseChat) {
-        // TLM 默认行为：显示气泡并给主人发送聊天栏消息（历史写入已被重定向跳过）、空白回复转 onFailure
-        super.onSuccess(responseChat);
-        // 父类对空白回复内部转调 onFailure（本类重写已复位 pending 并沉默），此处直接收敛
-        if (responseChat.getChatText() == null || responseChat.getChatText().isBlank()) {
+        deliverOnServerThread(() -> {
+            if (isRequestInvalidated()) {
+                // 清空作废：迟到成功不产生任何玩家可见输出（不显示、不播报、不广播），
+                // 也不写档案、不进有效上下文、不发事件
+                resetSelfTalkPending();
+                discardWaitingBubble();
+                return;
+            }
+            // TLM 默认行为：显示气泡并给主人发送聊天栏消息（历史写入已被重定向跳过）、空白回复转 onFailure
+            super.onSuccess(responseChat);
+            // 父类对空白回复内部转调 onFailure（本类重写已复位 pending 并沉默），此处直接收敛
+            if (responseChat.getChatText() == null || responseChat.getChatText().isBlank()) {
+                return;
+            }
+            EntityMaid maid = getMaid();
+            // 上下文消息沿用原 ResponseChat.toString()：聊天／TTS 两段内容的既有形式不变，
+            // 与玩家 chat 路径写入 TLM 历史的形态一致，模型侧契约无变化
+            AutonomousChatRecord record = archiveSelfTalk(maid, responseChat.toString(),
+                    responseChat.getChatText());
+            MinecraftForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, responseChat.getChatText(), welcome));
+            MaidSelfTalkService.onSelfTalkFinished(maid, this, record);
+            broadcastToNearby(maid, responseChat.getChatText());
+        });
+    }
+
+    /**
+     * 把交付动作放到服务端主线程执行（已在主线程则直接执行）。
+     * <p>
+     * LLM 回调运行在响应线程，而令牌判定必须与玩家可见副作用在同一任务内原子完成。
+     */
+    private void deliverOnServerThread(Runnable action) {
+        if (isOnServerThread()) {
+            action.run();
+        } else {
+            runOnServerThread(action);
+        }
+    }
+
+    /** 清理本请求自己的等待气泡（按本轮捕获的 id 精准删除，绝不误删新请求的气泡） */
+    private void discardWaitingBubble() {
+        if (waitingChatBubbleId == 0) {
             return;
         }
         EntityMaid maid = getMaid();
-        // 上下文消息沿用原 ResponseChat.toString()：聊天／TTS 两段内容的既有形式不变，
-        // 与玩家 chat 路径写入 TLM 历史的形态一致，模型侧契约无变化
-        String contextMessage = responseChat.toString();
-        String chatText = responseChat.getChatText();
-        Runnable finish = () -> {
-            if (isRequestInvalidated()) {
-                // 清空作废：迟到成功不写档案、不进有效上下文、不发事件、不广播，只复位自己的 pending
-                resetSelfTalkPending();
-                return;
-            }
-            AutonomousChatRecord record = archiveSelfTalk(maid, contextMessage, chatText);
-            MinecraftForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, chatText, welcome));
-            MaidSelfTalkService.onSelfTalkFinished(maid, this, record);
-            broadcastToNearby(maid, chatText);
-        };
-        if (isOnServerThread()) {
-            finish.run();
-        } else {
-            // LLM 回调在响应线程，档案写入、状态与事件必须回到服务端主线程
-            runOnServerThread(finish);
+        if (maid != null && maid.isAlive()) {
+            maid.getChatBubbleManager().removeChatBubble(waitingChatBubbleId);
         }
     }
 
@@ -158,10 +186,34 @@ public class SelfTalkCallback extends LLMCallback {
                 maid.level().getGameTime(), contextMessage, chatText);
     }
 
+    /**
+     * 失败交付。
+     * <p>
+     * <b>不调父类 {@code onFailure}</b>：父类会重新提交一个服务端任务，无条件向主人发送红色错误文本
+     * 并移除等待气泡——对已清空作废的迟到请求而言，这就是「清空前的旧请求仍在产生可见输出」。
+     * 这里改为在当前任务内先判许可：作废则只清本请求的等待气泡与 pending，绝不显示任何文本；
+     * 未作废则复用 TLM 的错误文本生成逻辑（红色错误 + 收起等待气泡）后收敛。
+     */
     @Override
     public void onFailure(HttpRequest request, Throwable throwable, int errorCode) {
-        super.onFailure(request, throwable, errorCode);
-        runOnServerThread(this::resetSelfTalkPending);
+        deliverOnServerThread(() -> {
+            if (isRequestInvalidated()) {
+                // 清空作废：迟到失败不显示任何错误文本，只清本请求自己的资源
+                resetSelfTalkPending();
+                discardWaitingBubble();
+                return;
+            }
+            EntityMaid maid = getMaid();
+            if (maid.getOwner() instanceof ServerPlayer player) {
+                // 与 TLM 父类相同的文本生成（ServiceType.LLM + 错误码 + 本地化原因），只是不再另投递任务
+                String cause = throwable == null ? null : throwable.getLocalizedMessage();
+                var errorMessage = com.github.tartaricacid.touhoulittlemaid.ai.service.ErrorCode.getErrorMessage(
+                        com.github.tartaricacid.touhoulittlemaid.ai.service.ServiceType.LLM, errorCode, cause);
+                player.sendSystemMessage(errorMessage.withStyle(ChatFormatting.RED));
+            }
+            discardWaitingBubble();
+            resetSelfTalkPending();
+        });
     }
 
     /**

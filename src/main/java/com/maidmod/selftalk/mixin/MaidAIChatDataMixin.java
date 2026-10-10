@@ -171,7 +171,8 @@ public abstract class MaidAIChatDataMixin implements AutonomousChatHistoryHost {
     @Inject(method = "readFromTag", remap = false, at = @At("RETURN"))
     private void maid_self_talk$readAutonomousHistory(CompoundTag tag, CallbackInfoReturnable<CompoundTag> cir) {
         MaidAIChatData self = (MaidAIChatData) (Object) this;
-        // descendingIterator 给出的是旧到新的顺序（队列头部最新），与序列化时一致
+        // descendingIterator 给出的是旧到新（队列头部最新，见 CappedQueue.add 的 offerFirst），
+        // 与 writeTag 归一化后写入的顺序表同向，逐位绑定才对得上
         List<LLMMessage> dequeInOrder = new ArrayList<>();
         self.getHistory().getDeque().descendingIterator().forEachRemaining(dequeInOrder::add);
         AutonomousChatHistoryHost.read(self, tag, dequeInOrder);

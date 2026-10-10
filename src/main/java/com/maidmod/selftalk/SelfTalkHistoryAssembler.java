@@ -94,22 +94,27 @@ public final class SelfTalkHistoryAssembler {
      * 返回的是本次请求的副本：既不写回 TLM deque，也不改动任何存储，输入列表原样不动
      * （调用方另有只含 TLM 玩家历史的输入，检索库与「最近玩家对话」仍以那份为准）。
      *
-     * @param history TLM 历史区（旧到新，不含前导 SYSTEM）
+     * @param history TLM 历史区（旧到新，不含前导 SYSTEM）；可为空列表
      * @return 合并后的历史区；没有可合并内容时返回 {@code history} 本身
      */
     public static List<LLMMessage> mergeValidSelfTalk(EntityMaid maid, List<LLMMessage> history,
                                                       SourceIndex index) {
         AutonomousChatHistory archive = AutonomousChatHistoryHost.of(maid);
-        if (history == null || history.isEmpty() || archive == null) {
+        if (archive == null) {
             return history;
         }
+        // 允许空历史参与合并：新女仆已有欢迎语／自话、玩家却还没和她聊过时，
+        // TLM 历史区为空而有效自话非空。此处若因 history 为空直接返回，
+        // 默认全量模式就完全看不到仍有效的自话（精简／检索模式经 latestValidSelfTalk
+        // 反而能看到最新一条），默认模式与其它模式的可见性自相矛盾。
+        List<LLMMessage> base = history == null ? List.of() : history;
         List<AutonomousChatRecord> valid = archive.validSelfTalkSnapshot();
         if (valid.isEmpty()) {
-            return history;
+            return base;
         }
-        List<LLMMessage> merged = new ArrayList<>(history.size() + valid.size());
+        List<LLMMessage> merged = new ArrayList<>(base.size() + valid.size());
         int cursor = 0;
-        for (LLMMessage message : history) {
+        for (LLMMessage message : base) {
             // 未登记顺序号的 TLM 消息（尚未补号的旧存档）视作最旧：排在全部独立记录之前
             Long seq = archive.seqOf(message);
             long boundary = seq == null ? 0L : seq;
@@ -118,7 +123,7 @@ public final class SelfTalkHistoryAssembler {
             }
             merged.add(message);
         }
-        // 顺序号大于全部 TLM 历史（最新发生的自话）：接在历史之后
+        // 顺序号大于全部 TLM 历史（最新发生的自话）：接在历史之后；历史为空时即全部有效自话
         while (cursor < valid.size()) {
             merged.add(asRequestMessage(valid.get(cursor++), index));
         }
