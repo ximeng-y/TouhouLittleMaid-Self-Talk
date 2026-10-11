@@ -16,7 +16,8 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
  * 管理员全局配置界面（Cloth Config）。
  * <p>
  * 通过 TLM 的公开扩展点 {@link AddClothConfigEvent} 挂到「AI 全局设置」分类下，
- * 结构为「女仆自言自语」父分类，内含「态 1」「态 2」「欢迎语」「自话提示词」子页。
+ * 结构为「女仆自言自语」父分类，子页按功能划分（态 1／态 2／欢迎语／自话提示词／
+ * 互聊／环境感知／女仆身份），实际清单以 {@code onAddClothConfig} 内挂载为准。
  * <b>注意：</b>本类引用了 cloth 客户端类，只能在安装了 cloth-config 时加载，
  * 因此不使用 @EventBusSubscriber 自动注册，改由主类在运行时判断后反射注册。
  */
