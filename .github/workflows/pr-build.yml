@@ -38,5 +38,6 @@ jobs:
           cache-read-only: false
 
       # 只验证构建，不上传 jar，也不创建或修改 Release。
+      # build 经 check 真实执行 5 个 main() 自检（4 个现有自检 + TlmMixinTargetTest），自检失败即本步骤失败。
       - name: 编译与打包检查
         run: gradle --no-daemon --console=plain --stacktrace build

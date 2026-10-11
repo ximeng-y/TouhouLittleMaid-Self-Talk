@@ -22,7 +22,8 @@ import java.util.List;
  * javac -encoding UTF-8 -d .XMTEMP/issue33-out/classes -cp &lt;gson.jar&gt; src/test/java/com/maidmod/selftalk/HistoryCoreTest.java src/main/java/com/maidmod/selftalk/HistoryContextMode.java src/main/java/com/maidmod/selftalk/history/*.java
  * java -cp ... HistoryCoreTest
  * </pre>
- * Gradle 的 {@code test} 任务不会自动运行本入口，必须显式执行。
+ * 已由 {@code gradle check}（含 CI 的 {@code gradle build}，issue #60 C13）真实执行，
+ * 失败即构建失败；上方 {@code <pre>} 中的 javac+java 命令保留，供免 Gradle 场景手动复现。
  */
 public final class HistoryCoreTest {
 
