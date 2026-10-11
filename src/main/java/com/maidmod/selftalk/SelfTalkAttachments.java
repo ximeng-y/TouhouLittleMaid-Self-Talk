@@ -14,7 +14,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /**
- * 玩家独立设置的数据附件（挂在玩家实体上，随实体存档/同步）。
+ * 玩家独立设置的数据附件注册。
+ * <p>
+ * 1.1.2 起主宿主为 overworld Level 附件（存于世界存档，任何维度读同一份，不随玩家实体）；
+ * 本类保留的玩家实体附件仅为旧档（1.1.1 及更早）兼容——玩家登录时经 SelfTalkMigration
+ * 一次性迁移到 Level 附件并 removeData，此后只有迁移读点使用。
  */
 public final class SelfTalkAttachments {
 
