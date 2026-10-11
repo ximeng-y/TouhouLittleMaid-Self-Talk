@@ -447,7 +447,8 @@ public final class HistoryContextSession {
             reportRecall(blocks);
             dispatchReduced(SelfTalkHistoryAssembler.flattenBlocks(blocks), true);
             return;
-        }        if (outcome.errorText() == null) {
+        }
+        if (outcome.errorText() == null) {
             // 非格式错误（网络/HTTP/认证/限流/响应信封）：不用纠正预算盲目重试
             reportRecall(List.of());
             dispatchReduced(List.of(), false);
