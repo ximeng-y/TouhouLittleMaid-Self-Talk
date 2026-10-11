@@ -33,8 +33,20 @@ public final class SelfTalkState {
         return STATES.get(maidId);
     }
 
+    /**
+     * 移除状态条目（女仆死亡／卸载／周期清扫的唯一出口）。
+     * <p>
+     * 一并退役清空世代计数器：状态条目消失后，此前捕获的在途令牌保持失效，
+     * 不会因为「世代记录随状态一起没了」而被重新判为有效；状态若随后重建，
+     * 拿到的是全新计数器，新请求照常有效。
+     * <p>
+     * 三条移除路径（离开维度、tick 死亡兜底、周期清扫）共用此处，避免状态与世代记录各清一半。
+     */
     public static void remove(int maidId) {
-        STATES.remove(maidId);
+        State state = STATES.remove(maidId);
+        if (state != null) {
+            state.clearGeneration.retire();
+        }
     }
 
     /** 全部状态条目（周期清扫用） */
@@ -42,17 +54,6 @@ public final class SelfTalkState {
         return STATES.entrySet();
     }
 
-    /**
-     * 女仆死亡/卸载/移除时清理状态。
-     * 调用方：EntityLeaveLevelEvent 即时清理与 tick 中死亡兜底。
-     */
-    public static void cleanupIfDead(int maidId, boolean alive) {
-        if (!alive) {
-            STATES.remove(maidId);
-            // 请求令牌的世代记录一并不留：女仆已卸载，其世代墓碑不会再有令牌来查
-            SelfTalkRequestToken.clearTombstones(maidId);
-        }
-    }
     /** 玩家登出：清除所有女仆对该玩家的欢迎标记，下次登录窗口内可再次欢迎 */
     public static void removeWelcomeForPlayer(UUID playerUuid) {
         for (State state : STATES.values()) {
@@ -132,8 +133,9 @@ public final class SelfTalkState {
         public long interChatPendingSinceTick = -1;
         /** 当前互聊窗口内已保留的互聊消息（按时间序，含发起与回答），携带消息身份 */
         public final List<InterChatWindowEntry> windowInterChatMsgs = new ArrayList<>();
-        /** 清空世代号：手动清空即自增，作废清空前已开始的请求（令牌比对，见 SelfTalkRequestToken） */
-        public int clearGeneration = 0;
+        /** 清空世代计数器：手动清空即推进，作废清空前已开始的请求；
+         * 状态条目被移除时随之一并退役，令全部在途令牌永久失效（见 {@link SelfTalkRequestToken}） */
+        public final SelfTalkRequestToken.Generation clearGeneration = new SelfTalkRequestToken.Generation();
         /** 顺延队列：忙时积压的自话/互聊请求，空闲时按序派发（派发时现构建消息） */
         public final Deque<DeferredRequest> deferredRequests = new ArrayDeque<>();
         /**
