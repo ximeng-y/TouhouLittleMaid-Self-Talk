@@ -108,7 +108,7 @@ public final class SelfTalkHandler {
         }
         if (!maid.isAlive()) {
             cleanupInterChatRequest(maid.getId());
-            SelfTalkState.cleanupIfDead(maid.getId(), false);
+            SelfTalkState.remove(maid.getId());
             SelfTalkDispatcher.onMaidRemoved(maid.getId());
             InterChatChain.onMaidRemoved(maid.getId());
             HistoryRetrievalCache.drop(maid);
@@ -600,7 +600,7 @@ public final class SelfTalkHandler {
                 && maid.isRemoved()
                 && maid.getRemovalReason() != Entity.RemovalReason.CHANGED_DIMENSION) {
             cleanupInterChatRequest(maid.getId());
-            SelfTalkState.cleanupIfDead(maid.getId(), false);
+            SelfTalkState.remove(maid.getId());
             SelfTalkDispatcher.onMaidRemoved(maid.getId());
             InterChatChain.onMaidRemoved(maid.getId());
             HistoryRetrievalCache.drop(maid);

@@ -27,7 +27,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 与实际发送在同一主线程任务内原子完成。构造时清空必然还没发生，只有交付的当下才可能已经作废。
  * 作废时只清本条自己的等待气泡（转投主线程执行），不产生语音、聊天文本或错误红字。
  * <p>
- * 令牌为 null（普通玩家聊天、互聊等未登记路径）时两个注入点都不介入，
+ * 令牌为 null（普通玩家聊天等未登记路径）时两个注入点都不介入，
  * 交付逻辑与未安装本 mod 时完全一致。
  */
 @Mixin(TTSCallback.class)
