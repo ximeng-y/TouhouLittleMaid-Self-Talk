@@ -156,8 +156,9 @@ public final class MaidSelfTalkService {
         state.selfTalkPendingSinceTick = maid.level().getServer().getTickCount();
 
         LLMClient client = site.client();
+        SelfTalkCallback callback = null;
         try {
-            SelfTalkCallback callback = new SelfTalkCallback(chatManager, messages, welcome, keep,
+            callback = new SelfTalkCallback(chatManager, messages, welcome, keep,
                     broadcastRange, toolEnabled, token);
             state.currentSelfTalkCallback = callback;
             client.chat(callback);
@@ -167,6 +168,11 @@ public final class MaidSelfTalkService {
             state.selfTalkPending = false;
             state.selfTalkPendingSinceTick = -1;
             state.currentSelfTalkCallback = null;
+            // 父类构造器已创建等待气泡，而请求未发出时 onFailure 不会来收它；
+            // 此处（主线程）删掉本请求自己的气泡，欢迎/退避重试不再遗留「思考中」气泡
+            if (callback != null) {
+                callback.discardWaitingBubble();
+            }
             MaidSelfTalkMod.LOGGER.warn("Failed to dispatch self-talk request for maid {}", maid.getId(), t);
             return false;
         }
