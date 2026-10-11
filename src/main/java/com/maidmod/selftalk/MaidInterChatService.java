@@ -115,7 +115,8 @@ public final class MaidInterChatService {
         request.attachSession(session);
         session.start();
         // 检索模式的规划与建索引是异步的：此时正式请求可能尚未发出，但本次触发已受理；
-        // 正式阶段标记在实际派发点（dispatchInterChat）完成，链交接以真实派发为准
+        // 正式阶段标记在实际派发点（dispatchInterChat）完成，链交接以真实派发为准。
+        // start() 的同步派发失败已由请求身份作废+链释放收束（见 dispatchInterChat），无需反映到本返回值
         return true;
     }
 
