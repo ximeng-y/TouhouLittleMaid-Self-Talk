@@ -1,6 +1,8 @@
 package com.maidmod.selftalk;
 
+import com.github.tartaricacid.touhoulittlemaid.ai.manager.response.ResponseChat;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -22,7 +24,10 @@ import java.util.UUID;
  *   <li>{@link #seq}：本记录在所属女仆视角下的单调顺序号，由 {@link AutonomousChatHistory} 分配；</li>
  *   <li>{@link #message}：进入模型上下文的原消息。自话保留原 {@code ResponseChat.toString()} 形态
  *       （聊天／TTS 两段内容的形式不变），互聊为纯聊天文本；</li>
- *   <li>{@link #chatText}：界面展示正文，只含聊天文本（无 TTS 段、无段标签、无内部标识）。</li>
+ *   <li>{@link #chatText}：界面展示正文，只含聊天文本（无 TTS 段、无段标签、无内部标识）。
+ *       该字段完全可由 {@link #message} 推导，持久化时不写入 NBT——档案与有效上下文
+ *       都随女仆 AI 数据整份写入存档并随开聊天界面同步，保留推导字段只会白占体量；
+ *       读档时按 {@link #deriveChatText} 补齐，旧存档携带的字段优先。</li>
  * </ul>
  * 记录本身不可变；顺序号在创建时确定，之后不改写。
  */
@@ -71,6 +76,7 @@ public record AutonomousChatRecord(UUID id, Source source, UUID speakerId, Strin
         return new AutonomousChatRecord(id, source, speakerId, speakerName, newSeq, gameTime, message, chatText);
     }
 
+    /** 序列化：不持久化 chatText——它可由 message 经 ResponseChat 推导，读档时补齐 */
     public CompoundTag save() {
         CompoundTag tag = new CompoundTag();
         tag.putUUID("Id", id);
@@ -82,7 +88,6 @@ public record AutonomousChatRecord(UUID id, Source source, UUID speakerId, Strin
         tag.putLong("Seq", seq);
         tag.putLong("GameTime", gameTime);
         tag.putString("Message", message == null ? "" : message);
-        tag.putString("ChatText", chatText == null ? "" : chatText);
         return tag;
     }
 
@@ -95,10 +100,27 @@ public record AutonomousChatRecord(UUID id, Source source, UUID speakerId, Strin
         if (source.isEmpty()) {
             return null;
         }
+        String message = tag.getString("Message");
+        String chatText = tag.contains("ChatText", Tag.TAG_STRING)
+                ? tag.getString("ChatText")
+                : deriveChatText(message);
         return new AutonomousChatRecord(tag.getUUID("Id"), source.get(),
                 tag.hasUUID("Speaker") ? tag.getUUID("Speaker") : null,
                 tag.getString("SpeakerName"),
                 tag.getLong("Seq"), tag.getLong("GameTime"),
-                tag.getString("Message"), tag.getString("ChatText"));
+                message, chatText);
+    }
+
+    /** 从 message 推导展示正文；解析为空或失败时回退原消息（与迁移的 chatTextOf 同语义） */
+    private static String deriveChatText(String message) {
+        if (message == null || message.isBlank()) {
+            return "";
+        }
+        try {
+            String chatText = new ResponseChat(message).getChatText();
+            return chatText == null || chatText.isBlank() ? message : chatText;
+        } catch (Throwable t) {
+            return message;
+        }
     }
 }
