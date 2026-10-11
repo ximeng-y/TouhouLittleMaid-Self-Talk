@@ -294,8 +294,8 @@ public final class MaidSelfTalkService {
      */
     public static void invalidateRequestsOnClear(EntityMaid maid) {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
-        state.clearGeneration++;
-        SelfTalkRequestToken.advanceClearedUpTo(maid.getId(), state.clearGeneration);
+        // 推进状态自身的世代计数器（本状态条目上的在途令牌据此失效，见 SelfTalkRequestToken）
+        state.clearGeneration.advance();
         // 清空后旧窗口/计数一律不保留：它们引用的是已被隐藏的旧记录
         state.windowSelfTalkMsgs.clear();
         state.windowInterChatMsgs.clear();

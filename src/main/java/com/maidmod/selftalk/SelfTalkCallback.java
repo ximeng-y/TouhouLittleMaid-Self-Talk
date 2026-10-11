@@ -178,6 +178,22 @@ public class SelfTalkCallback extends LLMCallback {
         }
     }
 
+    /**
+     * <b>未开启 TTS</b>时，TLM 那条延迟文字上屏任务的执行当下是否仍允许交付
+     * （供 {@code SelfTalkLateDisplayMixin} 在 {@code lambda$onSuccess$1} 头部调用）。
+     * <p>
+     * 外层交付判定与这条被投递的任务之间仍可能插进一次清空，因此上屏前再判一次：
+     * 作废则只回收本条自己的等待气泡，不写气泡、不给主人发聊天栏消息。
+     * 此时请求收尾（pending、档案、事件）早已完成，这里只补掉那一次可见输出。
+     */
+    public boolean allowLateDisplay() {
+        if (!isRequestInvalidated()) {
+            return true;
+        }
+        discardWaitingBubble();
+        return false;
+    }
+
     /** 在服务端主线程把本次回复写成独立记录（展示档案 + 有效自话上下文），返回该记录 */
     private AutonomousChatRecord archiveSelfTalk(EntityMaid maid, String contextMessage, String chatText) {
         AutonomousChatHistory archive = AutonomousChatHistoryHost.of(maid);

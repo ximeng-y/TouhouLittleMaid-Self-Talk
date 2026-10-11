@@ -16,14 +16,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * （见 {@link SelfTalkRequestToken}）。
  * <p>
  * 传递方式：自话／欢迎语在调用父类 {@code onSuccess} 的这段<b>同步区间</b>内登记本请求令牌
- * （{@link #runWith}），TLM 在该区间内构造 {@code TTSCallback} 时由 {@code SelfTalkTtsMixin}
- * 取走令牌（{@link #currentToken}），交给 {@link SelfTalkTtsCallback} 在交付的当下判定。
+ * （{@link #runWith}），互聊在调用 {@code MaidAIChatManager.tts} 的同步区间内登记；
+ * TLM 在该区间内构造 {@code TTSCallback} 时由 {@code SelfTalkTtsMixin}
+ * 取走令牌（{@link #currentToken}），在其交付入口的当下判定。
  * <p>
  * 用 {@link ThreadLocal} 而非静态字段：登记与取用发生在同一线程的同一段调用栈上
  * （{@code onSuccess → tts → new TTSCallback}），静态字段会让这段区间内其它女仆、
  * 其它请求的 TTS 取到不属于自己的令牌。
  * <p>
- * <b>普通玩家聊天与互聊不经过 {@link #runWith}</b>：没有登记、令牌为 null，
+ * <b>普通玩家聊天不经过 {@link #runWith}</b>：没有登记、令牌为 null，
  * 注入点原样使用 TLM 自己的回调，行为与未安装本 mod 时一致。
  */
 public final class SelfTalkTtsGate {
