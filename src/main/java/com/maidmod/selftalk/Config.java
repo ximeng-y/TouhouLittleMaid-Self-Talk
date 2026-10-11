@@ -10,8 +10,9 @@ import net.minecraftforge.common.ForgeConfigSpec;
  * 旧文件中的未知键会被 Forge 忽略，新键使用默认值。
  * 1.0.1 起自话/欢迎提示词硬编码于 {@link SelfTalkPrompts}，不再从本配置读取。
  * <p>
- * 注意：本分支为 Forge 1.20.1，<b>无 NeoForge 的 ConfigFileWatcher 热重载</b>——
- * 替换 toml 后需重启服务端才生效（1.21.1 线替换即生效，双分支行为不同）。
+ * 注意：Forge 47.2.0 反编译显示与 NeoForge 一样注册了配置目录 FileWatcher，但「替换 toml
+ * 是否立即生效」尚未实机复验，复验前不断言任一侧；neoforge 1.21.1 线已实测替换即生效。
+ * /reload 命令不重载配置文件（只重载资源/数据包）。
  */
 public final class Config {
     /** 总开关 */
