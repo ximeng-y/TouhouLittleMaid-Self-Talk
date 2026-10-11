@@ -154,7 +154,7 @@ public final class SelfTalkDispatcher {
     }
 
     /**
-     * 派发单个请求：按种类现构建消息并发送，返回是否派发成功（女仆死亡/AI 关闭等失败返回 false）。
+     * 派发单个请求：按种类现构建消息并发送，返回是否派发成功（女仆死亡/AI 关闭/同步发送失败等返回 false）。
      * 互聊请求派发成功后同时续上/延长互聊对锁。
      */
     private static boolean dispatchNow(EntityMaid maid, SelfTalkState.DeferredRequest req) {

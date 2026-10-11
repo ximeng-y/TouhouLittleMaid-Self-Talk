@@ -44,7 +44,7 @@ public final class MaidSelfTalkService {
      * @param welcome       是否为欢迎语（欢迎语视为一次自话，同样受保留条数控制）
      * @param keep          当前态的自言自语保留上下文条数
      * @param broadcastRange 聊天框广播半径（格）
-     * @return 是否实际发起（前置检查未通过时为 false）
+     * @return 同步派发成功或异步流程已受理时 true；前置检查未通过或同步派发失败时 false（调用方可按既有规则重试）
      */
     public static boolean triggerSelfTalk(EntityMaid maid, boolean welcome, int keep, double broadcastRange) {
         return triggerSelfTalk(maid, welcome, keep, broadcastRange, null);
@@ -59,7 +59,7 @@ public final class MaidSelfTalkService {
      * @param broadcastRange 聊天框广播半径（格）
      * @param cachedRecall   互聊链上已完成的首次召回结果；非 null 时检索模式直接复用、不再规划
      *                       （自话与欢迎语不走互聊链，传 null）
-     * @return 是否实际发起（前置检查未通过时为 false）
+     * @return 同步派发成功或异步流程已受理时 true；前置检查未通过或同步派发失败时 false（调用方可按既有规则重试）
      */
     public static boolean triggerSelfTalk(EntityMaid maid, boolean welcome, int keep, double broadcastRange,
                                           HistoryContextSession.CachedRecall cachedRecall) {
@@ -137,9 +137,9 @@ public final class MaidSelfTalkService {
                 null,
                 welcome ? p -> UserPromptContexts.addContext(maid, p + SelfTalkContexts.buildRandomContext(maid))
                         : null);
-        session.start();
-        // 全量/精简模式同步完成；检索模式可能仍在规划，此时返回 true（本次触发已受理）
-        return true;
+        // 全量/精简模式同步派发：结果如实上报；检索模式在建索引/规划期间按「已受理」收束，
+        // 其后的正式派发（含失败）不再回传本次调用
+        return session.start() != HistoryContextSession.StartOutcome.FAILED;
     }
 
     /**
