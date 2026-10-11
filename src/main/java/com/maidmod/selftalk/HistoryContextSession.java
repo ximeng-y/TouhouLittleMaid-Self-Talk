@@ -372,7 +372,7 @@ public final class HistoryContextSession {
                 inlineOutcome[0] = dispatchReduced(List.of(), false);
                 return;
             }
-            sendPlanRequest(planningMessages(null, null), result);
+            inlineOutcome[0] = sendPlanRequest(planningMessages(null, null), result);
         });
         return inlineOutcome[0] == null ? StartOutcome.ACCEPTED_ASYNC : inlineOutcome[0];
     }
@@ -420,9 +420,16 @@ public final class HistoryContextSession {
         return List.copyOf(recent);
     }
 
-    private void sendPlanRequest(List<LLMMessage> messages, HistoryRetrievalCache.Result result) {
+    /**
+     * 发送关键词规划请求（结果经 {@link #onPlanOutcome} 异步回来）。
+     *
+     * @return 内联调用（缓存命中）时同步收束：请求未发出的各出口回传对应派发结果，
+     *         请求真实发出后为 {@link StartOutcome#ACCEPTED_ASYNC}；
+     *         纠正路径（onPlanOutcome）在异步上下文调用，返回值不消费
+     */
+    private StartOutcome sendPlanRequest(List<LLMMessage> messages, HistoryRetrievalCache.Result result) {
         if (!allowed()) {
-            return;
+            return StartOutcome.FAILED;
         }
         // 规划与纠正共用同一次在途身份：不重复经过全局发起限流，也不重设触发冷却
         LLMClient client = site.client();
@@ -439,8 +446,9 @@ public final class HistoryContextSession {
             // 与其他失败出口一致：同步抛出同样回报「首次检索完成、结果为空」，
             // 否则互聊链上本女仆的后续轮次会重复规划
             reportRecall(List.of());
-            dispatchReduced(List.of(), false);
+            return dispatchReduced(List.of(), false);
         }
+        return StartOutcome.ACCEPTED_ASYNC;
     }
 
     /**
