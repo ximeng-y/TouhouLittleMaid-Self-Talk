@@ -28,7 +28,7 @@
   - neoforge 线另有 `SelfTalkAttachments`（Level 附件注册）；forge 线另有 `PlayerSettingsSavedData`（overworld SavedData）、`SelfTalkProvenanceHost`（无附件，经 mixin 挂接口）
 - `client/`：仅客户端 —— `SelfTalkClothConfig`（管理员配置界面，反射注册）、`SelfTalkPlayerSettingsClient`（客户端设置缓存）、`SelfTalkPlayerSettingsScreen`（玩家开关/Prompt 界面）
 - `mixin/`：TLM 钩子（玩家 chat 入口标记、AIChatScreen 加 💬 按钮、LLMCallback、历史摘要、女仆 AI 数据；forge 线另有女仆指纹挂载）
-- `network/`：5 组 payload（自话 / 互聊 / 睡觉安静 / 自定义 Prompt / Tool，各 request/response/set），协议版本串 `5`
+- `network/`：8 个功能组、20 条注册，协议版本串 `8`：自话 / 互聊 / 睡觉安静 / 自定义 Prompt / Tool 各 request/response/set（15 条）；环境上下文 request/response/set（3 条）；环境上下文自然语言总开关、历史上下文模式各 1 条 C2S Set。版本演进见 `SelfTalkPackets` 注册处注释（不向后兼容，版本串即协商拒连依据）
 - 代码注释与 git 提交信息使用中文；避免引入非必要依赖
 
 ## 关键约定与陷阱

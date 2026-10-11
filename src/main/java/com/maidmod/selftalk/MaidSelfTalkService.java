@@ -24,7 +24,8 @@ import java.util.List;
  *       含固定上下文前缀与感知段）；欢迎语保留旧环境口径（分类级随机 + TLM 固定上下文，不读偏好、不消费事件），
  *       历史组装与自话一样按玩家历史上下文模式；</li>
  *   <li>user 消息<b>不写入</b> TLM 历史（系统内部消息，不出现在聊天记录 UI 中）；
- *       assistant 回复由 {@link SelfTalkCallback} 的父类逻辑写入历史，自动纳入原生聊天记录界面；</li>
+ *       assistant 回复同样<b>不写入</b> TLM 历史：LLMCallbackMixin 对 {@link SelfTalkCallback}
+ *       跳过 addAssistantHistory（TLM 写入被切断），回复由本 mod 的独立聊天档案承载；</li>
  *   <li>发送 {@link SelfTalkCallback}，回复返回后执行遗忘检查。</li>
  * </ol>
  * 无人设（customSetting 为空且无模型设定文件）的女仆直接跳过，绝不自动生成人设。

@@ -672,7 +672,8 @@ public final class EnvironmentContextPanel {
             int nameWidth = buttonX - NAME_MARGIN - 4 - (panelX + NAME_MARGIN);
             graphics.drawString(font, ellipsize(name, nameWidth), panelX + NAME_MARGIN, y + 6,
                     rowConfigurable(option) ? TITLE_COLOR : SUBTITLE_COLOR, false);
-            // 行按钮按当前滚动偏移重定位后绘制；鼠标坐标用屏幕外值可避免禁用态产生悬停高亮
+            // 行按钮按当前滚动偏移重定位后绘制；传入真实鼠标坐标，禁用行的悬停提示由面板层
+            // （render 尾部的 rowIndexAt 判定）自行绘制，不依赖按钮自身的悬停外观
             Button button = rowButtons.get(i);
             button.setY(y);
             button.render(graphics, mouseX, mouseY, 0.0F);
