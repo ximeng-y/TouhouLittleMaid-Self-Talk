@@ -242,17 +242,25 @@ public class SelfTalkCallback extends LLMCallback {
      * 只在服务端主线程调用。
      */
     private void broadcastToNearby(EntityMaid maid, String chatText) {
+        broadcastChatToNearby(maid, chatText, broadcastRange);
+    }
+
+    /**
+     * 附近玩家广播（自话／互聊共用）：向 maid 周围 range 格内存活、非旁观、非主人的玩家
+     * 发送灰色「{@code <女仆名> 内容}」系统消息，与 TLM {@code addLLMChatText} 相同格式。
+     * 只在服务端主线程调用。
+     */
+    static void broadcastChatToNearby(EntityMaid maid, String chatText, double range) {
         if (!(maid.level() instanceof ServerLevel serverLevel)) {
             return;
         }
         UUID ownerUuid = maid.getOwnerUUID();
-        // 与 TLM addLLMChatText 相同格式（灰色 <女仆名> 内容）
         Component message = Component.literal("<")
                 .append(maid.getName())
                 .append("> ")
                 .append(chatText)
                 .withStyle(ChatFormatting.GRAY);
-        AABB box = maid.getBoundingBox().inflate(broadcastRange);
+        AABB box = maid.getBoundingBox().inflate(range);
         for (ServerPlayer player : serverLevel.getEntitiesOfClass(ServerPlayer.class, box,
                 p -> p.isAlive() && !p.isSpectator() && !p.getUUID().equals(ownerUuid))) {
             player.sendSystemMessage(message);

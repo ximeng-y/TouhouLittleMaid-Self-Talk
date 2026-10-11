@@ -73,8 +73,6 @@ public final class AutonomousChatHistory {
     /** 手动清空的展示隐藏边界：顺序号小于该值的独立记录不展示（但仍在档案里占额度） */
     private long hiddenBelowSeq = 0;
     private boolean migrationDone = false;
-    /** 已读档标记：避免陈旧存档把内存里更新的数据覆盖回初始状态 */
-    private boolean loaded = false;
 
     public AutonomousChatHistory(EntityMaid maid) {
         this.maid = maid;
@@ -353,12 +351,6 @@ public final class AutonomousChatHistory {
                 seq, gameTime, message, chatText));
     }
 
-    public boolean isLoaded() {
-        synchronized (lock) {
-            return loaded;
-        }
-    }
-
     // ===== NBT =====
 
     /**
@@ -436,7 +428,6 @@ public final class AutonomousChatHistory {
             }
             // 按同一序列位置重新绑定顺序号：相同正文、相同 tick 的不同消息绝不合并
             bindOrderByPosition(tag, dequeInOrder == null ? List.of() : dequeInOrder);
-            loaded = true;
         }
     }
 

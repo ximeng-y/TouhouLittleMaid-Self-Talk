@@ -25,6 +25,9 @@ import java.util.UUID;
  */
 public final class PlayerSettingsStore {
 
+    /** 单只名单容量上限：自话/互聊/睡觉安静/自定义 Prompt/Tool 五类设置名单的新增条目上限，防恶意客户端伪造 UUID 撑大世界存档 */
+    public static final int MAX_MAID_OVERRIDES = 256;
+
     private PlayerSettingsStore() {
     }
 

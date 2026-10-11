@@ -89,7 +89,7 @@ public class CustomPromptConfigSetMessage {
                 if (!prompt.isBlank()
                         && PlayerSettingsStore.getCustomPromptForMaid(serverPlayer.server, serverPlayer.getUUID(), maidUuid).isBlank()
                         && PlayerSettingsStore.countCustomPromptMaidEntries(
-                        serverPlayer.server, serverPlayer.getUUID()) >= 256) {
+                        serverPlayer.server, serverPlayer.getUUID()) >= PlayerSettingsStore.MAX_MAID_OVERRIDES) {
                     MaidSelfTalkMod.LOGGER.warn("Player {} custom prompt maid list full, ignored",
                             serverPlayer.getUUID());
                     return;

@@ -52,7 +52,7 @@ public class SleepQuietConfigSetMessage {
                     if (msg.enabled && !PlayerSettingsStore.isSleepQuietMaid(
                             serverPlayer.server, serverPlayer.getUUID(), msg.maidUuid.get())
                             && PlayerSettingsStore.countSleepQuietMaidOverrides(
-                            serverPlayer.server, serverPlayer.getUUID()) >= 256) {
+                            serverPlayer.server, serverPlayer.getUUID()) >= PlayerSettingsStore.MAX_MAID_OVERRIDES) {
                         MaidSelfTalkMod.LOGGER.warn("Player {} sleep-quiet maid override list full, ignored",
                                 serverPlayer.getUUID());
                         return;

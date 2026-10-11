@@ -59,7 +59,7 @@ public class ToolConfigSetMessage {
                     // 容量上限：新增键时校验，防恶意客户端伪造任意 UUID 无限撑大世界存档
                     if (!msg.enabled
                             && !PlayerSettingsStore.isToolCallMaidDisabled(serverPlayer.server, serverPlayer.getUUID(), maidUuid)
-                            && PlayerSettingsStore.countToolCallMaidOverrides(serverPlayer.server, serverPlayer.getUUID()) >= 256) {
+                            && PlayerSettingsStore.countToolCallMaidOverrides(serverPlayer.server, serverPlayer.getUUID()) >= PlayerSettingsStore.MAX_MAID_OVERRIDES) {
                         MaidSelfTalkMod.LOGGER.warn("Player {} tool-call maid override list full, ignored",
                                 serverPlayer.getUUID());
                         return;
