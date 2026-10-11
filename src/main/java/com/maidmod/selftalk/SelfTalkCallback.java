@@ -167,8 +167,8 @@ public class SelfTalkCallback extends LLMCallback {
         }
     }
 
-    /** 清理本请求自己的等待气泡（按本轮捕获的 id 精准删除，绝不误删新请求的气泡） */
-    private void discardWaitingBubble() {
+    /** 清理本请求自己的等待气泡（按本轮捕获的 id 精准删除，绝不误删新请求的气泡）；包级私有供同步派发失败出口复用 */
+    void discardWaitingBubble() {
         if (waitingChatBubbleId == 0) {
             return;
         }
