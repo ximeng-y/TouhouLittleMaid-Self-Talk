@@ -189,7 +189,8 @@ public final class SelfTalkHandler {
                 boolean triggered = MaidSelfTalkService.triggerSelfTalk(maid, true,
                         Config.STATE1_KEEP_SELF_TALK_COUNT.get(), Config.STATE1_PLAYER_RANGE.get());
                 if (triggered) {
-                    // 仅在真实发起后才标记：触发失败（如清洗/接入异常）时窗口期内可继续重试
+                    // 同步派发成功或异步受理才标记：同步派发失败（false）时不标记、不加冷却，
+                    // 窗口期内按既有规则每 tick 重试（欢迎语每秒闸门照常约束）
                     state.welcomedPlayers.add(ownerUuid);
                     applyCooldown(state, serverTick,
                             Config.STATE1_MIN_INTERVAL.get(), Config.STATE1_MAX_INTERVAL.get());

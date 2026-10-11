@@ -36,6 +36,19 @@ public final class HistoryContextSession {
     }
 
     /**
+     * start() 的受理结果：区分「同步派发成功」「同步派发失败」与「异步流程已受理」。
+     * 调用方据此决定是否把本次触发记为已完成（欢迎语标记、顺延出队等）。
+     */
+    public enum StartOutcome {
+        /** 同步派发成功：正式请求已真实发出 */
+        DISPATCHED,
+        /** 异步流程已受理：检索模式的建索引/规划仍在进行，正式派发稍后发生，结果不回传本次调用 */
+        ACCEPTED_ASYNC,
+        /** 同步派发失败：正式请求未发出且本次会话同步终止，调用方可按既有规则安全重试 */
+        FAILED
+    }
+
+    /**
      * 本次检索的成品结果回报口（互聊链专用）。
      * <p>
      * 检索模式到达任一终态（正常召回、无可用历史、纠正耗尽、非格式失败）时调用一次，
@@ -222,13 +235,15 @@ public final class HistoryContextSession {
      * <p>
      * 互聊链上下文的「继续与否」判据是本次会话的<b>成品结果是否真正交付</b>（见 {@link Dispatcher}），
      * 因此插话中断后的迟到结果不会被链误认成「尚未结束」。
+     *
+     * @return 受理结果：同步派发成功／异步流程已受理／同步派发失败，见 {@link StartOutcome}
      */
-    public void start() {
-        switch (mode) {
+    public StartOutcome start() {
+        return switch (mode) {
             case FULL -> dispatchFull();
             case COMPACT -> dispatchReduced(null, false);
             case RETRIEVAL -> startRetrieval();
-        }
+        };
     }
 
     // ===== 全量模式 =====
@@ -239,7 +254,7 @@ public final class HistoryContextSession {
      * 全量模式不观测召回，链进入交付等待（不是「等不到」）——否则同链下一轮会在
      * 前一跳尚未交付时就派发，破坏串行语义。
      */
-    private void dispatchFull() {
+    private StartOutcome dispatchFull() {
         List<LLMMessage> history = rebuildHistoryWithSelfTalk();
         List<LLMMessage> messages = new ArrayList<>(systemPrefix);
         messages.addAll(history);
@@ -249,7 +264,7 @@ public final class HistoryContextSession {
         messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt)));
         int historyCount = systemPrefix.size() + history.size();
         SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowMessages.size(), sourceIndex);
-        deliver(messages);
+        return deliver(messages);
     }
 
     // ===== 精简模式 =====
@@ -261,7 +276,7 @@ public final class HistoryContextSession {
      * @param recalledBlocks 检索模式的召回块；精简模式传 null
      * @param recallNote     是否追加「召回片段是历史资料」的说明（仅检索模式）
      */
-    private void dispatchReduced(List<LLMMessage> recalledBlocks, boolean recallNote) {
+    private StartOutcome dispatchReduced(List<LLMMessage> recalledBlocks, boolean recallNote) {
         // 合并视图先建：最新一条自话与它取自同一条记录，两条路径的段标签判据一致
         rebuildHistoryWithSelfTalk();
         LLMMessage latestSelfTalk = latestSelfTalkMessage();
@@ -281,7 +296,7 @@ public final class HistoryContextSession {
                 recallNote && recalledBlocks != null && !recalledBlocks.isEmpty());
         messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt)));
         SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowMessages.size(), sourceIndex);
-        deliver(messages);
+        return deliver(messages);
     }
 
     /** 渲染本轮最终 user message：默认按环境快照渲染；注入了自定义渲染器（如欢迎语）时走调用方口径 */
@@ -334,27 +349,32 @@ public final class HistoryContextSession {
 
     // ===== 检索模式 =====
 
-    private void startRetrieval() {
+    private StartOutcome startRetrieval() {
         // 链上已完成首次检索（含「结果为空」）：直接复用，不再规划、不再跑 BM25
         if (cachedRecall != null && cachedRecall.completed()) {
-            dispatchReduced(SelfTalkHistoryAssembler.flattenBlocks(
+            return dispatchReduced(SelfTalkHistoryAssembler.flattenBlocks(
                     SelfTalkHistoryAssembler.retainAliveBlocks(cachedRecall.blocks(), fullHistory)), true);
-            return;
         }
+        // 同步性判定：indexFor 的回调可能在缓存命中/构建失败时内联执行（此时透传同步派发结果），
+        // 也可能在索引重建后异步执行（此时按「已受理」收束，正式派发结果不回传本次调用）。
+        // 收束规则：一旦发出规划请求，本次触发即异步受理；未进入规划请求的路径全部同步透传
+        StartOutcome[] inlineOutcome = { null };
         HistoryRetrievalCache.indexFor(maid, fullHistory, result -> {
             // 索引可能是在文本执行器线程算完再回主线程的；本回调统一在主线程执行
             if (!allowed()) {
+                inlineOutcome[0] = StartOutcome.FAILED;
                 return;
             }
             if (!result.hasSearchableHistory()) {
                 // 没有可检索历史：直接正式生成，不发送规划请求。
                 // 回报「已完成、结果为空」——同链后续轮次不再重复尝试
                 reportRecall(List.of());
-                dispatchReduced(List.of(), false);
+                inlineOutcome[0] = dispatchReduced(List.of(), false);
                 return;
             }
-            sendPlanRequest(planningMessages(null, null), result);
+            inlineOutcome[0] = sendPlanRequest(planningMessages(null, null), result);
         });
+        return inlineOutcome[0] == null ? StartOutcome.ACCEPTED_ASYNC : inlineOutcome[0];
     }
 
     /**
@@ -400,9 +420,16 @@ public final class HistoryContextSession {
         return List.copyOf(recent);
     }
 
-    private void sendPlanRequest(List<LLMMessage> messages, HistoryRetrievalCache.Result result) {
+    /**
+     * 发送关键词规划请求（结果经 {@link #onPlanOutcome} 异步回来）。
+     *
+     * @return 内联调用（缓存命中）时同步收束：请求未发出的各出口回传对应派发结果，
+     *         请求真实发出后为 {@link StartOutcome#ACCEPTED_ASYNC}；
+     *         纠正路径（onPlanOutcome）在异步上下文调用，返回值不消费
+     */
+    private StartOutcome sendPlanRequest(List<LLMMessage> messages, HistoryRetrievalCache.Result result) {
         if (!allowed()) {
-            return;
+            return StartOutcome.FAILED;
         }
         // 规划与纠正共用同一次在途身份：不重复经过全局发起限流，也不重设触发冷却
         LLMClient client = site.client();
@@ -419,8 +446,9 @@ public final class HistoryContextSession {
             // 与其他失败出口一致：同步抛出同样回报「首次检索完成、结果为空」，
             // 否则互聊链上本女仆的后续轮次会重复规划
             reportRecall(List.of());
-            dispatchReduced(List.of(), false);
+            return dispatchReduced(List.of(), false);
         }
+        return StartOutcome.ACCEPTED_ASYNC;
     }
 
     /**
@@ -498,18 +526,19 @@ public final class HistoryContextSession {
     }
 
     /** 正式派发（服务端主线程）：派发前再复核一次许可，超时或插话中断的迟到结果不会继续发请求 */
-    private void deliver(List<LLMMessage> messages) {
+    private StartOutcome deliver(List<LLMMessage> messages) {
         if (!allowed()) {
             settle(false);
-            return;
+            return StartOutcome.FAILED;
         }
         dispatched = true;
         if (dispatcher.dispatch(messages)) {
             settle(true);
-        } else {
-            MaidSelfTalkMod.LOGGER.warn("Failed to dispatch history-mode request for maid {}", maid.getId());
-            settle(false);
+            return StartOutcome.DISPATCHED;
         }
+        MaidSelfTalkMod.LOGGER.warn("Failed to dispatch history-mode request for maid {}", maid.getId());
+        settle(false);
+        return StartOutcome.FAILED;
     }
 
     /** 把响应线程的结果投递回服务端主线程 */
