@@ -32,7 +32,7 @@ public abstract class AIChatScreenMixin extends Screen {
     private EntityMaid maid;
 
     protected AIChatScreenMixin() {
-        super(Component.translatable("maid_self_talk.screen.player_settings.title"));
+        super(Component.translatable("config.maid_self_talk.screen.player_settings.title"));
     }
 
     /**

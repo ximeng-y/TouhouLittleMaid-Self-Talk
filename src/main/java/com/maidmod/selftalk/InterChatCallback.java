@@ -9,11 +9,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.openai.response.Message;
 import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
-import net.minecraft.ChatFormatting;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.phys.AABB;
 
 import java.net.http.HttpRequest;
 import java.util.ArrayList;
@@ -362,15 +358,7 @@ public class InterChatCallback extends LLMCallback {
     }
 
     private void broadcastToNearby(EntityMaid maid, String chatText) {
-        if (!(maid.level() instanceof ServerLevel serverLevel)) return;
-        // 与 SelfTalkCallback 一致：TLM addLLMChatText 已给主人发过同格式消息，此处跳过主人避免重复
-        UUID ownerUuid = maid.getOwnerUUID();
-        Component message = Component.literal("<").append(maid.getName()).append("> ").append(chatText).withStyle(ChatFormatting.GRAY);
-        AABB box = maid.getBoundingBox().inflate(broadcastRange);
-        for (ServerPlayer player : serverLevel.getEntitiesOfClass(ServerPlayer.class, box,
-                p -> p.isAlive() && !p.isSpectator() && !p.getUUID().equals(ownerUuid))) {
-            player.sendSystemMessage(message);
-        }
+        SelfTalkCallback.broadcastChatToNearby(maid, chatText, broadcastRange);
     }
 
     @Override

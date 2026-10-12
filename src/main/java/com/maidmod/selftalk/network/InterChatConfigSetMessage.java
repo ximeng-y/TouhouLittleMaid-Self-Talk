@@ -55,9 +55,9 @@ public class InterChatConfigSetMessage {
                     // 容量上限：新增键时校验，防恶意客户端伪造任意 UUID 无限撑大世界存档
                     if (!msg.enabled
                             && !PlayerSettingsStore.isInterChatMaidDisabled(serverPlayer.server, serverPlayer.getUUID(), maidUuid)
-                            && PlayerSettingsStore.countInterChatMaidOverrides(serverPlayer.server, serverPlayer.getUUID()) >= 256) {
+                            && PlayerSettingsStore.countInterChatMaidOverrides(serverPlayer.server, serverPlayer.getUUID()) >= PlayerSettingsStore.MAX_MAID_OVERRIDES) {
                         MaidSelfTalkMod.LOGGER.warn("Player {} inter-chat maid override list full ({}), ignored",
-                                serverPlayer.getUUID(), 256);
+                                serverPlayer.getUUID(), PlayerSettingsStore.MAX_MAID_OVERRIDES);
                         return;
                     }
                     PlayerSettingsStore.setInterChatMaidDisabled(serverPlayer.server,
