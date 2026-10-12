@@ -1,11 +1,16 @@
 package com.maidmod.selftalk;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.regex.Pattern;
@@ -20,10 +25,11 @@ import java.util.regex.Pattern;
  * {@code MaidAIChatManager} 上就已差一号）。字符串绑定在编译期不报错，漂移只会在运行期
  * 以 {@code InjectionError} 崩溃。本自检把漂移发现提前到 gradle build / CI（issue #60 C4）。
  * <p>
- * 实现方式：直接在 classpath 的 TLM jar 里读取宿主类 .class 字节码，按字节匹配方法名／描述符。
+ * 实现方式：直接在 classpath 的 TLM jar 里读取宿主类 .class 字节码，解析常量池并精确比对
+ * 方法名／描述符条目（不用子串包含，否则 {@code lambda$onSuccess$1} 会被 {@code ...$10} 顶替通过）。
  * 不用反射的原因：枚举声明方法会连带加载 TLM 类继承的 Minecraft 实体链，在 bare JVM 的
  * dev classpath 上会因二进制不匹配抛 {@code IncompatibleClassChangeError}（本线实测）；
- * 而字节码扫描与 Mixin「按名字在目标类字节码中匹配」的表面完全一致——名字在，mixin 就命中。
+ * 而常量池精确比对与 Mixin「按名字在目标类字节码中匹配」的表面完全一致——名字在，mixin 就命中。
  * <p>
  * 兼容边界：本类断言对应 TLM {@code 1.5.3-neoforge+mc1.21.1}（Modrinth）。若升级 TLM，
  * 必须同步复核三个 mixin 的 {@code method} 字符串并更新本类期望值；forge 线的对应自检
@@ -94,7 +100,7 @@ public final class TlmMixinTargetTest {
         return candidates.get(0);
     }
 
-    /** 断言宿主类字节码中包含全部期望名（与 Mixin 按名字匹配的表面一致） */
+    /** 断言宿主类常量池中存在全部期望名（Mixin 按「常量池里的完整名字」匹配，故只做精确比对） */
     private static void checkClass(File tlmJar, String hostClass, String... expectedNames) throws Exception {
         byte[] bytes;
         try (JarFile jar = new JarFile(tlmJar)) {
@@ -113,13 +119,71 @@ public final class TlmMixinTargetTest {
             }
             bytes = out.toByteArray();
         }
-        // 常量池为 modified-UTF8：按 ISO-8859-1 读取可保持字节一一对应，
-        // 方法名与描述符在其中连续出现，字节包含即 Mixin 可命中
-        String pool = new String(bytes, StandardCharsets.ISO_8859_1);
+        Set<String> names = readConstantPoolUtf8(bytes, hostClass);
         for (String expected : expectedNames) {
-            check(pool.contains(expected), hostClass + " 字节码应包含 " + expected
+            check(names.contains(expected), hostClass + " 常量池应含完整名字 " + expected
                     + "（TLM 构建变更会使 lambda 序号漂移或方法改名，需同步复核 mixin 的 method 绑定）");
         }
+    }
+
+    /**
+     * 读出 class 常量池中全部 UTF8 条目的完整内容（方法名与描述符都在其中）。
+     * <p>
+     * 必须逐条取完整条目、精确比对，不能用整段字节的子串包含判断：常量池里只有
+     * {@code lambda$onSuccess$10} 时，子串 {@code lambda$onSuccess$1} 同样成立，会把
+     * lambda 编号漂移漏报成通过，而 mixin 到启动期才因目标缺失崩溃——这正是本自检要拦的。
+     * <p>
+     * 按 ISO-8859-1 还原条目字节以保持与 class 文件字节一一对应（名字均为 ASCII，
+     * 且 modified-UTF8 的 0 字节编码不影响等值比较）。
+     */
+    private static Set<String> readConstantPoolUtf8(byte[] classBytes, String hostClass) throws IOException {
+        DataInputStream in = new DataInputStream(new ByteArrayInputStream(classBytes));
+        check(in.readInt() == 0xCAFEBABE, hostClass + " 应是合法 class 文件（magic 不匹配）");
+        in.readUnsignedShort(); // minor
+        in.readUnsignedShort(); // major
+        int count = in.readUnsignedShort();
+        Set<String> utf8 = new HashSet<>();
+        // 常量池有效下标自 1 起；Long/Double 占两个槽位，其余各占一个
+        for (int index = 1; index < count; index++) {
+            int tag = in.readUnsignedByte();
+            switch (tag) {
+                case 1:
+                    int length = in.readUnsignedShort();
+                    byte[] raw = new byte[length];
+                    in.readFully(raw);
+                    utf8.add(new String(raw, StandardCharsets.ISO_8859_1));
+                    break;
+                case 7:  // Class
+                case 8:  // String
+                case 16: // MethodType
+                case 19: // Module
+                case 20: // Package
+                    in.skipBytes(2);
+                    break;
+                case 15: // MethodHandle
+                    in.skipBytes(3);
+                    break;
+                case 3:  // Integer
+                case 4:  // Float
+                case 9:  // Fieldref
+                case 10: // Methodref
+                case 11: // InterfaceMethodref
+                case 12: // NameAndType
+                case 17: // Dynamic
+                case 18: // InvokeDynamic
+                    in.skipBytes(4);
+                    break;
+                case 5:  // Long
+                case 6:  // Double
+                    in.skipBytes(8);
+                    index++;
+                    break;
+                default:
+                    throw new AssertionError("检查失败：" + hostClass + " 常量池出现未知 tag " + tag
+                            + "（可能为 class 文件新版本引入的新 tag，需扩展本解析）");
+            }
+        }
+        return utf8;
     }
 
     private static void check(boolean condition, String message) {
