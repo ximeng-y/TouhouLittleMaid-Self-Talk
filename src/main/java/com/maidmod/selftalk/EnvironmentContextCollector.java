@@ -72,7 +72,7 @@ final class EnvironmentContextCollector {
             case "effects" -> EnvironmentContextRenderer.effects(snapshot.effects(), lang);
             case "nearby_entities" -> EnvironmentContextRenderer.nearbyEntities(snapshot.entities(), lang);
             case EnvironmentContextOption.KEY_IDENTITY -> {
-                List<EnvironmentContextRenderer.IdentitySnapshot> identities = snapshot.identities(lang);
+                List<EnvironmentContextRenderer.IdentitySnapshot> identities = snapshot.identities();
                 yield identities == null ? null : EnvironmentContextRenderer.identities(identities, lang);
             }
             default -> null;
@@ -160,7 +160,7 @@ final class EnvironmentContextCollector {
          * 名称经 {@link SelfTalkMaidNames#resolveName} 解析（命名牌名称优先，TLM 内置模型预置名称次之，
          * 其余视为未命名），语言取查询者自己的聊天语言；UUID 保留供辨认，实体编号只留内部关联。
          */
-        List<EnvironmentContextRenderer.IdentitySnapshot> identities(ContextLanguage lang) {
+        List<EnvironmentContextRenderer.IdentitySnapshot> identities() {
             String language = SelfTalkMaidNames.resolveQueryLanguage(maid);
             List<EnvironmentContextRenderer.IdentitySnapshot> result = new ArrayList<>();
             for (NearbyEntry entry : nearby()) {
