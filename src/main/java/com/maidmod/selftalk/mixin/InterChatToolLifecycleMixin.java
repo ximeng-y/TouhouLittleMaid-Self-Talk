@@ -57,6 +57,11 @@ import java.util.concurrent.CompletableFuture;
  * <p>
  * 目标方法均为 {@code LLMCallback} 的实例方法（private lambda 亦同），handler 同为实例方法，
  * 与双线既有 mixin 约定一致。
+ * <p>
+ * 兼容边界：{@code lambda$executeSingleToolCall$5}／{@code lambda$onFunctionCall$2} 对应 TLM
+ * {@code 1.5.3-neoforge+mc1.21.1}（Modrinth）的字节码。lambda 序号由编译器按宿主类内出现顺序生成，
+ * 升级或更换 TLM 构建可能漂移，须同步复核本类 method 绑定与两处 @Redirect 目标
+ * （{@code com.maidmod.selftalk.TlmMixinTargetTest} 已在 CI 校验）。
  */
 @Mixin(LLMCallback.class)
 public abstract class InterChatToolLifecycleMixin {

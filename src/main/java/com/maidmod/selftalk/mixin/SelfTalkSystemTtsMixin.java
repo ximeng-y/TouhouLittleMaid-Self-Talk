@@ -23,6 +23,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 登记中），此处 HEAD 按本请求的等待气泡 id 把令牌寄存；随后投递的主线程发声任务在其 HEAD 取走并
  * 判失效——判定与实际发包／上屏在同一主线程任务内原子完成。作废时只回收本条自己的等待气泡，
  * 不发声、不上屏。令牌未寄存（普通玩家聊天等未登记路径）时两个注入点都不介入，行为与未装本 mod 时一致。
+ * <p>
+ * 兼容边界：{@code lambda$onPlaySoundLocal$4} 对应 TLM {@code 1.5.3-neoforge+mc1.21.1}（Modrinth）
+ * 的字节码；forge 线同一 lambda 序号为 {@code $5}（两线 TLM artifact 的 lambda 计数不同）。
+ * 序号由编译器按宿主类内出现顺序生成，升级或更换 TLM 构建可能漂移，须同步复核本类 method 绑定
+ * （{@code com.maidmod.selftalk.TlmMixinTargetTest} 已在 CI 校验）。
  */
 @Mixin(MaidAIChatManager.class)
 public abstract class SelfTalkSystemTtsMixin {

@@ -21,7 +21,8 @@ import java.util.UUID;
  * 覆盖冷却粒度、有效期边界、容量收缩、重复投递、去重与归并规则。
  * 事件正文的成句与归并分组由 {@link EnvironmentContextRendererTest} 覆盖，本类只断言
  * 「哪些记录进了分组、时间取了哪一条」这类生命周期行为。
- * Gradle 的 {@code test} 任务不含 JUnit 用例，不会执行本入口，需显式调用。
+ * Gradle 侧已由 {@code gradle check}（含 CI 的 {@code gradle build}，issue #60 C13）真实执行，
+ * 失败即构建失败；上方 {@code <pre>} 中的 javac+java 命令保留，供免 Gradle 场景手动复现。
  */
 public final class SelfTalkEventBufferTest {
 
