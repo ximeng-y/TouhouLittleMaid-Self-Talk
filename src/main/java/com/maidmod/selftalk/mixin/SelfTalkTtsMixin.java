@@ -29,6 +29,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * <p>
  * 令牌为 null（普通玩家聊天等未登记路径）时两个注入点都不介入，
  * 交付逻辑与未安装本 mod 时完全一致。
+ * <p>
+ * 兼容边界：{@code lambda$onSuccess$1}／{@code lambda$onFailure$0} 对应 TLM
+ * {@code 1.5.3-forge+mc1.20.1}（Modrinth）的字节码。lambda 序号由编译器按宿主类内出现顺序生成，
+ * 升级或更换 TLM 构建可能漂移，须同步复核本类 method 绑定
+ * （{@code com.maidmod.selftalk.TlmMixinTargetTest} 已在 CI 校验）；交付时判定的语义不因此调整注入点。
  */
 @Mixin(TTSCallback.class)
 public abstract class SelfTalkTtsMixin {

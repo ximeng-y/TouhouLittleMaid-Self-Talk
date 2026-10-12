@@ -21,7 +21,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  *       src/test/java/com/maidmod/selftalk/EnvironmentContextTest.java
  * java -cp out com.maidmod.selftalk.EnvironmentContextTest
  * </pre>
- * Gradle 的 {@code test} 任务不含 JUnit 用例，不会执行本入口，需显式调用。
+ * 已由 {@code gradle check}（含 CI 的 {@code gradle build}，issue #60 C13）真实执行，
+ * 失败即构建失败；上方 {@code <pre>} 中的 javac+java 命令保留，供免 Gradle 场景手动复现。
  */
 public final class EnvironmentContextTest {
 

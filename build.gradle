@@ -82,3 +82,22 @@ jar {
         ])
     }
 }
+
+// ===== 自检真实执行（issue #60 C13）：四个 main() 自检 + TLM 兼容自检挂到 check，
+// gradle build / CI 自动运行，失败（非零退出或异常）即构建失败 =====
+def selfCheckMains = ['EnvironmentContextTest', 'EnvironmentContextRendererTest',
+                      'HistoryCoreTest', 'SelfTalkEventBufferTest', 'TlmMixinTargetTest']
+selfCheckMains.each { name ->
+    tasks.register("selfCheck${name}", JavaExec) {
+        group = 'verification'
+        description = "运行自检 main：com.maidmod.selftalk.${name}"
+        // 并入 main 的 runtimeClasspath：neoforge 线 MDG 只把平台库（含 gson）接到 main，
+        // forge 线为对称写法；HistoryCoreTest 运行需要的 gson 来自 Minecraft 依赖树
+        classpath = sourceSets.test.runtimeClasspath + sourceSets.main.runtimeClasspath
+        mainClass = "com.maidmod.selftalk.${name}"
+        jvmArgs '-Dfile.encoding=UTF-8'
+    }
+}
+tasks.named('check') {
+    dependsOn selfCheckMains.collect { "selfCheck${it}" }
+}
