@@ -771,11 +771,14 @@ public final class EnvironmentContextPanel {
     }
 
     /**
-     * 历史上下文模式的 tooltip：切换成本与实验性说明共用一个金黄色警告块，
-     * 换行由本 mod 自己的本地化文案携带（与总开关同一套排版）。
+     * 历史上下文模式的 tooltip：模式说明用常规色，切换成本与实验性说明用金黄色警告块，
+     * 两者之间留一空行分段；换行由本 mod 自己的本地化文案携带（与总开关同一套排版）。
      */
     private List<Component> historyModeTooltip() {
         List<Component> lines = new ArrayList<>();
+        lines.add(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.context.history.description"));
+        lines.add(Component.empty());
         lines.add(Component.translatable(
                         "config.maid_self_talk.screen.player_settings.context.history.warning")
                 .withStyle(ChatFormatting.GOLD));
