@@ -59,7 +59,9 @@ public class KeywordPlanCallback extends LLMCallback {
 
     public KeywordPlanCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
                                Consumer<Outcome> onOutcome) {
-        super(chatManager, messages);
+        // subagents=true 只利用父类的气泡开关：规划及纠正请求从源头不创建等待气泡；
+        // 本回调并不产生实际子 Agent
+        super(chatManager, messages, true);
         this.onOutcome = onOutcome;
         // 规划请求绝不带工具：既避免误执行游戏工具，也让输出形状收敛到纯 JSON
         this.needAddTools = false;
