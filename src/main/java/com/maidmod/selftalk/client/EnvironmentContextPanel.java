@@ -82,6 +82,8 @@ public final class EnvironmentContextPanel {
     private static final int TRACK_GAP = 6;
     /** 名称区左边距 */
     private static final int NAME_MARGIN = 8;
+    /** 名称文字相对行顶的下沉量（行高 24、文字高 9，垂直居中的余量） */
+    private static final int NAME_TEXT_Y = 6;
     /** 滚轮每档滚动的行数 */
     private static final int SCROLL_ROWS_PER_NOTCH = 3;
     /** 滚动条滑块最小高度（太短的滑块不好拖） */
@@ -524,11 +526,22 @@ public final class EnvironmentContextPanel {
     }
 
     /**
-     * 可点行的悬停说明键：四项环境事件／状态各有专属说明，其余行共用三态通用说明。
+     * 右侧状态按钮的悬停说明键：32 行共用一份三态通用说明。
      * <p>
-     * 其余 28 行的名称本身已是自然语言（「女仆主手物品」……），逐条写描述只会变成 28 条冗余文案。
+     * 操作处只解释「进入随机池／必定进入／必定不进入」这三个状态本身，与具体是哪一项无关；
+     * 四项环境事件／状态的专属说明改挂在左侧名称上（见 {@link #rowDescriptionKey}）。
      */
-    private static String rowTooltipKey(EnvironmentContextOption option) {
+    private static String modeTooltipKey() {
+        return "config.maid_self_talk.screen.player_settings.context.row.mode";
+    }
+
+    /**
+     * 左侧名称的专属说明键：只有四项环境事件／状态有，其余行返回 {@code null}。
+     * <p>
+     * 其余 28 行的名称本身已是自然语言（「女仆主手物品」……），逐条写描述只会变成 28 条冗余文案，
+     * 因此它们的名称不挂说明——只在名称被省略号截断时补一行完整名称。
+     */
+    private static String rowDescriptionKey(EnvironmentContextOption option) {
         String key = switch (option.key()) {
             case EnvironmentContextOption.KEY_IDENTITY -> "identity";
             case EnvironmentContextOption.KEY_DEATHS -> "deaths";
@@ -536,8 +549,9 @@ public final class EnvironmentContextPanel {
             case EnvironmentContextOption.KEY_SELF_HURT -> "self_hurt";
             default -> null;
         };
-        return "config.maid_self_talk.screen.player_settings.context.row."
-                + (key == null ? "mode" : key);
+        return key == null
+                ? null
+                : "config.maid_self_talk.screen.player_settings.context.row." + key;
     }
 
     private static String modeKey(EnvironmentContextMode mode) {
@@ -616,15 +630,23 @@ public final class EnvironmentContextPanel {
         if (hovered >= 0) {
             EnvironmentContextOption option = EnvironmentContextOption.ALL.get(hovered);
             String reason = disabledReasonKey(option);
-            if (reason != null) {
-                graphics.renderTooltip(font, wrap(reason), mouseX, mouseY);
-            } else {
-                // 可点行：三态说明（或该行的专属说明）+ 名称被截断时的完整名称，合成一个多行 tooltip。
-                // 走 wrap 按面板宽度硬换行，说明文案可长可短，不必在译文里写死换行
-                List<FormattedCharSequence> lines = new ArrayList<>(wrap(rowTooltipKey(option)));
-                if (nameTruncated(option)) {
-                    lines.addAll(wrap(nameKey(option)));
-                }
+            // 操作处统一只解释三态本身；不可用行代之以不可用原因（原因比三态更该被看到）
+            graphics.renderTooltip(font, wrap(reason != null ? reason : modeTooltipKey()), mouseX, mouseY);
+            return;
+        }
+        int named = rowNameIndexAt(mouseX, mouseY);
+        if (named >= 0) {
+            EnvironmentContextOption option = EnvironmentContextOption.ALL.get(named);
+            // 名称区：四项专属说明（其余行没有）+ 名称被截断时的完整名称；两者都空则不显示浮层
+            List<FormattedCharSequence> lines = new ArrayList<>();
+            String description = rowDescriptionKey(option);
+            if (description != null) {
+                lines.addAll(wrap(description));
+            }
+            if (nameTruncated(option)) {
+                lines.addAll(wrap(nameKey(option)));
+            }
+            if (!lines.isEmpty()) {
                 graphics.renderTooltip(font, lines, mouseX, mouseY);
             }
         }
@@ -649,8 +671,7 @@ public final class EnvironmentContextPanel {
             return;
         }
         String name = Component.translatable(labelKey).getString();
-        int nameWidth = buttonX - NAME_MARGIN - 4 - (panelX + NAME_MARGIN);
-        graphics.drawString(font, ellipsize(name, nameWidth), panelX + NAME_MARGIN, y + 6,
+        graphics.drawString(font, ellipsize(name, nameWidth()), panelX + NAME_MARGIN, y + NAME_TEXT_Y,
                 toggleConfigurable() ? TITLE_COLOR : SUBTITLE_COLOR, false);
         button.setY(y);
         button.render(graphics, mouseX, mouseY, 0.0F);
@@ -669,9 +690,8 @@ public final class EnvironmentContextPanel {
             int y = rowY(i);
             // 名称区宽度：按钮左沿到列表右边距之间的可用宽度（留 4px 间隙）
             String name = Component.translatable(nameKey(option)).getString();
-            int nameWidth = buttonX - NAME_MARGIN - 4 - (panelX + NAME_MARGIN);
-            graphics.drawString(font, ellipsize(name, nameWidth), panelX + NAME_MARGIN, y + 6,
-                    rowConfigurable(option) ? TITLE_COLOR : SUBTITLE_COLOR, false);
+            graphics.drawString(font, ellipsize(name, nameWidth()), panelX + NAME_MARGIN,
+                    y + NAME_TEXT_Y, rowConfigurable(option) ? TITLE_COLOR : SUBTITLE_COLOR, false);
             // 行按钮按当前滚动偏移重定位后绘制；传入真实鼠标坐标，禁用行的悬停提示由面板层
             // （render 尾部的 rowIndexAt 判定）自行绘制，不依赖按钮自身的悬停外观
             Button button = rowButtons.get(i);
@@ -717,11 +737,10 @@ public final class EnvironmentContextPanel {
         return EnvironmentContextSettings.nameKey(option);
     }
 
-    /** 名称是否会被省略号截断（决定要不要挂完整名称 tooltip） */
+    /** 名称是否会被省略号截断（决定名称悬停要不要补一行完整名称） */
     private boolean nameTruncated(EnvironmentContextOption option) {
         String name = Component.translatable(nameKey(option)).getString();
-        int nameWidth = buttonX - NAME_MARGIN - 4 - (panelX + NAME_MARGIN);
-        return font.width(name) > nameWidth;
+        return font.width(name) > nameWidth();
     }
 
     /** 超宽时省略号截断（按渲染宽度而非字符数） */
@@ -815,6 +834,39 @@ public final class EnvironmentContextPanel {
             }
         }
         return -1;
+    }
+
+    /**
+     * 鼠标下方的名称行：横向命中区只取名称文字自身（按实际渲染宽度）。
+     * <p>
+     * 名称与按钮之间的空白不参与命中——左侧那一大片空白挂提示会让鼠标路过就弹浮层。
+     * 纵向仍按整行高度判定：文字只有 9px 高，按文字高度判会很难点中。
+     */
+    private int rowNameIndexAt(double mouseX, double mouseY) {
+        if (!open || mouseY < listTop || mouseY >= listBottom) {
+            return -1;
+        }
+        for (int i = 0; i < rowButtons.size(); i++) {
+            if (!rowVisible(i)) {
+                continue;
+            }
+            int y = rowY(i);
+            if (mouseY < y || mouseY >= y + BUTTON_HEIGHT) {
+                continue;
+            }
+            String name = Component.translatable(
+                    nameKey(EnvironmentContextOption.ALL.get(i))).getString();
+            int left = panelX + NAME_MARGIN;
+            if (mouseX >= left && mouseX < left + font.width(ellipsize(name, nameWidth()))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** 名称区可用宽度：按钮左沿到名称左边距之间，留 4px 间隙 */
+    private int nameWidth() {
+        return buttonX - NAME_MARGIN - 4 - (panelX + NAME_MARGIN);
     }
 
     private boolean inTrack(double mouseX, double mouseY) {

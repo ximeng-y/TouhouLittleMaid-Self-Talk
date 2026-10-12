@@ -127,7 +127,7 @@
   "config.maid_self_talk.screen.player_settings.context.mode.random": "进入随机池",
   "config.maid_self_talk.screen.player_settings.context.mode.always": "必定进入上下文",
   "config.maid_self_talk.screen.player_settings.context.mode.never": "必定不进入上下文",
-  "config.maid_self_talk.screen.player_settings.context.row.mode": "「进入随机池」每次随机抽取一部分；「必定进入」每次都带上；「必定不进入」永不带上。默认值即推荐配置。",
+  "config.maid_self_talk.screen.player_settings.context.row.mode": "「进入随机池」每次随机抽取一部分\n「必定进入」每次都带上\n「必定不进入」永不带上\n默认值即推荐配置",
   "config.maid_self_talk.screen.player_settings.context.row.identity": "附加每只附近女仆的名称与 UUID，便于模型区分同名女仆。",
   "config.maid_self_talk.screen.player_settings.context.row.deaths": "记录玩家、有主人的动物与其他女仆的死亡，普通生物不计。",
   "config.maid_self_talk.screen.player_settings.context.row.player_hurt": "记录玩家掉血事件。",

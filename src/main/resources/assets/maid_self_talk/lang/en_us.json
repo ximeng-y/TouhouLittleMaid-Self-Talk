@@ -127,7 +127,7 @@
   "config.maid_self_talk.screen.player_settings.context.mode.random": "Random pool",
   "config.maid_self_talk.screen.player_settings.context.mode.always": "Always include",
   "config.maid_self_talk.screen.player_settings.context.mode.never": "Never include",
-  "config.maid_self_talk.screen.player_settings.context.row.mode": "\"Random pool\": a random subset is picked each time. \"Always include\": sent every time. \"Never include\": never sent. The defaults are the recommended setup.",
+  "config.maid_self_talk.screen.player_settings.context.row.mode": "\"Random pool\": a random subset is picked each time\n\"Always include\": sent every time\n\"Never include\": never sent\nThe defaults are the recommended setup",
   "config.maid_self_talk.screen.player_settings.context.row.identity": "Adds each nearby maid's name and UUID so the model can tell same-named maids apart.",
   "config.maid_self_talk.screen.player_settings.context.row.deaths": "Only deaths of players, owned animals and other maids are recorded; ordinary mobs are ignored.",
   "config.maid_self_talk.screen.player_settings.context.row.player_hurt": "Recorded when a player actually loses health.",
