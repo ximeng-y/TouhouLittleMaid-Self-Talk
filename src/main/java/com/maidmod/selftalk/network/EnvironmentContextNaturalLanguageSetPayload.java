@@ -16,7 +16,7 @@ import java.util.UUID;
  * 客户端也无需依赖本地推断链条。包内<b>不携带</b>玩家或女仆 UUID——语义上就没有这两个维度，
  * 服务端一律用连接上的 {@code ServerPlayer} 身份读写。
  * <p>
- * 与 32 项设置共用同一个浮层会话：{@code sessionId} 与递增 {@code seq} 都取自当前浮层会话，
+ * 与 35 项设置共用同一个浮层会话：{@code sessionId} 与递增 {@code seq} 都取自当前浮层会话，
  * 因此旧会话或过期响应不会覆盖新状态。
  *
  * @param sessionId 浮层会话 id
