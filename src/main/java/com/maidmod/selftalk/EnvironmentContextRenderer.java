@@ -45,7 +45,9 @@ final class EnvironmentContextRenderer {
         return switch (key) {
             case "game_time", "weather", "dimension", "biome" -> Theme.WORLD;
             case "user_name", "user_healthy", "user_position", "distance_to_user",
-                 "user_mainhand", "user_armor" -> Theme.OWNER;
+                 "user_mainhand", "user_armor",
+                 // 主人 Curios 条目的 key 不以 user_ 开头，必须显式识别，否则会落到默认的 SELF 段
+                 EnvironmentContextOption.KEY_USER_CURIOS -> Theme.OWNER;
             case "nearby_entities", EnvironmentContextOption.KEY_IDENTITY -> Theme.SURROUNDINGS;
             default -> Theme.SELF;
         };
@@ -447,6 +449,83 @@ final class EnvironmentContextRenderer {
             parts.add(item.formatted());
         }
         return String.join(zh ? "；" : "; ", parts);
+    }
+
+    // ===== 饰品 =====
+
+    /**
+     * Curios 饰品快照：功能槽与外观槽两组，各自保持槽位顺序与重复堆叠。
+     * <p>
+     * 两组都为空表示「有槽位但都没戴」，是有效信息；本轮无数据不进入这里（采集侧直接返回 null）。
+     */
+    record AccessorySnapshot(List<ItemSnapshot> functional, List<ItemSnapshot> cosmetic) {
+    }
+
+    /**
+     * 饰品条目的普通模式取值（{@code - label: value} 里的 value，label 由
+     * {@link EnvironmentContextSettings#labelOf} 提供）。
+     * <p>
+     * Curios 两项把功能槽与外观槽分开写明，为空的一组也显式写 {@code Empty}，
+     * 避免主人与女仆、功能槽与外观槽的列表互相失去归属。
+     */
+    static String accessoryValue(String key, List<ItemSnapshot> functional, List<ItemSnapshot> cosmetic) {
+        if (EnvironmentContextOption.KEY_MAID_BAUBLES.equals(key)) {
+            return functional == null || functional.isEmpty() ? "Empty" : join(functional, false);
+        }
+        return "Functional slots: " + emptyIfBlank(functional)
+                + "; Cosmetic slots: " + emptyIfBlank(cosmetic);
+    }
+
+    private static String emptyIfBlank(List<ItemSnapshot> items) {
+        return items == null || items.isEmpty() ? "Empty" : join(items, false);
+    }
+
+    /**
+     * 饰品条目的自然语言表达：女仆原生饰品栏、女仆 Curios、主人 Curios 三项共用。
+     * <p>
+     * 与 {@link #items} 的关键差别：Curios 两项把功能槽与外观槽分成两组分别陈述，
+     * <b>一组为空只说明该组没戴</b>，绝不写成整个实体没戴饰品；
+     * 女仆原生饰品没有槽位分组，整栏作为一个列表表达。
+     * <p>
+     * 「功能槽」只是槽位种类名称，不声称物品正在生效；外观槽也不附加任何能力描述。
+     * 名称已由采集侧转义，本方法不截断、不聚合、不补入未被选中的内容。
+     * 主人条目的 key 不以 {@code user_} 开头，主语归属必须按固定 key 显式判定。
+     *
+     * @param functional 功能槽列表；原生饰品条目下即整栏列表
+     * @param cosmetic   外观槽列表；原生饰品条目下忽略
+     */
+    static String accessories(String key, List<ItemSnapshot> functional, List<ItemSnapshot> cosmetic,
+                              ContextLanguage lang) {
+        boolean zh = lang.isZh();
+        boolean owner = EnvironmentContextOption.KEY_USER_CURIOS.equals(key);
+        String subject = owner ? (zh ? "你的主人" : "your owner") : (zh ? "你" : "you");
+        // 英文所有格独立于主格：主语是 you，直接加 's 会拼成 You's
+        String possessive = owner ? "your owner's" : "your";
+        if (EnvironmentContextOption.KEY_MAID_BAUBLES.equals(key)) {
+            if (functional == null || functional.isEmpty()) {
+                return zh ? "你的女仆饰品栏中没有佩戴饰品。"
+                        : capitalize(possessive + " maid bauble slots hold no accessories.");
+            }
+            String list = join(functional, zh);
+            return zh ? "你的女仆饰品栏中佩戴着：" + list + "。"
+                    : capitalize(possessive + " maid bauble slots hold: " + list + ".");
+        }
+        return groupedPart(subject, possessive, functional, zh, true)
+                + groupedPart(subject, possessive, cosmetic, zh, false);
+    }
+
+    /** 单个 Curios 槽位组：有物品时列出，为空时明说该组没戴 */
+    private static String groupedPart(String subject, String possessive, List<ItemSnapshot> items,
+                                      boolean zh, boolean functional) {
+        String slotZh = functional ? "Curios 功能槽" : "Curios 外观槽";
+        String slotEn = functional ? "Curios functional slots" : "Curios cosmetic slots";
+        if (items == null || items.isEmpty()) {
+            return zh ? subject + "的" + slotZh + "中没有佩戴饰品。"
+                    : capitalize(possessive + " " + slotEn + " hold no accessories.");
+        }
+        String list = join(items, zh);
+        return zh ? subject + "的" + slotZh + "中佩戴着：" + list + "。"
+                : capitalize(possessive + " " + slotEn + " hold: " + list + ".");
     }
 
     // ===== 状态效果 =====

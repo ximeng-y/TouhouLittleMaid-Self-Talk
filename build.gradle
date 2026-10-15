@@ -23,6 +23,13 @@ repositories {
             includeGroup 'maven.modrinth'
         }
     }
+    maven {
+        name = 'IllusiveC4'
+        url = 'https://maven.theillusivec4.top/'
+        content {
+            includeGroup 'top.theillusivec4.curios'
+        }
+    }
 }
 
 dependencies {
@@ -31,6 +38,9 @@ dependencies {
     // Cloth Config（仅编译期：客户端配置界面类引用其 API；
     // 运行时通过反射注册，未安装 cloth-config 时配置界面自动禁用，不影响模组功能）
     compileOnly 'maven.modrinth:cloth-config:15.0.140+neoforge'
+    // Curios API（仅编译期：饰品读取类引用其 API，运行时不打包、不声明前置；
+    // 未安装 Curios 时功能门拦截，不加载读取实现，不影响模组功能）
+    compileOnly 'top.theillusivec4.curios:curios-neoforge:9.5.1+1.21.1:api'
 }
 
 neoForge {

@@ -19,7 +19,7 @@ import java.util.UUID;
  *   <li><b>管理员与提供者是否可用</b>（{@link Availability}）：决定界面是否可点、注入侧是否放行；</li>
  *   <li><b>本轮是否有实际数据</b>：只影响本轮候选池，不使界面按钮不可配置。</li>
  * </ol>
- * 第 27 项（附近女仆身份）的可用性必须查<b>服务端注册表内实际存在的 key</b>，
+ * 第 30 项（附近女仆身份）的可用性必须查<b>服务端注册表内实际存在的 key</b>，
  * 不能用热重载后的 {@code MAID_IDENTITY_ENABLED} 值代替——该功能的注册状态只在启动时决定一次。
  */
 public final class EnvironmentContextSettings {
@@ -41,7 +41,11 @@ public final class EnvironmentContextSettings {
         /** 附近女仆身份提供者未注册 */
         IDENTITY_NOT_REGISTERED(4),
         /** 其他所需 TLM 提供者缺失 */
-        PROVIDER_MISSING(5);
+        PROVIDER_MISSING(5),
+        /** 当前服务端未安装 Curios */
+        CURIOS_NOT_LOADED(6),
+        /** 已安装 Curios，但服务端关闭了东方小女仆的 Curios 饰品栏支持 */
+        MAID_CURIOS_DISABLED(7);
 
         private final byte id;
 
@@ -91,7 +95,7 @@ public final class EnvironmentContextSettings {
     }
 
     /**
-     * 该玩家的有效模式表（全部 32 项）。
+     * 该玩家的有效模式表（全部 35 项）。
      * <p>
      * 「允许玩家自定义配置」关闭时一律使用目录默认值——玩家覆盖被忽略（但存档里的选择保留，
      * 重新开启后原样生效；见 {@link PlayerSettingsStore#getEnvironmentContextMode}）。
@@ -136,10 +140,19 @@ public final class EnvironmentContextSettings {
             case EVENT_SELF -> !Config.EVENT_CONTEXT_ENABLED.get()
                     ? Availability.EVENT_MASTER_DISABLED
                     : (Config.EVENT_CONTEXT_SELF_ENABLED.get() ? Availability.AVAILABLE : Availability.SELF_DISABLED);
+            // 内置饰品不依赖任何外部提供者，恒可用
+            case BUILTIN -> Availability.AVAILABLE;
+            case CURIOS -> CuriosAccessoryReader.isCuriosLoaded()
+                    ? Availability.AVAILABLE : Availability.CURIOS_NOT_LOADED;
+            // 先区分「未安装 Curios」，再区分「女仆支持被关闭」——两者的禁用提示不同
+            case MAID_CURIOS -> !CuriosAccessoryReader.isCuriosLoaded()
+                    ? Availability.CURIOS_NOT_LOADED
+                    : (CuriosAccessoryReader.isMaidCuriosEnabled()
+                    ? Availability.AVAILABLE : Availability.MAID_CURIOS_DISABLED);
         };
     }
 
-    /** 全部 32 项的可用性表（界面快照与注入侧共用同一判定口） */
+    /** 全部 35 项的可用性表（界面快照与注入侧共用同一判定口） */
     public static Map<String, Availability> availabilityMap() {
         Map<String, Availability> result = new LinkedHashMap<>();
         for (EnvironmentContextOption option : EnvironmentContextOption.ALL) {
@@ -163,6 +176,25 @@ public final class EnvironmentContextSettings {
     /** 按 key 取提供者，缺失返回 null（只读，禁止改写返回的注册表内容） */
     public static IMaidContext provider(String key) {
         return key == null ? null : GameContextRegisterAccessor.maid_self_talk$contexts().get(key);
+    }
+
+    /**
+     * 条目的 label（模型上下文的 {@code - label: value} 与情境段普通模式共用）。
+     * <p>
+     * 饰品条目没有 TLM 提供者，改用本 mod 固定的一小组英文 label（与 TLM 提供者 label 的语言一致）；
+     * 其余条目一律读原提供者 label，提供者缺失时返回 {@code null}（调用方已经保证不会走到这里）。
+     * 不能用 {@code user_} 前缀区分主人与女仆——{@code maid_self_talk_user_curios} 正是靠这张固定表归属主人。
+     */
+    public static String labelOf(String key) {
+        if (EnvironmentContextOption.isAccessoryKey(key)) {
+            return switch (key) {
+                case EnvironmentContextOption.KEY_MAID_BAUBLES -> "Maid baubles";
+                case EnvironmentContextOption.KEY_MAID_CURIOS -> "Maid Curios accessories";
+                default -> "Owner Curios accessories";
+            };
+        }
+        IMaidContext context = provider(key);
+        return context == null ? null : context.label();
     }
 
     /** 目录项的本地化名称键（界面用；模型上下文一律不出现该键） */
