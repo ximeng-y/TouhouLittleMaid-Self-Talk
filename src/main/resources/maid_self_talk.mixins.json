@@ -15,13 +15,14 @@
     "SelfTalkTtsMixin",
     "SelfTalkSystemTtsMixin",
     "SelfTalkLateDisplayMixin",
-    "GameContextRegisterAccessor"
+    "GameContextRegisterAccessor",
+    "WaitingChatBubbleDataMixin"
   ],
   "client": [
     "AIChatScreenMixin",
     "HistoryAIChatScreenMixin",
-    "SettingEditScreenMixin"
-  ],
+    "SettingEditScreenMixin",
+    "SelfTalkChatBubbleRendererMixin"  ],
   "injectors": {
     "defaultRequire": 1
   }

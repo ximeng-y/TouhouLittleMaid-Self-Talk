@@ -10,6 +10,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.maidmod.selftalk.client.SelfTalkClientConfig;
 import com.maidmod.selftalk.network.SelfTalkPackets;
 
 /**
@@ -34,6 +35,9 @@ public class MaidSelfTalkMod {
         // 客户端 Cloth Config 配置界面：通过反射注册（字节码不直接引用 cloth 类，
         // 未安装 cloth-config 时自动跳过，不影响模组核心功能）
         if (FMLEnvironment.dist.isClient()) {
+            // 本地显示开关：独立的 CLIENT 配置，注册不依赖是否安装 Cloth Config
+            ModLoadingContext.get().getActiveContainer()
+                    .registerConfig(ModConfig.Type.CLIENT, SelfTalkClientConfig.SPEC);
             registerClothConfigIfPresent();
         }
     }

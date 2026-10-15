@@ -6,6 +6,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.openai.response.ToolCall;
 import com.maidmod.selftalk.InterChatCallback;
 import com.maidmod.selftalk.SelfTalkCallback;
+import com.maidmod.selftalk.SelfTalkWaitingBubbles;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Coerce;
@@ -114,6 +115,22 @@ public abstract class InterChatToolLifecycleMixin {
     private void maid_self_talk$blockBubbleRefresh(CallbackInfo ci) {
         if (maid_self_talk$isStopped()) {
             ci.cancel();
+        }
+    }
+
+    /**
+     * Tool 刷新成功（TAIL）后，把新建且已写回 {@code waitingChatBubbleId} 的等待气泡补上
+     * 自话/互聊来源标记（issue #78）：多轮 Tool 导致的换 ID 同样保持客户端隐藏持续生效。
+     * <p>
+     * 只在 Component 重载尾追加一注；String 重载经 {@code refreshWaitingChatBubble(String)}
+     * 内部转入本方法，不重复标记。HEAD 作废守卫仍先行生效，作废请求不会走到这里。
+     */
+    @Inject(method = "refreshWaitingChatBubble(Lnet/minecraft/network/chat/Component;)V",
+            at = @At("TAIL"))
+    private void maid_self_talk$markRefreshedBubble() {
+        if ((Object) this instanceof InterChatCallback
+                || (Object) this instanceof SelfTalkCallback) {
+            SelfTalkWaitingBubbles.markBubble((com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback) (Object) this);
         }
     }
 
