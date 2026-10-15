@@ -1,14 +1,24 @@
 package com.maidmod.selftalk.client;
 
+import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.MaidPersonaDraft;
+import com.maidmod.selftalk.MaidPersonaHost;
 import com.maidmod.selftalk.network.CustomPromptConfigResponsePayload;
 import com.maidmod.selftalk.network.EnvironmentContextConfigResponsePayload;
 import com.maidmod.selftalk.network.InterChatConfigResponsePayload;
+import com.maidmod.selftalk.network.MaidPersonaSaveResponsePayload;
 import com.maidmod.selftalk.network.SelfTalkConfigResponsePayload;
 import com.maidmod.selftalk.network.SleepQuietConfigResponsePayload;
 import com.maidmod.selftalk.network.ToolConfigResponsePayload;
 import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.neoforged.neoforge.common.NeoForge;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * 客户端辅助入口：网络层回调（仅客户端加载）。
@@ -17,6 +27,25 @@ import net.neoforged.api.distmarker.OnlyIn;
 public final class SelfTalkPlayerSettingsClient {
 
     private SelfTalkPlayerSettingsClient() {
+    }
+
+    /** 客户端断开连接时清空待确认记录：残留的旧连接请求不可能再回包，防止锁死重连后的草稿页 */
+    static {
+        NeoForge.EVENT_BUS.addListener(SelfTalkPlayerSettingsClient::onClientLoggingOut);
+    }
+
+    private static void onClientLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
+        PENDING_PERSONA_SAVES.clear();
+    }
+
+    /** 客户端级待确认草稿保存：requestId → {实体 id, 提交快照}。
+     *  页面关闭后的迟到回包仍能据此更新客户端宿主，重开草稿页读到的是服务端已确认值；
+     *  条目随回包到达移除（服务端对可解码请求一律回包，仅异常断连会残留，容量上限兜底）。 */
+    private static final Map<UUID, PendingPersonaSave> PENDING_PERSONA_SAVES = new HashMap<>();
+    /** 待确认条目容量上限：防异常断连下无限残留 */
+    private static final int MAX_PENDING_PERSONA_SAVES = 64;
+
+    private record PendingPersonaSave(int entityId, MaidPersonaDraft snapshot) {
     }
 
     /** 收到服务端自话设置响应后，刷新当前打开的设置界面 */
@@ -66,6 +95,56 @@ public final class SelfTalkPlayerSettingsClient {
         Minecraft mc = Minecraft.getInstance();
         if (mc.screen instanceof SelfTalkPlayerSettingsScreen screen) {
             screen.applyEnvironmentContextResponse(payload);
+        }
+    }
+
+    /** 草稿保存提交时登记：请求发出即登记，回包到达后据此独立确认客户端宿主 */
+    public static void registerPersonaSave(UUID requestId, EntityMaid maid, MaidPersonaDraft snapshot) {
+        if (requestId == null || maid == null) {
+            return;
+        }
+        if (PENDING_PERSONA_SAVES.size() >= MAX_PENDING_PERSONA_SAVES) {
+            // 容量兜底：整体清空（HashMap 顺序不稳定，仅防止无限残留，不影响正确性）
+            PENDING_PERSONA_SAVES.clear();
+        }
+        PENDING_PERSONA_SAVES.put(requestId, new PendingPersonaSave(maid.getId(), snapshot));
+    }
+
+    /** 同一女仆是否仍有未确认的草稿保存：跨页面门禁，防止旧基线在确认前被提交覆盖新值 */
+    public static boolean hasPendingSaveFor(int entityId) {
+        for (PendingPersonaSave pending : PENDING_PERSONA_SAVES.values()) {
+            if (pending.entityId() == entityId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 收到服务端草稿保存结果：先独立确认客户端宿主，再通知当前草稿页。
+     * <p>
+     * 宿主更新不依赖页面存活：回包到达即按提交登记把服务端已保存值写回客户端宿主，
+     * 页面关闭后重开草稿页也能读到最新值。
+     * <p>
+     * 「请求已结束」与「成功并入」分开：无论成功失败，都要让等待它的草稿页结束
+     * 跨页门禁（失败不改草稿/基线，只提示错误）；成功时才并入确认值。
+     * 原页仍按自身 requestId 走完整响应处理，旧回包不会落到任意新页面上。
+     */
+    public static void onPersonaSaveResponse(MaidPersonaSaveResponsePayload payload) {
+        Minecraft mc = Minecraft.getInstance();
+        PendingPersonaSave pending = PENDING_PERSONA_SAVES.remove(payload.requestId());
+        if (payload.success() && pending != null && mc.level != null
+                && mc.level.getEntity(pending.entityId()) instanceof EntityMaid maid) {
+            // 成功：独立确认客户端宿主（不依赖页面存活）
+            MaidPersonaHost.replace(maid, pending.snapshot());
+            // 当前打开的同一女仆草稿页并入确认值并解锁门禁
+            if (mc.screen instanceof MaidPersonaEditScreen screen) {
+                screen.onHostConfirmed(pending.entityId(), pending.snapshot());
+            }
+        }
+        // 无论成功失败：通知当前打开的草稿页「该请求已结束」
+        if (mc.screen instanceof MaidPersonaEditScreen screen) {
+            screen.onPendingSaveFinished(payload);
         }
     }
 }

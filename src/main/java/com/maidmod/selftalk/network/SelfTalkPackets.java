@@ -6,6 +6,8 @@ import com.maidmod.selftalk.EnvironmentContextMode;
 import com.maidmod.selftalk.EnvironmentContextOption;
 import com.maidmod.selftalk.EnvironmentContextSettings;
 import com.maidmod.selftalk.HistoryContextMode;
+import com.maidmod.selftalk.MaidPersonaDraft;
+import com.maidmod.selftalk.MaidPersonaHost;
 import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.PlayerSettingsStore;
 import com.maidmod.selftalk.SelfTalkAttachments;
@@ -42,10 +44,10 @@ public final class SelfTalkPackets {
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {
-        // v9：环境上下文目录由 32 项扩展至 35 项（新增女仆自身饰品、女仆 Curios 饰品、主人 Curios 饰品），
-        // 并新增两个 availability 值（Curios 未安装／女仆 Curios 被关闭）；
-        // 同样不做向后兼容——NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
-        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("9");
+        // v10：新增结构化人设草稿的保存请求/结果确认 payload（C2S Save + S2C SaveResponse）。
+        // 版本号跳过 9——并行开发的功能已占用 9，本功能不能再用 9 表示另一套协议；
+        // 同样不做向后兼容：NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
+        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("10");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,
                 SelfTalkPackets::handleConfigRequest);
         registrar.playToServer(SelfTalkConfigSetPayload.TYPE, SelfTalkConfigSetPayload.STREAM_CODEC,
@@ -91,6 +93,10 @@ public final class SelfTalkPackets {
         registrar.playToClient(EnvironmentContextConfigResponsePayload.TYPE,
                 EnvironmentContextConfigResponsePayload.STREAM_CODEC,
                 SelfTalkPackets::handleEnvironmentContextResponse);
+        registrar.playToServer(MaidPersonaSavePayload.TYPE, MaidPersonaSavePayload.STREAM_CODEC,
+                SelfTalkPackets::handlePersonaSave);
+        registrar.playToClient(MaidPersonaSaveResponsePayload.TYPE, MaidPersonaSaveResponsePayload.STREAM_CODEC,
+                SelfTalkPackets::handlePersonaSaveResponse);
     }
 
     /** 服务端：响应玩家的自话设置查询（全局值 + 请求女仆的单只有效值；1.1.2 起读世界存档、离线亦可查） */
@@ -520,6 +526,63 @@ public final class SelfTalkPackets {
     /** 客户端：收到 Tool 调用设置响应 */
     private static void handleToolResponse(ToolConfigResponsePayload payload, IPayloadContext context) {
         context.enqueueWork(() -> SelfTalkPlayerSettingsClient.onToolConfigResponse(payload));
+    }
+
+    /**
+     * 服务端：结构化人设草稿保存（整份替换）。
+     * <p>
+     * 与其它设置包共用每秒限流，但<b>一律回包</b>：结果码把这个请求为何没写进去如实告诉客户端，
+     * 页面不会把「包已发出」当成保存成功。实体查找与写入都在服务端主线程执行
+     * （{@code enqueueWork}）；四栏原文直存不做清洗，只按合计长度校验。
+     */
+    private static void handlePersonaSave(MaidPersonaSavePayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (!(player instanceof ServerPlayer serverPlayer)) {
+                return;
+            }
+            MaidPersonaSaveResponsePayload response = savePersona(serverPlayer, payload);
+            if (response != null) {
+                context.reply(response);
+            }
+        });
+    }
+
+    /** 实际写入路径：按顺序校验后整份替换宿主草稿，返回固定结果码对应回包（null = 无法匹配的请求，丢弃） */
+    private static MaidPersonaSaveResponsePayload savePersona(ServerPlayer player, MaidPersonaSavePayload payload) {
+        UUID requestId = payload.requestId();
+        if (requestId == null) {
+            // 请求 id 缺失则回包无从匹配，直接丢弃（页面在等待超时后自行解除，不会误判为成功）
+            return null;
+        }
+        if (!allowConfigPacket(player.getUUID())) {
+            return new MaidPersonaSaveResponsePayload(requestId, false,
+                    MaidPersonaSaveResponsePayload.RESULT_RATE_LIMITED);
+        }
+        if (!(player.serverLevel().getEntity(payload.entityId()) instanceof EntityMaid maid)) {
+            return new MaidPersonaSaveResponsePayload(requestId, false,
+                    MaidPersonaSaveResponsePayload.RESULT_NOT_LOADED);
+        }
+        if (!maid.isOwnedBy(player)) {
+            return new MaidPersonaSaveResponsePayload(requestId, false,
+                    MaidPersonaSaveResponsePayload.RESULT_NOT_OWNER);
+        }
+        MaidPersonaDraft draft = payload.toDraft();
+        if (!draft.withinLimit()) {
+            return new MaidPersonaSaveResponsePayload(requestId, false,
+                    MaidPersonaSaveResponsePayload.RESULT_TOO_LONG);
+        }
+        // 整份替换：不逐栏写入，也不触碰原版整段人设
+        if (!MaidPersonaHost.replace(maid, draft)) {
+            return new MaidPersonaSaveResponsePayload(requestId, false,
+                    MaidPersonaSaveResponsePayload.RESULT_UNAVAILABLE);
+        }
+        return new MaidPersonaSaveResponsePayload(requestId, true, MaidPersonaSaveResponsePayload.RESULT_OK);
+    }
+
+    /** 客户端：收到草稿保存结果（会话匹配在页面内完成，非当前页面直接丢弃） */
+    private static void handlePersonaSaveResponse(MaidPersonaSaveResponsePayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> SelfTalkPlayerSettingsClient.onPersonaSaveResponse(payload));
     }
 
     /** 客户端：收到环境上下文设置响应（会话/序号校验在客户端浮层内完成） */
