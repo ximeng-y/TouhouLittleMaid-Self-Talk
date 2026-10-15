@@ -72,6 +72,9 @@ public class MaidPersonaEditScreen extends Screen {
     /** 程序化 setValue 期间挂起监听，防把载入的栏内容误当输入 */
     private boolean loadingBox;
 
+    /** 本女仆仍有跨页面待确认保存：该旧基线在确认前不得进入可编辑/可提交状态 */
+    private boolean awaitingConfirmation;
+
     private Component statusText = Component.empty();
     private int statusColor = 0xAAAAAA;
 
@@ -89,6 +92,9 @@ public class MaidPersonaEditScreen extends Screen {
             this.draft[i] = current.get(i);
         }
         this.baseline = current;
+        // 跨页面待确认门禁：同女仆仍有未确认保存时（旧请求回包未到），
+        // 禁止编辑与提交，等待确认后由 onHostConfirmed 并入并解锁，避免旧基线覆盖新值
+        this.awaitingConfirmation = SelfTalkPlayerSettingsClient.hasPendingSaveFor(this.maid.getId());
     }
 
     @Override
@@ -199,6 +205,7 @@ public class MaidPersonaEditScreen extends Screen {
             this.draft[i] = confirmed.get(i);
         }
         this.baseline = confirmed;
+        this.awaitingConfirmation = false;
         this.savedShown = false;
         if (this.box != null) {
             this.loadingBox = true;
@@ -212,7 +219,7 @@ public class MaidPersonaEditScreen extends Screen {
      * 超限时不发包（界面已禁用按钮，这里是纵深防御）。
      */
     private void submit(boolean returnAfterSuccess) {
-        if (this.pendingRequestId != null) {
+        if (this.pendingRequestId != null || this.awaitingConfirmation) {
             return;
         }
         MaidPersonaDraft snapshot = currentDraft();
@@ -224,6 +231,8 @@ public class MaidPersonaEditScreen extends Screen {
         this.pendingRequestId = UUID.randomUUID();
         this.pendingSnapshot = snapshot;
         this.returnAfterSave = returnAfterSuccess;
+        // 进入新请求：撤销旧的「已保存」成功标志（通用状态在此之后优先渲染）
+        this.savedShown = false;
         setStatus(Component.translatable(
                 "config.maid_self_talk.screen.persona_draft.status.saving"), 0xFFAA55);
         // 客户端级登记：页面提前关闭时，回包仍能独立更新客户端宿主（见 SelfTalkPlayerSettingsClient）
@@ -259,6 +268,8 @@ public class MaidPersonaEditScreen extends Screen {
             return;
         }
         this.pendingSnapshot = null;
+        // 失败：撤销旧的「已保存」成功标志，让通用错误提示不被遮住
+        this.savedShown = false;
         setStatus(errorMessage(msg.getResultCode()), 0xFF5555);
     }
 
@@ -304,6 +315,8 @@ public class MaidPersonaEditScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         boolean pending = this.pendingRequestId != null;
+        // 跨页面待确认门禁期间禁止编辑与提交（旧基线在确认前不可覆盖服务端新值）
+        boolean locked = pending || this.awaitingConfirmation;
         MaidPersonaDraft current = currentDraft();
         int total = current.totalLength();
         boolean withinLimit = total <= MaidPersonaDraft.MAX_TOTAL_LENGTH;
@@ -313,13 +326,13 @@ public class MaidPersonaEditScreen extends Screen {
         }
         // 等待结果期间禁止继续编辑与重复提交；返回始终可用（离开页面不等于撤销已发出的请求）
         if (this.box != null) {
-            this.box.setEditable(!pending);
+            this.box.setEditable(!locked);
         }
         if (this.saveButton != null) {
-            this.saveButton.active = !pending && withinLimit;
+            this.saveButton.active = !locked && withinLimit;
         }
         if (this.saveAndBackButton != null) {
-            this.saveAndBackButton.active = !pending && withinLimit;
+            this.saveAndBackButton.active = !locked && withinLimit;
         }
 
         super.render(graphics, mouseX, mouseY, partialTick);

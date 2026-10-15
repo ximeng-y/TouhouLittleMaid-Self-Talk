@@ -99,6 +99,16 @@ public final class SelfTalkPlayerSettingsClient {
         PENDING_PERSONA_SAVES.put(requestId, new PendingPersonaSave(maid.getId(), snapshot));
     }
 
+    /** 同一女仆是否仍有未确认的草稿保存：跨页面门禁，防止旧基线在确认前被提交覆盖新值 */
+    public static boolean hasPendingSaveFor(int entityId) {
+        for (PendingPersonaSave pending : PENDING_PERSONA_SAVES.values()) {
+            if (pending.entityId() == entityId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * 收到服务端草稿保存结果：先独立确认客户端宿主，再决定是否更新当前 UI。
      * <p>
