@@ -178,6 +178,35 @@ public class MaidPersonaEditScreen extends Screen {
         return new MaidPersonaDraft(this.draft[0], this.draft[1], this.draft[2], this.draft[3]);
     }
 
+    /** 四栏值相对已保存基线是否有未保存改动 */
+    private boolean isDirty() {
+        return !this.baseline.equals(currentDraft());
+    }
+
+    /**
+     * 客户端宿主被保存回包确认更新时调用：若当前打开的是同一女仆的草稿页、
+     * 且没有未保存改动，把确认值并入页面草稿与基线。
+     * <p>
+     * 覆盖「返回后、回包到达前重开页面」的时序——新页已把旧宿主值复制进
+     * draft/baseline，若不并入，后续保存会把服务端已确认的新值覆盖回旧值。
+     * 有未保存改动（用户已在页面上输入新文字）时不触碰用户输入。
+     */
+    void onHostConfirmed(int entityId, MaidPersonaDraft confirmed) {
+        if (this.maid.getId() != entityId || this.pendingRequestId != null || isDirty()) {
+            return;
+        }
+        for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
+            this.draft[i] = confirmed.get(i);
+        }
+        this.baseline = confirmed;
+        this.savedShown = false;
+        if (this.box != null) {
+            this.loadingBox = true;
+            this.box.setValue(this.draft[this.category]);
+            this.loadingBox = false;
+        }
+    }
+
     /**
      * 提交保存：冻结本次快照并发出请求，随后进入等待态。
      * 超限时不发包（界面已禁用按钮，这里是纵深防御）。
@@ -221,8 +250,9 @@ public class MaidPersonaEditScreen extends Screen {
             this.pendingSnapshot = null;
             this.baseline = saved;
             this.savedShown = true;
-            setStatus(Component.translatable(
-                    "config.maid_self_talk.screen.persona_draft.status.saved"), 0x55FF55);
+            // 成功状态只由 savedShown 渲染：清掉通用状态文本，
+            // 避免 dirty 后通用分支仍把旧的绿色「已保存」画出来
+            this.statusText = Component.empty();
             if (returnAfterSuccess) {
                 this.onClose();
             }
@@ -278,8 +308,7 @@ public class MaidPersonaEditScreen extends Screen {
         int total = current.totalLength();
         boolean withinLimit = total <= MaidPersonaDraft.MAX_TOTAL_LENGTH;
         // dirty 由四栏值相对基线比较得出；内容一有改动，「已保存」状态立即撤销
-        boolean dirty = !this.baseline.equals(current);
-        if (dirty) {
+        if (isDirty()) {
             this.savedShown = false;
         }
         // 等待结果期间禁止继续编辑与重复提交；返回始终可用（离开页面不等于撤销已发出的请求）
