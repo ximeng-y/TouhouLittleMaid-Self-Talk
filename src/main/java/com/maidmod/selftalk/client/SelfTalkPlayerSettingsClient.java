@@ -111,7 +111,12 @@ public final class SelfTalkPlayerSettingsClient {
         PendingPersonaSave pending = PENDING_PERSONA_SAVES.remove(payload.requestId());
         if (payload.success() && pending != null && mc.level != null
                 && mc.level.getEntity(pending.entityId()) instanceof EntityMaid maid) {
+            // 客户端宿主更新不依赖页面存活：页面关闭后重开草稿页读到服务端已确认值
             MaidPersonaHost.replace(maid, pending.snapshot());
+            // 回包前已重开的本女仆草稿页同步并入确认值（页面内判定是否有未保存改动）
+            if (mc.screen instanceof MaidPersonaEditScreen screen) {
+                screen.onHostConfirmed(pending.entityId(), pending.snapshot());
+            }
         }
         if (mc.screen instanceof MaidPersonaEditScreen screen) {
             screen.applySaveResponse(payload);
