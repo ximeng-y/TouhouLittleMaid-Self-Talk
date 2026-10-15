@@ -57,6 +57,8 @@ public class MaidPersonaEditScreen extends Screen {
     private final String[] draft = new String[MaidPersonaDraft.CATEGORY_COUNT];
     /** 已保存基线：最近一次服务端确认成功的四栏值，用于判定 dirty */
     private MaidPersonaDraft baseline;
+    /** 是否显示「已保存」状态：仅当四栏相对基线无改动时成立（render 里随 dirty 收敛） */
+    private boolean savedShown;
     /** 当前分类（0..3，对应 MaidPersonaDraft 的四个栏位） */
     private int category;
 
@@ -195,13 +197,17 @@ public class MaidPersonaEditScreen extends Screen {
         this.returnAfterSave = returnAfterSuccess;
         setStatus(Component.translatable(
                 "config.maid_self_talk.screen.persona_draft.status.saving"), 0xFFAA55);
+        // 客户端级登记：页面提前关闭时，回包仍能独立更新客户端宿主（见 SelfTalkPlayerSettingsClient）
+        SelfTalkPlayerSettingsClient.registerPersonaSave(this.pendingRequestId, this.maid, snapshot);
         PacketDistributor.sendToServer(new MaidPersonaSavePayload(this.pendingRequestId, this.maid.getId(),
                 snapshot.identity(), snapshot.personality(), snapshot.background(), snapshot.hobbies()));
     }
 
     /**
      * 处理服务端结果：只认正在等待的那一个 requestId。
-     * 成功时把提交时的快照写回客户端宿主（重开本页读到新值）并作为新基线；失败保留草稿与 dirty。
+     * 成功时把提交时的快照作为新基线并显示「已保存」——客户端宿主的更新已由
+     * {@link SelfTalkPlayerSettingsClient#onPersonaSaveResponse} 独立完成，此处不重复写；
+     * 失败保留草稿与 dirty。「保存并返回」只在成功响应到达后才回父页面。
      */
     public void applySaveResponse(MaidPersonaSaveResponsePayload payload) {
         if (this.pendingRequestId == null || !this.pendingRequestId.equals(payload.requestId())) {
@@ -214,8 +220,7 @@ public class MaidPersonaEditScreen extends Screen {
             MaidPersonaDraft saved = this.pendingSnapshot == null ? currentDraft() : this.pendingSnapshot;
             this.pendingSnapshot = null;
             this.baseline = saved;
-            // 客户端宿主同步：重新打开本页时以已保存值为准
-            MaidPersonaHost.replace(this.maid, saved);
+            this.savedShown = true;
             setStatus(Component.translatable(
                     "config.maid_self_talk.screen.persona_draft.status.saved"), 0x55FF55);
             if (returnAfterSuccess) {
@@ -257,8 +262,14 @@ public class MaidPersonaEditScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         boolean pending = this.pendingRequestId != null;
-        int total = currentDraft().totalLength();
+        MaidPersonaDraft current = currentDraft();
+        int total = current.totalLength();
         boolean withinLimit = total <= MaidPersonaDraft.MAX_TOTAL_LENGTH;
+        // dirty 由四栏值相对基线比较得出；内容一有改动，「已保存」状态立即撤销
+        boolean dirty = !this.baseline.equals(current);
+        if (dirty) {
+            this.savedShown = false;
+        }
         // 等待结果期间禁止继续编辑与重复提交；返回始终可用（离开页面不等于撤销已发出的请求）
         if (this.box != null) {
             this.box.setEditable(!pending);
@@ -285,6 +296,10 @@ public class MaidPersonaEditScreen extends Screen {
             graphics.drawCenteredString(this.font, Component.translatable(
                     "config.maid_self_talk.screen.persona_draft.error.too_long"),
                     this.width / 2, this.height - 44, 0xFF5555);
+        } else if (this.savedShown) {
+            graphics.drawCenteredString(this.font, Component.translatable(
+                    "config.maid_self_talk.screen.persona_draft.status.saved"),
+                    this.width / 2, this.height - 44, 0x55FF55);
         } else if (!this.statusText.getString().isEmpty()) {
             graphics.drawCenteredString(this.font, this.statusText, this.width / 2, this.height - 44,
                     this.statusColor);
