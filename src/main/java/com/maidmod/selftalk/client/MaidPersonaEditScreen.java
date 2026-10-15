@@ -165,7 +165,7 @@ public class MaidPersonaEditScreen extends Screen {
      * 载入期间挂起监听，避免 setValue 触发的回调把目标栏内容写进刚切走的栏位。
      */
     private void switchCategory(int target) {
-        if (target == this.category || this.pendingRequestId != null) {
+        if (target == this.category || this.pendingRequestId != null || this.awaitingConfirmation) {
             return;
         }
         if (this.box != null) {
@@ -211,6 +211,23 @@ public class MaidPersonaEditScreen extends Screen {
             this.loadingBox = true;
             this.box.setValue(this.draft[this.category]);
             this.loadingBox = false;
+        }
+    }
+
+    /**
+     * 本次女仆的旧请求已结束（成功或失败）。
+     * <p>
+     * 成功回包已在 {@link #onHostConfirmed} 并入确认值；这里只负责结束跨页门禁。
+     * 失败不改草稿/基线、解除只读并显示对应错误（原页按 requestId 匹配时走
+     * {@link #applySaveResponse}；新页无匹配 id 但同女仆的也要解除门禁）。
+     */
+    void onPendingSaveFinished(MaidPersonaSaveResponsePayload payload) {
+        this.awaitingConfirmation = false;
+        if (this.pendingRequestId != null && this.pendingRequestId.equals(payload.requestId())) {
+            applySaveResponse(payload);
+        } else if (!payload.success()) {
+            // 失败且非本页请求：只提示错误，不改草稿/基线（用户输入保留）
+            setStatus(errorMessage(payload.resultCode()), 0xFF5555);
         }
     }
 
