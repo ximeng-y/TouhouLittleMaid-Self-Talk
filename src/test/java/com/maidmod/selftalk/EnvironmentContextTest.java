@@ -43,10 +43,10 @@ public final class EnvironmentContextTest {
         System.out.println("EnvironmentContextTest passed: " + checks + " checks");
     }
 
-    /** 1. 32 个 key 唯一，15 项默认随机、17 项默认必定进入，且不含默认 NEVER */
+    /** 1. 35 个 key 唯一，18 项默认随机、17 项默认必定进入，且不含默认 NEVER */
     private static void catalogShape() {
         List<EnvironmentContextOption> all = EnvironmentContextOption.ALL;
-        check(all.size() == 32, "目录应为 32 项，实际 " + all.size());
+        check(all.size() == 35, "目录应为 35 项，实际 " + all.size());
         Set<String> keys = new LinkedHashSet<>();
         int randomDefault = 0;
         int alwaysDefault = 0;
@@ -61,7 +61,7 @@ public final class EnvironmentContextTest {
             }
             check(EnvironmentContextOption.byKey(option.key()) == option, "byKey 回查失败：" + option.key());
         }
-        check(randomDefault == 15, "默认随机应为 15 项，实际 " + randomDefault);
+        check(randomDefault == 18, "默认随机应为 18 项，实际 " + randomDefault);
         check(alwaysDefault == 17, "默认必定进入应为 17 项，实际 " + alwaysDefault);
         check(EnvironmentContextOption.byKey("not_in_catalog") == null, "目录外 key 应返回 null");
         check(EnvironmentContextOption.byKey(null) == null, "null key 应返回 null");

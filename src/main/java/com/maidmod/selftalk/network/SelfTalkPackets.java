@@ -21,9 +21,10 @@ import java.util.UUID;
  */
 public final class SelfTalkPackets {
 
-    // v8：新增「历史上下文模式」的 C2S 消息（序号 19），并给环境上下文快照增加一个模式字段；
+    // v9：环境上下文目录由 32 项扩展至 35 项（新增女仆自身饰品、女仆 Curios 饰品、主人 Curios 饰品），
+    // 并新增两个 availability 值（Curios 未安装／女仆 Curios 被关闭）；包本身不变，但行数与取值域都变了；
     // 不做向后兼容（既定决策），升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
-    private static final String PROTOCOL_VERSION = "8";
+    private static final String PROTOCOL_VERSION = "9";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MaidSelfTalkMod.MODID, "main"),
@@ -97,11 +98,11 @@ public final class SelfTalkPackets {
         CHANNEL.registerMessage(nextId++, EnvironmentContextConfigResponseMessage.class,
                 EnvironmentContextConfigResponseMessage::encode, EnvironmentContextConfigResponseMessage::decode,
                 EnvironmentContextConfigResponseMessage::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
-        // 原 0~17 之后追加为 18：环境信息自然语言化总开关（与 32 项设置共用同一浮层会话）
+        // 原 0~17 之后追加为 18：环境信息自然语言化总开关（与 35 项设置共用同一浮层会话）
         CHANNEL.registerMessage(nextId++, EnvironmentContextNaturalLanguageSetMessage.class,
                 EnvironmentContextNaturalLanguageSetMessage::encode, EnvironmentContextNaturalLanguageSetMessage::decode,
                 EnvironmentContextNaturalLanguageSetMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
-        // 原 0~18 之后追加为 19：历史上下文模式总开关（与 32 项设置共用同一浮层会话）
+        // 原 0~18 之后追加为 19：历史上下文模式总开关（与 35 项设置共用同一浮层会话）
         CHANNEL.registerMessage(nextId++, HistoryContextModeSetMessage.class,
                 HistoryContextModeSetMessage::encode, HistoryContextModeSetMessage::decode,
                 HistoryContextModeSetMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
