@@ -44,8 +44,10 @@ public final class SelfTalkPackets {
 
     @SubscribeEvent
     public static void register(RegisterPayloadHandlersEvent event) {
-        // v10：新增结构化人设草稿的保存请求/结果确认 payload（C2S Save + S2C SaveResponse）。
-        // 版本号跳过 9——并行开发的功能已占用 9，本功能不能再用 9 表示另一套协议；
+        // v9：环境上下文目录由 32 项扩展至 35 项（新增女仆自身饰品、女仆 Curios 饰品、主人 Curios 饰品），
+        // 并新增两个 availability 值（Curios 未安装／女仆 Curios 被关闭）；
+        // v10：新增结构化人设草稿的保存请求/结果确认 payload（C2S Save + S2C SaveResponse），
+        // 以及新等待气泡 serializer 类型 ID（maid_self_talk:autonomous_waiting）；
         // 同样不做向后兼容：NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
         PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("10");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,

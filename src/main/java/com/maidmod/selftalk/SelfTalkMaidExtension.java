@@ -9,6 +9,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.function.schema.param
 import com.github.tartaricacid.touhoulittlemaid.ai.service.function.schema.parameter.Parameter;
 import com.github.tartaricacid.touhoulittlemaid.api.ILittleMaid;
 import com.github.tartaricacid.touhoulittlemaid.api.LittleMaidExtension;
+import com.github.tartaricacid.touhoulittlemaid.entity.chatbubble.ChatBubbleRegister;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.mojang.serialization.Codec;
 import net.minecraft.ChatFormatting;
@@ -63,6 +64,15 @@ public class SelfTalkMaidExtension implements ILittleMaid {
         // 注册进 TLM 的全局工具表：与内置工具同一张表、同一次请求下发，模型自行决定是否调用
         register.register(new NearbyMaidTool());
         MaidSelfTalkMod.LOGGER.info("Nearby maid identity tool registered");
+    }
+
+    /**
+     * 注册「自话/互聊等待气泡」专用类型 ID 与 serializer（在 TLM 冻结 CODEC_MAP 前调用）。
+     * 双端无条件注册，不受客户端显示开关、管理员配置或自话功能开关控制。
+     */
+    @Override
+    public void registerChatBubble(ChatBubbleRegister register) {
+        SelfTalkWaitingBubbles.register(register);
     }
 
     /**
