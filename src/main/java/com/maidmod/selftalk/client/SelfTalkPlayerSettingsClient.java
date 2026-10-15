@@ -1,5 +1,8 @@
 package com.maidmod.selftalk.client;
 
+import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.MaidPersonaDraft;
+import com.maidmod.selftalk.MaidPersonaHost;
 import com.maidmod.selftalk.network.CustomPromptConfigResponseMessage;
 import com.maidmod.selftalk.network.EnvironmentContextConfigResponseMessage;
 import com.maidmod.selftalk.network.InterChatConfigResponseMessage;
@@ -11,6 +14,10 @@ import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
 /**
  * 客户端辅助入口：网络层回调（仅客户端加载）。
  */
@@ -18,6 +25,16 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 public final class SelfTalkPlayerSettingsClient {
 
     private SelfTalkPlayerSettingsClient() {
+    }
+
+    /** 客户端级待确认草稿保存：requestId → {实体 id, 提交快照}。
+     *  页面关闭后的迟到回包仍能据此更新客户端宿主，重开草稿页读到的是服务端已确认值；
+     *  条目随回包到达移除（服务端对可解码请求一律回包，仅异常断连会残留，容量上限兜底）。 */
+    private static final Map<UUID, PendingPersonaSave> PENDING_PERSONA_SAVES = new HashMap<>();
+    /** 待确认条目容量上限：防异常断连下无限残留 */
+    private static final int MAX_PENDING_PERSONA_SAVES = 64;
+
+    private record PendingPersonaSave(int entityId, MaidPersonaDraft snapshot) {
     }
 
     /** 收到服务端自话设置响应后，刷新当前打开的设置界面 */
@@ -70,13 +87,32 @@ public final class SelfTalkPlayerSettingsClient {
         }
     }
 
+    /** 草稿保存提交时登记：请求发出即登记，回包到达后据此独立确认客户端宿主 */
+    public static void registerPersonaSave(UUID requestId, EntityMaid maid, MaidPersonaDraft snapshot) {
+        if (requestId == null || maid == null) {
+            return;
+        }
+        if (PENDING_PERSONA_SAVES.size() >= MAX_PENDING_PERSONA_SAVES) {
+            // 容量兜底：整体清空（HashMap 顺序不稳定，仅防止无限残留，不影响正确性）
+            PENDING_PERSONA_SAVES.clear();
+        }
+        PENDING_PERSONA_SAVES.put(requestId, new PendingPersonaSave(maid.getId(), snapshot));
+    }
+
     /**
-     * 收到服务端草稿保存结果后转交草稿页（requestId 匹配在页面内完成）。
+     * 收到服务端草稿保存结果：先独立确认客户端宿主，再决定是否更新当前 UI。
      * <p>
-     * 只认当前打开的那一个草稿页：已经关掉的页面或旧请求的回包不操作任何界面。
+     * 宿主更新不依赖页面存活：回包到达即按提交登记把服务端已保存值写回客户端宿主，
+     * 页面关闭后重开草稿页也能读到最新值；旧 requestId 不操作新页面
+     * （页面内仍按自身 pendingRequestId 匹配，迟到回包不会落到新页面上）。
      */
     public static void onPersonaSaveResponse(MaidPersonaSaveResponseMessage msg) {
         Minecraft mc = Minecraft.getInstance();
+        PendingPersonaSave pending = PENDING_PERSONA_SAVES.remove(msg.getRequestId());
+        if (msg.isSuccess() && pending != null && mc.level != null
+                && mc.level.getEntity(pending.entityId()) instanceof EntityMaid maid) {
+            MaidPersonaHost.replace(maid, pending.snapshot());
+        }
         if (mc.screen instanceof MaidPersonaEditScreen screen) {
             screen.applySaveResponse(msg);
         }
