@@ -124,10 +124,14 @@ public abstract class InterChatToolLifecycleMixin {
      * <p>
      * 只在 Component 重载尾追加一注；String 重载经 {@code refreshWaitingChatBubble(String)}
      * 内部转入本方法，不重复标记。HEAD 作废守卫仍先行生效，作废请求不会走到这里。
+     * <p>
+     * 处理器只接收 {@code CallbackInfo}（不捕获目标参数，本注入无需读取 Component）：
+     * Mixin 只接受目标回调描述符或 {@code getSimpleCallbackDescriptor()} 两种签名，
+     * 零参处理器两者都不匹配，会在应用期抛 {@code InvalidInjectionException: Invalid descriptor}。
      */
     @Inject(method = "refreshWaitingChatBubble(Lnet/minecraft/network/chat/Component;)V",
             at = @At("TAIL"))
-    private void maid_self_talk$markRefreshedBubble() {
+    private void maid_self_talk$markRefreshedBubble(CallbackInfo ci) {
         if ((Object) this instanceof InterChatCallback
                 || (Object) this instanceof SelfTalkCallback) {
             SelfTalkWaitingBubbles.markBubble((com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback) (Object) this);
