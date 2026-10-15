@@ -61,6 +61,11 @@ public class SelfTalkCallback extends LLMCallback {
         this.token = token;
         // Tool 关闭时模型看不到工具定义；开启时由 TLM 工具循环接管
         this.needAddTools = toolEnabled;
+        // 父构造器已创建等待气泡，这里在 welcome 等字段赋值后标记来源（欢迎语不标记，
+        // 客户端显示开关只影响自话/互聊的等待气泡）
+        if (!welcome) {
+            SelfTalkWaitingBubbles.markBubble(this);
+        }
     }
 
     /** 本次请求是否已被清空作废（供工具异步入口在响应线程做失效判定） */

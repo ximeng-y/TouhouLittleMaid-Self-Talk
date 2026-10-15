@@ -71,6 +71,8 @@ public class InterChatCallback extends LLMCallback {
         this.request = request;
         this.token = token;
         this.needAddTools = toolEnabled;
+        // 父构造器已创建初始等待气泡，这里标记来源（客户端显示开关据此隐藏互聊等待气泡）
+        SelfTalkWaitingBubbles.markBubble(this);
     }
 
     /**
