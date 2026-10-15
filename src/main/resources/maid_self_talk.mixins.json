@@ -6,8 +6,8 @@
   "refmap": "maid_self_talk.refmap.json",
   "mixins": ["MaidAIChatManagerAccessor", "MaidAIChatManagerMixin", "LLMCallbackMixin", "SelfTalkTtsMixin",
     "SelfTalkSystemTtsMixin", "SelfTalkLateDisplayMixin", "EntityMaidProvenanceMixin", "HistorySummaryManagerAccessor",
-    "HistorySummaryManagerMixin", "MaidAIChatDataMixin",
+    "HistorySummaryManagerMixin", "MaidAIChatDataMixin", "MaidAIChatPersonaMixin",
     "GameContextRegisterAccessor", "InterChatToolLifecycleMixin"],
-  "client": ["AIChatScreenMixin", "HistoryAIChatScreenMixin"],
+  "client": ["AIChatScreenMixin", "HistoryAIChatScreenMixin", "SettingEditScreenMixin"],
   "injectors": { "defaultRequire": 1 }
 }

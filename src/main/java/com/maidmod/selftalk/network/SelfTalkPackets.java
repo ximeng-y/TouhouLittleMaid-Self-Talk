@@ -21,10 +21,11 @@ import java.util.UUID;
  */
 public final class SelfTalkPackets {
 
-    // v9：环境上下文目录由 32 项扩展至 35 项（新增女仆自身饰品、女仆 Curios 饰品、主人 Curios 饰品），
-    // 并新增两个 availability 值（Curios 未安装／女仆 Curios 被关闭）；包本身不变，但行数与取值域都变了；
-    // 不做向后兼容（既定决策），升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
-    private static final String PROTOCOL_VERSION = "9";
+    // v8：新增「历史上下文模式」的 C2S 消息（序号 19），并给环境上下文快照增加一个模式字段。
+    // v10：新增结构化人设草稿的保存请求/结果确认消息（序号 20、21）。
+    // 版本号从 8 直接跳到 10——并行开发的功能已占用 9，本功能不能再用 9 表示另一套协议。
+    // 与 v8 同样不做向后兼容（既定决策）：升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
+    private static final String PROTOCOL_VERSION = "10";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MaidSelfTalkMod.MODID, "main"),
@@ -106,6 +107,14 @@ public final class SelfTalkPackets {
         CHANNEL.registerMessage(nextId++, HistoryContextModeSetMessage.class,
                 HistoryContextModeSetMessage::encode, HistoryContextModeSetMessage::decode,
                 HistoryContextModeSetMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        // 原 0~19 之后追加为 20、21：结构化人设草稿保存请求与结果确认
+        // （追加在列表末尾，不重排既有序号，避免与旧版客户端的消息 id 错位）
+        CHANNEL.registerMessage(nextId++, MaidPersonaSaveMessage.class,
+                MaidPersonaSaveMessage::encode, MaidPersonaSaveMessage::decode,
+                MaidPersonaSaveMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, MaidPersonaSaveResponseMessage.class,
+                MaidPersonaSaveResponseMessage::encode, MaidPersonaSaveResponseMessage::decode,
+                MaidPersonaSaveResponseMessage::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     /** 每玩家每秒限流：防恶意客户端包风暴（正常设置界面操作远低于该频率） */
