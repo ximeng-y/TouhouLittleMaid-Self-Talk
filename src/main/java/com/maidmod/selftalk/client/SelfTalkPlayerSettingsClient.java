@@ -3,6 +3,7 @@ package com.maidmod.selftalk.client;
 import com.maidmod.selftalk.network.CustomPromptConfigResponsePayload;
 import com.maidmod.selftalk.network.EnvironmentContextConfigResponsePayload;
 import com.maidmod.selftalk.network.InterChatConfigResponsePayload;
+import com.maidmod.selftalk.network.MaidPersonaSaveResponsePayload;
 import com.maidmod.selftalk.network.SelfTalkConfigResponsePayload;
 import com.maidmod.selftalk.network.SleepQuietConfigResponsePayload;
 import com.maidmod.selftalk.network.ToolConfigResponsePayload;
@@ -66,6 +67,18 @@ public final class SelfTalkPlayerSettingsClient {
         Minecraft mc = Minecraft.getInstance();
         if (mc.screen instanceof SelfTalkPlayerSettingsScreen screen) {
             screen.applyEnvironmentContextResponse(payload);
+        }
+    }
+
+    /**
+     * 收到服务端草稿保存结果后转交草稿页（requestId 匹配在页面内完成）。
+     * <p>
+     * 只认当前打开的那一个草稿页：已经关掉的页面或旧请求的回包不操作任何界面。
+     */
+    public static void onPersonaSaveResponse(MaidPersonaSaveResponsePayload payload) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof MaidPersonaEditScreen screen) {
+            screen.applySaveResponse(payload);
         }
     }
 }

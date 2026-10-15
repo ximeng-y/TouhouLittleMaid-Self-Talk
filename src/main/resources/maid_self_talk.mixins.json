@@ -8,6 +8,7 @@
     "HistorySummaryManagerMixin",
     "InterChatToolLifecycleMixin",
     "MaidAIChatDataMixin",
+    "MaidAIChatPersonaMixin",
     "MaidAIChatManagerAccessor",
     "MaidAIChatManagerMixin",
     "LLMCallbackMixin",
@@ -18,7 +19,8 @@
   ],
   "client": [
     "AIChatScreenMixin",
-    "HistoryAIChatScreenMixin"
+    "HistoryAIChatScreenMixin",
+    "SettingEditScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1
