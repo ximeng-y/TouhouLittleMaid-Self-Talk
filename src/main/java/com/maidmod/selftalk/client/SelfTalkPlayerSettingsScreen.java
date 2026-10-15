@@ -254,7 +254,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
      * 否则关闭界面时 flush 会把「显示空 ≠ 基线」误判为用户清空，
      * 静默发出空串 Set 包抹掉已保存的 Prompt（数据丢失路径）。
      * <p>
-     * 浮层状态（开关、滚动偏移、32 项状态、焦点、session、seq、同步标志）由浮层自身持有，
+     * 浮层状态（开关、滚动偏移、35 项状态、焦点、session、seq、同步标志）由浮层自身持有，
      * 这里只让它按新尺寸重算几何——<b>不</b>新建会话、不把默认值覆盖到已收到的设置上。
      */
     @Override

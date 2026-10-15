@@ -79,6 +79,92 @@ final class EnvironmentContextCollector {
         };
     }
 
+    /**
+     * 采集并可渲染一项饰品条目（{@link EnvironmentContextOption.Source#ACCESSORY}）。
+     * <p>
+     * 功能门与 NEVER 必须由调用方<b>先</b>判定：本方法假定 Curios 相关门已放行，
+     * 因而调用 {@link CuriosAccessoryReader} 时未安装 Curios 的情况不会发生。
+     * <p>
+     * 普通模式与自然语言模式都通过本方法取值（普通模式也要类型化快照），
+     * 因此两种模式的差异只在 {@code naturalLanguage} 参数上，不放两份采集代码。
+     *
+     * @return 该条目的最终文本（普通模式的 value 或自然语言的完整句子）；
+     * {@code null} 表示本轮无数据（不进入候选池）
+     */
+    static String renderAccessory(EntityMaid maid, String key, ContextLanguage lang, boolean naturalLanguage) {
+        EnvironmentContextRenderer.AccessorySnapshot snapshot = accessorySnapshot(maid, key, lang);
+        if (snapshot == null) {
+            return null;
+        }
+        return naturalLanguage
+                ? EnvironmentContextRenderer.accessories(key, snapshot.functional(), snapshot.cosmetic(), lang)
+                : EnvironmentContextRenderer.accessoryValue(key, snapshot.functional(), snapshot.cosmetic());
+    }
+
+    /**
+     * 饰品条目里的物品名（普通模式与自然语言模式共用转义口径）。
+     * <p>
+     * 每次调用都重新快照，不做请求内缓存：一项触发最多读三次（三项各一次），
+     * 缓存或不缓存都不改变语义，而缓存会引入跨调用共享的可变状态。
+     */
+    private static EnvironmentContextRenderer.AccessorySnapshot accessorySnapshot(
+            EntityMaid maid, String key, ContextLanguage lang) {
+        if (EnvironmentContextOption.KEY_MAID_BAUBLES.equals(key)) {
+            // 女仆原生饰品栏：TLM 的 maidBauble 是唯一数据入口，不用背包或全部物品栏代替
+            List<EnvironmentContextRenderer.ItemSnapshot> baubles = new ArrayList<>();
+            var bauble = maid.getMaidBauble();
+            if (bauble == null) {
+                return null;
+            }
+            for (int i = 0; i < bauble.getSlots(); i++) {
+                ItemStack stack = bauble.getStackInSlot(i);
+                if (!stack.isEmpty()) {
+                    baubles.add(item(stack, lang));
+                }
+            }
+            return new EnvironmentContextRenderer.AccessorySnapshot(List.copyOf(baubles), List.of());
+        }
+        LivingEntity target;
+        if (EnvironmentContextOption.KEY_USER_CURIOS.equals(key)) {
+            // 主人：只用 maid.getOwner()，不查找其他玩家、不跨维度寻找主人
+            target = maid.getOwner();
+            if (target == null) {
+                return null;
+            }
+        } else {
+            target = maid;
+        }
+        CuriosAccessoryReader.AccessoryStacks stacks;
+        try {
+            stacks = CuriosAccessoryReader.read(target);
+        } catch (Throwable t) {
+            // 单个条目的读取异常只丢它自己：不中断整次请求、不改读 NBT、不重试
+            MaidSelfTalkMod.LOGGER.warn("Failed to read Curios accessories for {}", key, t);
+            return null;
+        }
+        if (stacks == null) {
+            return null;
+        }
+        return new EnvironmentContextRenderer.AccessorySnapshot(
+                toItems(stacks.functional(), lang), toItems(stacks.cosmetic(), lang));
+    }
+
+    private static List<EnvironmentContextRenderer.ItemSnapshot> toItems(List<ItemStack> stacks,
+                                                                         ContextLanguage lang) {
+        List<EnvironmentContextRenderer.ItemSnapshot> result = new ArrayList<>(stacks.size());
+        for (ItemStack stack : stacks) {
+            result.add(item(stack, lang));
+        }
+        return List.copyOf(result);
+    }
+
+    /** 单个物品：显示名转义后加引号（玩家可控文本），数量沿用上游的 {@code 名称x数量} 写法 */
+    private static EnvironmentContextRenderer.ItemSnapshot item(ItemStack stack, ContextLanguage lang) {
+        return new EnvironmentContextRenderer.ItemSnapshot(
+                EnvironmentContextRenderer.quote(stack.getDisplayName().getString(), lang),
+                stack.getCount());
+    }
+
     // ===== 请求内快照 =====
 
     /** 采集到的附近实体（内部用：保留实体引用以便第二遍筛女仆，不进入长期结构） */
@@ -263,13 +349,6 @@ final class EnvironmentContextCollector {
                 }
             });
             return List.copyOf(result);
-        }
-
-        /** 单个物品：显示名转义后加引号（玩家可控文本），数量沿用上游的 {@code 名称x数量} 写法 */
-        private EnvironmentContextRenderer.ItemSnapshot item(ItemStack stack, ContextLanguage lang) {
-            return new EnvironmentContextRenderer.ItemSnapshot(
-                    EnvironmentContextRenderer.quote(stack.getDisplayName().getString(), lang),
-                    stack.getCount());
         }
     }
 }

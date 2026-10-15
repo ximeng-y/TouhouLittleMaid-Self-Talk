@@ -17,7 +17,7 @@ import java.util.function.Supplier;
  * 客户端也无需依赖本地推断链条。包内不携带 player UUID 或 maid UUID——
  * 玩家身份一律取连接上的 {@link ServerPlayer}，语义上也没有女仆维度（总开关按玩家算）。
  *
- * @param sessionId 浮层会话 id（与 32 项设置共用同一个会话）
+ * @param sessionId 浮层会话 id（与 35 项设置共用同一个会话）
  * @param seq       该会话内的请求序号
  * @param enabled   目标状态（绝对布尔值）
  */
@@ -47,9 +47,9 @@ public class EnvironmentContextNaturalLanguageSetMessage {
     /**
      * 服务端：保存总开关（纵深防御，不信任客户端）。
      * <p>
-     * 与 32 项设置共用同一个浮层会话与同一套限流；管理员允许时保存，不允许时只回快照、<b>不</b>改存档——
+     * 与 35 项设置共用同一个浮层会话与同一套限流；管理员允许时保存，不允许时只回快照、<b>不</b>改存档——
      * 玩家原来的 true 必须保留，功能恢复后继续生效。除被限流直接丢弃外，一律回完整环境上下文快照
-     * （布尔值、32 项模式与管理员状态作为同一快照应用，不部分更新）。
+     * （布尔值、35 项模式与管理员状态作为同一快照应用，不部分更新）。
      */
     public static void handle(EnvironmentContextNaturalLanguageSetMessage msg, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
