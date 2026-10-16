@@ -8,7 +8,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 女仆感知事件缓冲：结构化保存死亡、玩家受伤与自身受伤记录，
+ * 女仆感知事件缓冲：结构化保存死亡、玩家受伤、自身受伤、神龛复活与自身击杀记录，
  * 负责固定采样冷却、有效期淘汰、容量收缩与相邻记录归并。
  * <p>
  * 不依赖 Minecraft / TLM 类型，也不读取配置——容量与有效期由调用方按当前配置传入，
@@ -34,11 +34,18 @@ final class SelfTalkEventBuffer {
      */
     static final long HURT_COOLDOWN_TICKS = 20L;
 
-    /** 事件种类（死亡不参与受伤冷却与有效期） */
+    /** 神龛复活事实固定有效期（tick）：180 秒 */
+    static final long SELF_REVIVE_MAX_AGE_TICKS = 3600L;
+    /** 自身击杀事实固定有效期（tick）：60 秒 */
+    static final long SELF_KILL_MAX_AGE_TICKS = 1200L;
+
+    /** 事件种类（死亡与新增复活/击杀不参与受伤冷却；复活与击杀用各自固定有效期） */
     enum Kind {
         DEATH,
         PLAYER_HURT,
-        SELF_HURT
+        SELF_HURT,
+        SELF_REVIVED,
+        SELF_KILL
     }
 
     /** 受伤主体类别（渲染时决定称呼，不保存实体引用） */
@@ -70,7 +77,7 @@ final class SelfTalkEventBuffer {
     }
 
     /** 事件事实：语言中立，渲染时才按目标语言成句 */
-    sealed interface Fact permits HurtFact, DeathFact {
+    sealed interface Fact permits HurtFact, DeathFact, ReviveFact, KillFact {
     }
 
     /**
@@ -92,6 +99,19 @@ final class SelfTalkEventBuffer {
      * 两者都在事发时定格，之后不再依赖游戏全局语言。
      */
     record DeathFact(String zhText, String enText) implements Fact {
+    }
+
+    /** 复活事实：女仆本人成功通过神龛复活，无额外字段 */
+    record ReviveFact() implements Fact {
+    }
+
+    /**
+     * 击杀事实：归属于该女仆本人的击杀。
+     *
+     * @param zhTargetName 事发时定格的目标名称快照；已清洗过段标签与换行
+     * @param enTargetName 事发时定格的英文目标名称；英文渲染不可用时与中文名相同，不猜译
+     */
+    record KillFact(String zhTargetName, String enTargetName) implements Fact {
     }
 
     /**
@@ -183,7 +203,8 @@ final class SelfTalkEventBuffer {
      * 把有效事件归并为语言中立的连续分组，供 {@link EnvironmentContextRenderer} 按语言成句。
      * <p>
      * 只归并<b>相邻</b>且种类、主体、攻击者、伤害类型与事实内容全相同的受伤记录：中间夹了别的事件
-     * 就不合并，保证事件先后关系不被打乱。死亡不归并。归并只发生在渲染阶段，不刷新缓冲里的记录时间，
+     * 就不合并，保证事件先后关系不被打乱。死亡、复活与击杀不归并，逐条按原顺序输出。
+     * 归并只发生在渲染阶段，不刷新缓冲里的记录时间，
      * 旧事件不会借新事件无限续期。过期记录在 {@link #drain} 阶段已被剔除，不参与「反复发生」的判断。
      * <p>
      * 归并比较的是语言中立的事实，不比最终中文或英文句子——切换语言不会改变分组结果。
@@ -197,7 +218,7 @@ final class SelfTalkEventBuffer {
         while (index < events.size()) {
             Event first = events.get(index);
             int end = index + 1;
-            while (first.kind() != Kind.DEATH && end < events.size()
+            while (isMergeableHurt(first) && end < events.size()
                     && sameHurt(events.get(end), first)) {
                 end++;
             }
@@ -232,10 +253,15 @@ final class SelfTalkEventBuffer {
                 && Objects.equals(a.fact(), b.fact());
     }
 
-    /** 受伤冷却：首次必定通过，距上次成功记录不足一个采样间隔则忽略 */
+    /** 可归并的种类：仅两类受伤；死亡、复活与击杀都保持逐条输出 */
+    private static boolean isMergeableHurt(Event event) {
+        return event.kind() == Kind.PLAYER_HURT || event.kind() == Kind.SELF_HURT;
+    }
+
+    /** 受伤冷却：首次必定通过，距上次成功记录不足一个采样间隔则忽略；死亡与新增复活/击杀不设冷却 */
     private boolean passesCooldown(Event event, long nowTick) {
         return switch (event.kind()) {
-            case DEATH -> true;
+            case DEATH, SELF_REVIVED, SELF_KILL -> true;
             case PLAYER_HURT -> lastPlayerHurtTick < 0
                     || nowTick - lastPlayerHurtTick >= HURT_COOLDOWN_TICKS;
             case SELF_HURT -> lastSelfHurtTick < 0
@@ -243,13 +269,17 @@ final class SelfTalkEventBuffer {
         };
     }
 
-    /** 受伤记录有效期：达到有效期即过期；死亡不设有效期（由容量、消费与女仆生命周期控制） */
+    /** 记录有效期：受伤两类用传入配置，复活与击杀用各自固定值，达到即过期；死亡不设有效期 */
     private void purgeExpired(long nowTick, long hurtMaxAgeTicks) {
         if (events.isEmpty()) {
             return;
         }
-        events.removeIf(event -> event.kind() != Kind.DEATH
-                && nowTick - event.tick() >= hurtMaxAgeTicks);
+        events.removeIf(event -> switch (event.kind()) {
+            case DEATH -> false;
+            case PLAYER_HURT, SELF_HURT -> nowTick - event.tick() >= hurtMaxAgeTicks;
+            case SELF_REVIVED -> nowTick - event.tick() >= SELF_REVIVE_MAX_AGE_TICKS;
+            case SELF_KILL -> nowTick - event.tick() >= SELF_KILL_MAX_AGE_TICKS;
+        });
     }
 
     /** 容量收缩：容量被调小时在下一次入队/消费时收敛（不主动扫描，也不丢死亡优先保留） */

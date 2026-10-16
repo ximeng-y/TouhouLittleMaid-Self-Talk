@@ -26,8 +26,10 @@ public final class SelfTalkPackets {
     // 并新增两个 availability 值（Curios 未安装／女仆 Curios 被关闭）；包本身不变，但行数与取值域都变了；
     // v10：新增结构化人设草稿的保存请求/结果确认消息（序号 20、21），并新增等待气泡 serializer 类型 ID
     // （maid_self_talk:autonomous_waiting），两端必须同版才能正确解码实体数据中的该类型气泡；
+    // v11：环境上下文目录由 35 项扩展至 37 项（新增神龛复活、女仆自身击杀），
+    // 快照行数与取值域随之变化，包结构不变；
     // v12：人设保存消息扩展为「模式 + 四栏」整份配置并带女仆 UUID，回包同样带 UUID
-    // 与服务端确认后的完整配置（v11 由另一批在途改动占用，此处直接跳到 12 避免版本串复用）；
+    // 与服务端确认后的完整配置；
     // 不做向后兼容（既定决策），升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
     private static final String PROTOCOL_VERSION = "12";
 

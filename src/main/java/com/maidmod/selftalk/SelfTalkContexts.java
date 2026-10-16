@@ -44,7 +44,7 @@ public final class SelfTalkContexts {
      * status/world 属于 prompt 类分类，欢迎语经 {@link UserPromptContexts#addContext} 前缀恒量注入，
      * 不再放入随机池，避免同一消息中重复出现浪费 token。
      * <p>
-     * 自话与互聊已改走 {@link EnvironmentContextOption} 的逐项目录（35 项，含 status/world），
+     * 自话与互聊已改走 {@link EnvironmentContextOption} 的逐项目录（37 项，含 status/world），
      * 本列表只服务欢迎语的旧路径。
      */
     private static final List<String> CONTEXT_CATEGORIES = List.of(
@@ -117,7 +117,7 @@ public final class SelfTalkContexts {
      * 单次请求内固定按此顺序执行（顺序即语义，不得调换）：
      * <ol>
      *   <li>取主人 UUID（离线也按 UUID 查存档；无主女仆用目录默认模式）；</li>
-     *   <li>算 35 项有效模式（管理员关玩家配置时用默认值）与逐项功能可用性，各只算一次；
+     *   <li>算 37 项有效模式（管理员关玩家配置时用默认值）与逐项功能可用性，各只算一次；
      *       同时读取「环境信息自然语言化」有效开关（默认关闭的实验模式）；</li>
      *   <li>环境感知总开关开启时<b>调用且只调用一次</b> {@code drain}——即使三个事件项全是 NEVER
      *       也照样 drain，不能留下旧事件等以后重新打开；总开关关闭时既不注入也不消费（原行为）；</li>
@@ -157,7 +157,7 @@ public final class SelfTalkContexts {
      * 单次采集内固定按此顺序执行（顺序即语义，不得调换）：
      * <ol>
      *   <li>取主人 UUID（离线也按 UUID 查存档；无主女仆用目录默认模式）；</li>
-     *   <li>算 35 项有效模式（管理员关玩家配置时用默认值）与逐项功能可用性，各只算一次；
+     *   <li>算 37 项有效模式（管理员关玩家配置时用默认值）与逐项功能可用性，各只算一次；
      *       同时读取「环境信息自然语言化」有效开关（默认关闭的实验模式）；</li>
      *   <li>环境感知总开关开启时<b>调用且只调用一次</b> {@code drain}——即使三个事件项全是 NEVER
      *       也照样 drain，不能留下旧事件等以后重新打开；总开关关闭时既不注入也不消费（原行为）；</li>
