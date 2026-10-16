@@ -538,7 +538,7 @@ public final class EnvironmentContextPanel {
     }
 
     /**
-     * 左侧名称的专属说明键：环境事件／状态四项与饰品三项有，其余行返回 {@code null}。
+     * 左侧名称的专属说明键：女仆身份、环境事件条目与饰品条目有，其余行返回 {@code null}。
      * <p>
      * 其余行的名称本身已是自然语言（「女仆主手物品」……），逐条写描述只会变成冗余文案，
      * 因此它们的名称不挂说明——只在名称被省略号截断时补一行完整名称。
@@ -551,6 +551,8 @@ public final class EnvironmentContextPanel {
             case EnvironmentContextOption.KEY_DEATHS -> "deaths";
             case EnvironmentContextOption.KEY_PLAYER_HURT -> "player_hurt";
             case EnvironmentContextOption.KEY_SELF_HURT -> "self_hurt";
+            case EnvironmentContextOption.KEY_SELF_REVIVE -> "self_revive";
+            case EnvironmentContextOption.KEY_SELF_KILLS -> "self_kills";
             case EnvironmentContextOption.KEY_MAID_BAUBLES -> "baubles";
             case EnvironmentContextOption.KEY_MAID_CURIOS, EnvironmentContextOption.KEY_USER_CURIOS -> "curios";
             default -> null;

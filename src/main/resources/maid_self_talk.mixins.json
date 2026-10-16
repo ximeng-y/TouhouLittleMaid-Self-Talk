@@ -17,7 +17,8 @@
     "SelfTalkSystemTtsMixin",
     "SelfTalkLateDisplayMixin",
     "GameContextRegisterAccessor",
-    "WaitingChatBubbleDataMixin"
+    "WaitingChatBubbleDataMixin",
+    "ItemFilmMixin"
   ],
   "client": [
     "AIChatScreenMixin",

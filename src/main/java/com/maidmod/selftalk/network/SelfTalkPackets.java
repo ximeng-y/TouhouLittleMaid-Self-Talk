@@ -51,8 +51,10 @@ public final class SelfTalkPackets {
         // 并新增两个 availability 值（Curios 未安装／女仆 Curios 被关闭）；
         // v10：新增结构化人设草稿的保存请求/结果确认 payload（C2S Save + S2C SaveResponse），
         // 以及新等待气泡 serializer 类型 ID（maid_self_talk:autonomous_waiting）；
+        // v11：环境上下文目录由 35 项扩展至 37 项（新增神龛复活、女仆自身击杀），
+        // 响应包行数与取值域随之变化，包结构不变；
         // v12：人设保存 payload 扩展为「模式 + 四栏」整份配置并带女仆 UUID，回包同样带 UUID
-        // 与服务端确认后的完整配置（v11 由另一批在途改动占用，此处直接跳到 12 避免版本串复用）；
+        // 与服务端确认后的完整配置；
         // v13：新增 AI 拆分人设的请求/结果 payload（C2S SplitRequest + S2C SplitResponse）；
         // 同样不做向后兼容：NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
         PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("13");
