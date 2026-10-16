@@ -7,6 +7,7 @@ import com.maidmod.selftalk.MaidPersonaHost;
 import com.maidmod.selftalk.MaidPersonaMode;
 import com.maidmod.selftalk.network.MaidPersonaSaveMessage;
 import com.maidmod.selftalk.network.MaidPersonaSaveResponseMessage;
+import com.maidmod.selftalk.network.MaidPersonaSplitResponseMessage;
 import com.maidmod.selftalk.network.SelfTalkPackets;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.ComponentPath;
@@ -15,10 +16,12 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.navigation.FocusNavigationEvent;
+import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import org.lwjgl.glfw.GLFW;
 
 import javax.annotation.Nullable;
 import java.util.UUID;
@@ -39,6 +42,12 @@ import java.util.UUID;
  * requestId 回结果，回包里带服务端确认的完整配置。等待期间禁止继续编辑与重复提交；只有当前打开、
  * id 匹配的页面处理响应，关闭后的迟到响应不会落到任何界面上。成功以<b>服务端确认值</b>写回客户端宿主
  * 与基线并清 dirty；失败保留页面内容与 dirty，且不得被当成已保存。
+ * <p>
+ * <b>AI 拆分</b>：进入本页时从原版输入框冻结一份文本快照（含未保存修改），「AI 拆分」按钮据此
+ * 发起一次静默整理请求。成功且发起页面一直未离开、仍是当前页面时整份填入四栏并选中四栏模式
+ * （保持基线不变，仍需手动保存）；其他情况暂存为候选，重开该女仆页面时弹确认载入。
+ * 整理期间禁止编辑、切模式、保存与重复发起（允许查看分类与离开页面）；关闭界面不取消任务，
+ * 完成后服务端向发起玩家发私信。候选仅保留在本次连接内，保存成功或显式丢弃才消费。
  */
 @OnlyIn(Dist.CLIENT)
 public class MaidPersonaEditScreen extends Screen {
@@ -83,6 +92,19 @@ public class MaidPersonaEditScreen extends Screen {
     /** 本女仆仍有跨页面待确认保存：该旧基线在确认前不得进入可编辑/可提交状态 */
     private boolean awaitingConfirmation;
 
+    /** 进入本页时冻结的原版输入框文本快照（含未保存修改）：AI 拆分的唯一资料来源 */
+    private final String splitSourceText;
+    /** 本页实例唯一标识：整理任务与页面的关联（重开页面是新实例、新 id） */
+    private final UUID pageId = UUID.randomUUID();
+    /** 是否已真正离开本页（确认浮层不算离开；resize 不算） */
+    private boolean leftPage;
+    /** setScreen 到确认浮层前置位：removed() 里据此区分「浮层接管」与「真离开」 */
+    private boolean openingConfirm;
+    /** 本次页面访问是否已弹过「载入 AI 整理结果」确认（ESC 暂缓后本访问不再弹） */
+    private boolean splitConfirmShown;
+    /** 本页已载入的整理候选来源 requestId（保存时登记关联，保存成功后消费候选） */
+    private UUID loadedSplitRequestId;
+
     private Component statusText = Component.empty();
     private int statusColor = 0xAAAAAA;
 
@@ -90,11 +112,13 @@ public class MaidPersonaEditScreen extends Screen {
     private GuardedPersonaEditBox box;
     private Button saveButton;
     private Button saveAndBackButton;
+    private Button splitButton;
 
-    public MaidPersonaEditScreen(@Nullable Screen parent, EntityMaid maid) {
+    public MaidPersonaEditScreen(@Nullable Screen parent, EntityMaid maid, String sourceText) {
         super(Component.translatable("config.maid_self_talk.screen.persona_draft.title"));
         this.parent = parent;
         this.maid = maid;
+        this.splitSourceText = sourceText == null ? "" : sourceText;
         // 打开时读客户端已同步配置：宿主不可用（未挂载/未同步）时按默认配置处理，不阻断页面
         MaidPersonaConfig current = MaidPersonaHost.configOf(maid);
         this.mode = current.mode();
@@ -129,6 +153,13 @@ public class MaidPersonaEditScreen extends Screen {
                     .bounds(leftX, top + i * 24, CATEGORY_WIDTH, 20)
                     .build());
         }
+
+        // AI 拆分入口：位于四栏分类列之下；原文空白时禁用（等待/门禁期间在 render 里统一禁用）
+        this.splitButton = this.addRenderableWidget(Button.builder(
+                        Component.translatable("config.maid_self_talk.screen.persona_draft.button.split"),
+                        b -> startSplit())
+                .bounds(leftX, top + MaidPersonaDraft.CATEGORY_COUNT * 24 + 8, CATEGORY_WIDTH, 20)
+                .build());
 
         this.box = new GuardedPersonaEditBox(this.font, boxX, top, boxWidth, boxHeight,
                 Component.translatable("config.maid_self_talk.screen.persona_draft.placeholder"));
@@ -221,6 +252,183 @@ public class MaidPersonaEditScreen extends Screen {
         return new MaidPersonaDraft(this.draft[0], this.draft[1], this.draft[2], this.draft[3]);
     }
 
+    // ===== AI 拆分 =====
+
+    /** 本页是否是该女仆的人设页（整理缓存按它决定通知目标） */
+    boolean isPageOf(UUID maidUuid) {
+        return this.maid.getUUID().equals(maidUuid);
+    }
+
+    /**
+     * 发起 AI 拆分：按当前页面状态决定是否需要「替换确认」，确认后登记并发送请求。
+     * 已有四栏内容（非严格空）或页面存在未保存修改时先确认替换；失败/取消不影响页面。
+     */
+    private void startSplit() {
+        if (this.pendingRequestId != null || this.awaitingConfirmation) {
+            return;
+        }
+        if (this.splitSourceText.isBlank()) {
+            return;
+        }
+        UUID maidUuid = this.maid.getUUID();
+        // READY 候选未保存或丢弃前禁止再次整理；任意在途任务期间同样不允许
+        // （服务端每名玩家同时只放行一个任务，这里提前给出可见的 busy 提示）
+        if (MaidPersonaSplitClient.hasAnyRunning() || MaidPersonaSplitClient.hasReadyCandidate(maidUuid)) {
+            setStatus(Component.translatable("config.maid_self_talk.screen.persona_draft.split.error.busy"),
+                    0xFF5555);
+            return;
+        }
+        if (!currentDraft().isEmpty() || isDirty()) {
+            this.openingConfirm = true;
+            this.minecraft.setScreen(new ConfirmScreen(confirm -> {
+                this.minecraft.setScreen(this);
+                if (confirm) {
+                    registerAndSendSplit();
+                }
+            },
+                    Component.translatable(
+                            "config.maid_self_talk.screen.persona_draft.split.confirm.replace.title"),
+                    Component.translatable(
+                            "config.maid_self_talk.screen.persona_draft.split.confirm.replace.message")));
+            return;
+        }
+        registerAndSendSplit();
+    }
+
+    /** 登记并发送拆分请求（请求不携带页面状态；结果按 requestId + 女仆 UUID 回到整理缓存） */
+    private void registerAndSendSplit() {
+        MaidPersonaSplitClient.startRequest(UUID.randomUUID(), this.maid, this.pageId,
+                this.splitSourceText);
+        setStatus(Component.translatable(
+                "config.maid_self_talk.screen.persona_draft.split.status.running"), 0xFFAA55);
+    }
+
+    /**
+     * 整理任务终态通知（整理缓存只通知当前打开的该女仆页面）。
+     * <p>
+     * 成功且本页发起、从未离开（仍为当前页面）时整份填入四栏并选中四栏模式，
+     * 撤销「已保存」显示，保持基线不变——玩家检查、修改后手动保存。
+     * 其他情况不动作：READY 候选由 {@link #maybeShowSplitLoadConfirm} 的重开确认接管；
+     * 失败只在本页提示，页面内容原样保留。
+     */
+    void onSplitFinished(boolean success, @Nullable MaidPersonaSplitClient.Entry entry,
+                         @Nullable String failCode) {
+        if (success) {
+            if (entry == null || entry.candidate() == null
+                    || entry.leftPage() || !entry.pageId().equals(this.pageId)) {
+                return;
+            }
+            loadSplitCandidate(entry);
+            this.statusText = Component.empty();
+            return;
+        }
+        setStatus(splitErrorMessage(failCode == null ? "" : failCode), 0xFF5555);
+    }
+
+    /**
+     * 载入整理候选：整份填入四栏并选中四栏模式，标记来源 requestId（保存时登记关联）。
+     * 候选本身保留在缓存里，直到保存成功或被显式丢弃。
+     */
+    private void loadSplitCandidate(MaidPersonaSplitClient.Entry entry) {
+        if (entry.candidate() == null) {
+            return;
+        }
+        this.mode = MaidPersonaMode.STRUCTURED;
+        for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
+            this.draft[i] = entry.candidate().get(i);
+        }
+        this.loadedSplitRequestId = entry.requestId();
+        this.savedShown = false;
+        if (this.modeButton != null) {
+            this.modeButton.setMessage(modeLabel());
+        }
+        if (this.box != null) {
+            this.loadingBox = true;
+            this.box.setValue(this.draft[this.category]);
+            this.loadingBox = false;
+        }
+    }
+
+    /**
+     * 有可载入的 READY 候选时弹「载入 AI 整理结果？」确认（页面 tick 中检查，不在 init 里切屏）。
+     * 保存等待门禁优先：门禁期间不弹，解除后下一 tick 再弹。每次页面访问只弹一次；
+     * ESC 仅暂缓（候选保留），本次访问不再弹。
+     * <p>
+     * 本页成功路径刚自动填入的候选（loadedSplitRequestId 一致）不再重复询问——
+     * 自动填入本身就是确认结果；候选仍保留，未保存离开后重开页面（新实例、
+     * loadedSplitRequestId 为空）会照常询问。
+     */
+    private void maybeShowSplitLoadConfirm() {
+        if (this.leftPage || this.splitConfirmShown || this.awaitingConfirmation || this.minecraft == null) {
+            return;
+        }
+        MaidPersonaSplitClient.Entry entry = MaidPersonaSplitClient.entryFor(this.maid.getUUID());
+        if (entry == null || entry.status() != MaidPersonaSplitClient.Status.READY) {
+            return;
+        }
+        if (entry.requestId().equals(this.loadedSplitRequestId)) {
+            return;
+        }
+        this.splitConfirmShown = true;
+        this.openingConfirm = true;
+        this.minecraft.setScreen(new SplitLoadConfirmScreen(entry));
+    }
+
+    private static Component splitErrorMessage(String resultCode) {
+        String key = switch (resultCode) {
+            case MaidPersonaSplitResponseMessage.RESULT_BUSY -> "split.error.busy";
+            case MaidPersonaSplitResponseMessage.RESULT_RATE_LIMITED -> "error.rate_limited";
+            case MaidPersonaSplitResponseMessage.RESULT_NOT_LOADED -> "error.not_loaded";
+            case MaidPersonaSplitResponseMessage.RESULT_NOT_OWNER -> "error.not_owner";
+            case MaidPersonaSplitResponseMessage.RESULT_EMPTY_SOURCE -> "split.error.empty_source";
+            case MaidPersonaSplitResponseMessage.RESULT_TOO_LONG -> "split.error.too_long";
+            case MaidPersonaSplitResponseMessage.RESULT_UNAVAILABLE -> "split.error.unavailable";
+            case MaidPersonaSplitResponseMessage.RESULT_NETWORK -> "split.error.network";
+            case MaidPersonaSplitResponseMessage.RESULT_TIMEOUT -> "split.error.timeout";
+            default -> "split.error.format";
+        };
+        return Component.translatable("config.maid_self_talk.screen.persona_draft." + key);
+    }
+
+    /**
+     * 「载入 AI 整理结果？」确认框。
+     * 原生 ConfirmScreen 把 ESC 与「否」都映射到 callback(false)，而本流程要求
+     * ESC 仅暂缓（候选保留、不再弹），「丢弃结果」才删除候选，因此覆写 ESC 路径。
+     */
+    private class SplitLoadConfirmScreen extends ConfirmScreen {
+
+        private SplitLoadConfirmScreen(MaidPersonaSplitClient.Entry entry) {
+            super(confirm -> {
+                MaidPersonaEditScreen.this.minecraft.setScreen(MaidPersonaEditScreen.this);
+                if (confirm) {
+                    loadSplitCandidate(entry);
+                } else {
+                    MaidPersonaSplitClient.discardCandidate(entry.maidUuid(), entry.requestId());
+                }
+            },
+                    Component.translatable(
+                            "config.maid_self_talk.screen.persona_draft.split.confirm.load.title"),
+                    Component.translatable(
+                            "config.maid_self_talk.screen.persona_draft.split.confirm.load.message"),
+                    Component.translatable(
+                            "config.maid_self_talk.screen.persona_draft.split.confirm.load.yes"),
+                    Component.translatable(
+                            "config.maid_self_talk.screen.persona_draft.split.confirm.load.no"));
+        }
+
+        @Override
+        public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                // ESC 仅暂缓确认：候选保留，本次访问不再弹（splitConfirmShown 已置位）
+                MaidPersonaEditScreen.this.minecraft.setScreen(MaidPersonaEditScreen.this);
+                return true;
+            }
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
+    }
+
+    // ===== 保存 =====
+
     /** 当前完整页面配置（模式 + 四栏），即本次保存要提交的内容 */
     private MaidPersonaConfig currentConfig() {
         return new MaidPersonaConfig(this.mode, currentDraft());
@@ -282,7 +490,8 @@ public class MaidPersonaEditScreen extends Screen {
      * 超限时不发包（界面已禁用按钮，这里是纵深防御），未变更也允许提交（幂等写入）。
      */
     private void submit(boolean returnAfterSuccess) {
-        if (this.pendingRequestId != null || this.awaitingConfirmation) {
+        if (this.pendingRequestId != null || this.awaitingConfirmation
+                || MaidPersonaSplitClient.isRunningFor(this.maid.getUUID())) {
             return;
         }
         if (this.box != null) {
@@ -303,6 +512,11 @@ public class MaidPersonaEditScreen extends Screen {
                 "config.maid_self_talk.screen.persona_draft.status.saving"), 0xFFAA55);
         // 客户端级登记：页面提前关闭时，回包仍能独立定位女仆并更新客户端宿主（见 SelfTalkPlayerSettingsClient）
         SelfTalkPlayerSettingsClient.registerPersonaSave(this.pendingRequestId, this.maid);
+        // 本页载入过整理候选：登记「保存请求 → 整理候选」关联，保存成功后由整理缓存消费候选
+        if (this.loadedSplitRequestId != null) {
+            MaidPersonaSplitClient.linkSave(this.pendingRequestId, this.maid.getUUID(),
+                    this.loadedSplitRequestId);
+        }
         SelfTalkPackets.CHANNEL.sendToServer(new MaidPersonaSaveMessage(this.pendingRequestId, this.maid.getId(),
                 this.maid.getUUID(), snapshot.mode().tag(), snapshot.draft().identity(),
                 snapshot.draft().personality(), snapshot.draft().background(), snapshot.draft().hobbies()));
@@ -377,6 +591,7 @@ public class MaidPersonaEditScreen extends Screen {
         if (this.box != null) {
             this.box.tick();
         }
+        maybeShowSplitLoadConfirm();
     }
 
     @Override
@@ -390,10 +605,24 @@ public class MaidPersonaEditScreen extends Screen {
     }
 
     @Override
+    public void removed() {
+        if (this.openingConfirm) {
+            // 确认浮层只是临时接管屏幕：不算离开页面（回收标志，浮层回来后仍可继续置位）
+            this.openingConfirm = false;
+            return;
+        }
+        // 真正离开：不取消任务，只标记离开（结果改为暂存，重开该女仆页面时确认载入）
+        this.leftPage = true;
+        MaidPersonaSplitClient.markLeft(this.maid.getUUID(), this.pageId);
+    }
+
+    @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         boolean pending = this.pendingRequestId != null;
-        // 跨页面待确认门禁期间禁止编辑与提交（旧基线在确认前不可覆盖服务端新值）
-        boolean locked = pending || this.awaitingConfirmation;
+        // 整理任务在途（含重开页面的同女仆任务）与跨页面待确认门禁一样锁编辑与提交；
+        // 离开页面不取消任务，整理中允许查看分类与离开
+        boolean splitRunning = MaidPersonaSplitClient.isRunningFor(this.maid.getUUID());
+        boolean locked = pending || this.awaitingConfirmation || splitRunning;
         int total = currentDraft().totalLength();
         boolean withinLimit = total <= MaidPersonaDraft.MAX_TOTAL_LENGTH;
         // dirty 由页面内容相对基线比较得出；内容一有改动（含切模式），「已保存」状态立即撤销
@@ -412,6 +641,11 @@ public class MaidPersonaEditScreen extends Screen {
         }
         if (this.saveAndBackButton != null) {
             this.saveAndBackButton.active = !locked && withinLimit;
+        }
+        // 拆分入口：原文空白、门禁/等待期间、已有 READY 候选未消费时禁用
+        if (this.splitButton != null) {
+            this.splitButton.active = !locked && !this.splitSourceText.isBlank()
+                    && !MaidPersonaSplitClient.hasReadyCandidate(this.maid.getUUID());
         }
 
         super.render(graphics, mouseX, mouseY, partialTick);
@@ -433,6 +667,11 @@ public class MaidPersonaEditScreen extends Screen {
             graphics.drawCenteredString(this.font, Component.translatable(
                     "config.maid_self_talk.screen.persona_draft.status.saved"),
                     this.width / 2, this.height - 44, 0x55FF55);
+        } else if (splitRunning) {
+            // 整理中（含重开页面的同女仆任务）：显示等待提示，允许离开页面
+            graphics.drawCenteredString(this.font, Component.translatable(
+                    "config.maid_self_talk.screen.persona_draft.split.status.running"),
+                    this.width / 2, this.height - 44, 0xFFAA55);
         } else if (!this.statusText.getString().isEmpty()) {
             graphics.drawCenteredString(this.font, this.statusText, this.width / 2, this.height - 44,
                     this.statusColor);
