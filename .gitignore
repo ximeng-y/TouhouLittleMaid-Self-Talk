@@ -1,6 +1,7 @@
 # 文档与临时目录
 HANDOFF.md
 .XMTEMP/
+.XMagent-docs/
 
 # 本地想法与讨论归档
 /XM_ideas/
