@@ -35,6 +35,7 @@ public final class SelfTalkPlayerSettingsClient {
 
     private static void onClientLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         PENDING_PERSONA_SAVES.clear();
+        MaidPersonaSplitClient.clearAll();
     }
 
     /** 客户端级待确认人设保存：requestId → {实体 id, 女仆 UUID}。
@@ -149,6 +150,10 @@ public final class SelfTalkPlayerSettingsClient {
         // 页面内按自身 requestId 匹配，不匹配的只解除跨页门禁
         if (mc.screen instanceof MaidPersonaEditScreen screen) {
             screen.onPendingSaveFinished(msg);
+        }
+        // 本保存请求登记过拆分候选关联且保存成功：消费对应候选（requestId 匹配才删，旧回包不清后来的候选）
+        if (pending != null) {
+            MaidPersonaSplitClient.onPersonaSaveConfirmed(msg.getRequestId(), msg.isSuccess());
         }
     }
 }

@@ -211,5 +211,22 @@
   "config.maid_self_talk.screen.persona_draft.error.not_loaded": "女仆不在当前维度，未能保存。",
   "config.maid_self_talk.screen.persona_draft.error.not_owner": "你不是这只女仆的主人，未能保存。",
   "config.maid_self_talk.screen.persona_draft.error.unavailable": "这只女仆暂时无法保存人设。",
-  "config.maid_self_talk.screen.persona_draft.error.unknown": "保存失败，请稍后再试。"
+  "config.maid_self_talk.screen.persona_draft.error.unknown": "保存失败，请稍后再试。",
+  "config.maid_self_talk.screen.persona_draft.button.split": "AI 拆分",
+  "config.maid_self_talk.screen.persona_draft.split.status.running": "AI 正在整理人设……可离开页面，完成后会私信通知。",
+  "config.maid_self_talk.screen.persona_draft.split.confirm.replace.title": "开始 AI 整理？",
+  "config.maid_self_talk.screen.persona_draft.split.confirm.replace.message": "AI 整理结果将替换本页四栏内容并选择四栏模式，页面上的未保存修改会被覆盖。继续吗？",
+  "config.maid_self_talk.screen.persona_draft.split.confirm.load.title": "载入 AI 整理结果？",
+  "config.maid_self_talk.screen.persona_draft.split.confirm.load.message": "将用 AI 整理结果替换本页四栏内容并选择四栏模式，保存后才会生效。",
+  "config.maid_self_talk.screen.persona_draft.split.confirm.load.yes": "载入",
+  "config.maid_self_talk.screen.persona_draft.split.confirm.load.no": "丢弃结果",
+  "config.maid_self_talk.screen.persona_draft.split.error.busy": "已有整理任务正在进行，请稍候。",
+  "config.maid_self_talk.screen.persona_draft.split.error.empty_source": "原版人设内容为空，无法整理。",
+  "config.maid_self_talk.screen.persona_draft.split.error.too_long": "内容超出长度上限，本次整理已放弃。",
+  "config.maid_self_talk.screen.persona_draft.split.error.unavailable": "模型服务不可用，无法整理。",
+  "config.maid_self_talk.screen.persona_draft.split.error.network": "整理请求发送失败，请重试。",
+  "config.maid_self_talk.screen.persona_draft.split.error.timeout": "整理超时，已取消。",
+  "config.maid_self_talk.screen.persona_draft.split.error.format": "AI 返回的整理结果格式有误，请重试。",
+  "chat.maid_self_talk.split.done": "AI 整理完成：%s。重新打开四栏人设页即可载入结果。",
+  "chat.maid_self_talk.split.failed": "AI 整理失败。"
 }

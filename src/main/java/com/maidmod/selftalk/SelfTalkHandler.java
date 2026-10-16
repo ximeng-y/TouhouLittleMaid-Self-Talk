@@ -7,6 +7,7 @@ import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.google.common.collect.Maps;
 import com.maidmod.selftalk.network.SelfTalkPackets;
+import com.maidmod.selftalk.persona.PersonaSplitService;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -17,10 +18,12 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
 import net.minecraftforge.event.entity.living.LivingDamageEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
@@ -333,6 +336,25 @@ public final class SelfTalkHandler {
         SelfTalkState.removeWelcomeForPlayer(uuid);
         // 清理网络限流条目，防长期多人服务端内存缓慢增长
         SelfTalkPackets.removeRateEntry(uuid);
+        // 取消该玩家在途的 AI 拆分人设任务（不回包，客户端断连本身也会清候选）
+        PersonaSplitService.onPlayerLogout(uuid);
+    }
+
+    /**
+     * 全局服务端 tick 扫描（END 相位）：AI 拆分人设任务的超时兜底（6000 tick，服务器 tick 计时）。
+     * 拆分任务不挂女仆 tick（结果与女仆 tick 无关），只能靠全局扫描兜底挂死任务。
+     */
+    @SubscribeEvent
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) {
+            PersonaSplitService.onServerTick(event.getServer());
+        }
+    }
+
+    /** 服务端关闭：撤销全部在途拆分任务（不回包，连接即将断开） */
+    @SubscribeEvent
+    public static void onServerStopped(ServerStoppedEvent event) {
+        PersonaSplitService.onServerStopped();
     }
 
     // 1.1.2 起玩家设置在 overworld SavedData，天然跨玩家死亡重生/维度传送保留，无需任何 clone 钩子。

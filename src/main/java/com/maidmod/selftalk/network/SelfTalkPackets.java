@@ -28,8 +28,9 @@ public final class SelfTalkPackets {
     // （maid_self_talk:autonomous_waiting），两端必须同版才能正确解码实体数据中的该类型气泡；
     // v12：人设保存消息扩展为「模式 + 四栏」整份配置并带女仆 UUID，回包同样带 UUID
     // 与服务端确认后的完整配置（v11 由另一批在途改动占用，此处直接跳到 12 避免版本串复用）；
+    // v13：新增 AI 拆分人设的请求/结果消息（序号 22、23）；
     // 不做向后兼容（既定决策），升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
-    private static final String PROTOCOL_VERSION = "12";
+    private static final String PROTOCOL_VERSION = "13";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MaidSelfTalkMod.MODID, "main"),
@@ -119,10 +120,17 @@ public final class SelfTalkPackets {
         CHANNEL.registerMessage(nextId++, MaidPersonaSaveResponseMessage.class,
                 MaidPersonaSaveResponseMessage::encode, MaidPersonaSaveResponseMessage::decode,
                 MaidPersonaSaveResponseMessage::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        // 原 0~21 之后追加为 22、23：AI 拆分人设请求与结果
+        CHANNEL.registerMessage(nextId++, MaidPersonaSplitRequestMessage.class,
+                MaidPersonaSplitRequestMessage::encode, MaidPersonaSplitRequestMessage::decode,
+                MaidPersonaSplitRequestMessage::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, MaidPersonaSplitResponseMessage.class,
+                MaidPersonaSplitResponseMessage::encode, MaidPersonaSplitResponseMessage::decode,
+                MaidPersonaSplitResponseMessage::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
-    /** 每玩家每秒限流：防恶意客户端包风暴（正常设置界面操作远低于该频率） */
-    static boolean allowConfigPacket(UUID playerUuid) {
+    /** 每玩家每秒限流：防恶意客户端包风暴（正常设置界面操作远低于该频率；人设拆分链共用） */
+    public static boolean allowConfigPacket(UUID playerUuid) {
         long second = System.currentTimeMillis() / 1000;
         long[] entry = PACKET_RATE.get(playerUuid);
         if (entry == null) {

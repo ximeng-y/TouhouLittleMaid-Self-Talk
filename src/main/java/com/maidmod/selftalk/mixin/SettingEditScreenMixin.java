@@ -5,6 +5,7 @@ import com.github.tartaricacid.touhoulittlemaid.client.gui.widget.button.FlatCol
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.client.MaidPersonaEditScreen;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Final;
@@ -41,6 +42,11 @@ public abstract class SettingEditScreenMixin extends Screen {
     @Final
     private EntityMaid maid;
 
+    /** TLM 的原版整段人设输入框：进入四栏页时冻结当前文本（含未保存修改），供 AI 拆分用。
+     *  TLM 自有字段 prod 不混淆，与 {@code maid} 同样走 remap=false */
+    @Shadow(remap = false)
+    private MultiLineEditBox customSetting;
+
     protected SettingEditScreenMixin() {
         super(Component.translatable("config.maid_self_talk.screen.persona_draft.title"));
     }
@@ -53,7 +59,9 @@ public abstract class SettingEditScreenMixin extends Screen {
         int posX = this.width / 2 - 195;
         FlatColorButton button = new FlatColorButton(posX + 265, 5, 128, 20,
                 Component.translatable("config.maid_self_talk.screen.persona_draft.entry"),
-                b -> Minecraft.getInstance().setScreen(new MaidPersonaEditScreen(screen, this.maid)));
+                b -> Minecraft.getInstance().setScreen(new MaidPersonaEditScreen(screen, this.maid,
+                        // 点击时刻冻结原版输入框当前文本（含未保存修改）；不调用原版保存
+                        this.customSetting.getValue())));
         this.addRenderableWidget(button);
     }
 }
