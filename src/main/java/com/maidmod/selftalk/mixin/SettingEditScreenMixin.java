@@ -7,6 +7,7 @@ import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.client.MaidPersonaEditScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -37,6 +38,10 @@ public abstract class SettingEditScreenMixin {
     @Final
     private EntityMaid maid;
 
+    /** TLM 的原版整段人设输入框：进入四栏页时冻结当前文本（含未保存修改），供 AI 拆分用 */
+    @Shadow
+    private MultiLineEditBox customSetting;
+
     @Inject(method = "init", at = @At("TAIL"))
     private void maid_self_talk$addPersonaDraftButton(CallbackInfo ci) {
         SettingEditScreen screen = (SettingEditScreen) (Object) this;
@@ -45,7 +50,9 @@ public abstract class SettingEditScreenMixin {
         int posX = screen.width / 2 - 195;
         FlatColorButton button = new FlatColorButton(posX + 265, 5, 128, 20,
                 Component.translatable("config.maid_self_talk.screen.persona_draft.entry"),
-                b -> Minecraft.getInstance().setScreen(new MaidPersonaEditScreen(screen, this.maid)));
+                b -> Minecraft.getInstance().setScreen(new MaidPersonaEditScreen(screen, this.maid,
+                        // 点击时刻冻结原版输入框当前文本（含未保存修改）；不调用原版保存
+                        this.customSetting.getValue())));
         addRenderableWidgetReflect(screen, button);
     }
 

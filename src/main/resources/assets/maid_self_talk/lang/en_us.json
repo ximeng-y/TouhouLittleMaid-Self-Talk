@@ -215,5 +215,22 @@
   "config.maid_self_talk.screen.persona_draft.error.not_loaded": "The maid is not in your current dimension, so it was not saved.",
   "config.maid_self_talk.screen.persona_draft.error.not_owner": "You are not the owner of this maid, so it was not saved.",
   "config.maid_self_talk.screen.persona_draft.error.unavailable": "This maid cannot store its persona right now.",
-  "config.maid_self_talk.screen.persona_draft.error.unknown": "Saving failed. Please try again later."
+  "config.maid_self_talk.screen.persona_draft.error.unknown": "Saving failed. Please try again later.",
+  "config.maid_self_talk.screen.persona_draft.button.split": "AI Split",
+  "config.maid_self_talk.screen.persona_draft.split.status.running": "AI is organizing the persona... You may leave this screen; you will receive a chat message when it finishes.",
+  "config.maid_self_talk.screen.persona_draft.split.confirm.replace.title": "Start AI organizing?",
+  "config.maid_self_talk.screen.persona_draft.split.confirm.replace.message": "The AI result will replace the four sections on this screen and switch to the four-section mode. Unsaved changes will be overwritten. Continue?",
+  "config.maid_self_talk.screen.persona_draft.split.confirm.load.title": "Load AI result?",
+  "config.maid_self_talk.screen.persona_draft.split.confirm.load.message": "The AI result will replace the four sections on this screen and switch to the four-section mode. It only takes effect after saving.",
+  "config.maid_self_talk.screen.persona_draft.split.confirm.load.yes": "Load",
+  "config.maid_self_talk.screen.persona_draft.split.confirm.load.no": "Discard result",
+  "config.maid_self_talk.screen.persona_draft.split.error.busy": "Another organizing task is already running. Please wait.",
+  "config.maid_self_talk.screen.persona_draft.split.error.empty_source": "The original persona text is empty, so there is nothing to organize.",
+  "config.maid_self_talk.screen.persona_draft.split.error.too_long": "The content exceeds the length limit, so this attempt was abandoned.",
+  "config.maid_self_talk.screen.persona_draft.split.error.unavailable": "The model service is unavailable, so the persona cannot be organized.",
+  "config.maid_self_talk.screen.persona_draft.split.error.network": "The organizing request failed to send. Please try again.",
+  "config.maid_self_talk.screen.persona_draft.split.error.timeout": "The organizing request timed out and was cancelled.",
+  "config.maid_self_talk.screen.persona_draft.split.error.format": "The AI returned an unexpected format. Please try again.",
+  "chat.maid_self_talk.split.done": "AI organizing finished for %s. Reopen the four-section persona screen to load the result.",
+  "chat.maid_self_talk.split.failed": "AI organizing failed."
 }

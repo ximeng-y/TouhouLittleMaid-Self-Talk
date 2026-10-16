@@ -12,6 +12,7 @@
     "MaidAIChatManagerAccessor",
     "MaidAIChatManagerMixin",
     "LLMCallbackMixin",
+    "LLMOpenAIClientMixin",
     "SelfTalkTtsMixin",
     "SelfTalkSystemTtsMixin",
     "SelfTalkLateDisplayMixin",
