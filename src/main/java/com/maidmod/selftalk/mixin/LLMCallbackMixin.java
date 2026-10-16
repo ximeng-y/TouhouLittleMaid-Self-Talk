@@ -10,6 +10,7 @@ import com.maidmod.selftalk.KeywordPlanCallback;
 import com.maidmod.selftalk.MaidSelfTalkService;
 import com.maidmod.selftalk.SegmentTags;
 import com.maidmod.selftalk.SelfTalkCallback;
+import com.maidmod.selftalk.persona.PersonaSplitCallback;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -24,8 +25,9 @@ import java.net.http.HttpRequest;
  * 只有 TLM 内部 new 的裸 {@link LLMCallback}（玩家 chat）才参与该计数；
  * 本模组自建的子类回调各自管理状态，此处按类型排除：
  * {@link SelfTalkCallback}、{@link InterChatCallback}（自话／互聊），
- * 以及 {@link KeywordPlanCallback}（检索模式的静默关键词规划——它不是玩家聊天完成，
- * 若误认会让一次规划凭空解除一条在途 player chat 计数）。
+ * {@link KeywordPlanCallback}（检索模式的静默关键词规划），
+ * 以及 {@link PersonaSplitCallback}（AI 拆分人设的静默整理请求）——
+ * 它们都不是玩家聊天完成，若误认会凭空解除在途 player chat 计数。
  * <p>
  * 同时承接<b>最终自话回复的历史写入切断</b>：窄范围重定向
  * {@code addAssistantHistory(String)}，只在宿主是 {@link SelfTalkCallback} 时跳过写入。
@@ -69,8 +71,8 @@ public abstract class LLMCallbackMixin {
 
     private static void onChatEnd(LLMCallback callback) {
         if (callback instanceof SelfTalkCallback || callback instanceof InterChatCallback
-                || callback instanceof KeywordPlanCallback) {
-            // 自话/互聊/静默规划回调自行管理各自状态与遗忘，不参与玩家 chat 计数
+                || callback instanceof KeywordPlanCallback || callback instanceof PersonaSplitCallback) {
+            // 自话/互聊/静默规划/AI 拆分回调自行管理各自状态与遗忘，不参与玩家 chat 计数
             return;
         }
         EntityMaid maid = callback.getMaid();

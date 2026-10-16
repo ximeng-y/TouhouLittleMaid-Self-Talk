@@ -31,7 +31,7 @@ import java.util.UUID;
  * 💬 玩家设置页内的「环境上下文」浮层（issue #14）。
  * <p>
  * 本类是<b>现有 Screen 内部管理的组件</b>，不是另一个 Screen：不接管 {@code setScreen}，
- * 不把 32 个行按钮混进页面的焦点链，事件由页面按「浮层优先、未用也不透传」的规则转发进来。
+ * 不把 35 个行按钮混进页面的焦点链，事件由页面按「浮层优先、未用也不透传」的规则转发进来。
  * <p>
  * 会话模型（与服务端的约定，见 network 包的三个 payload）：
  * <ul>
@@ -126,9 +126,9 @@ public final class EnvironmentContextPanel {
     /** 是否已收到过至少一次权威快照（未收到前所有行不可点击） */
     private boolean hasSnapshot;
     private boolean adminEnabled = true;
-    /** 32 项模式（已存偏好补默认值后的值，非管理员强制后的有效模式） */
+    /** 35 项模式（已存偏好补默认值后的值，非管理员强制后的有效模式） */
     private final Map<String, EnvironmentContextMode> modes = new LinkedHashMap<>();
-    /** 32 项功能可用性 */
+    /** 35 项功能可用性 */
     private final Map<String, EnvironmentContextSettings.Availability> availability = new LinkedHashMap<>();
     /**
      * 环境信息自然语言化的<b>已存偏好</b>（不是管理员门控后的有效值）。
@@ -163,9 +163,9 @@ public final class EnvironmentContextPanel {
     private boolean draggingThumb;
     /** 拖拽起点相对滑块顶部的偏移，拖动时保证光标与滑块相对位置不跳变 */
     private int dragGrabOffset;
-    /** 当前焦点：0..31 = 行，{@link #FOCUS_TOGGLE} / {@link #FOCUS_MODE} = 标题区控件，{@link #FOCUS_CLOSE} = 关闭按钮，-1 = 无 */
+    /** 当前焦点：0..34 = 行，{@link #FOCUS_TOGGLE} / {@link #FOCUS_MODE} = 标题区控件，{@link #FOCUS_CLOSE} = 关闭按钮，-1 = 无 */
     private int focusedIndex = -1;
-    /** 已构建的行按钮（与目录同序，恒 32 个） */
+    /** 已构建的行按钮（与目录同序，恒 35 个） */
     private final List<Button> rowButtons = new ArrayList<>();
     /** 标题区的「环境信息自然语言化」总开关（不随列表滚动，也不进底页焦点链） */
     private Button naturalLanguageButton;
@@ -226,7 +226,7 @@ public final class EnvironmentContextPanel {
     /**
      * 重算几何、钳制滚动偏移并重建按钮。
      * <p>
-     * 不触碰会话、序号、32 项状态、总开关与同步标志——窗口 resize 只应改变布局，
+     * 不触碰会话、序号、35 项状态、总开关与同步标志——窗口 resize 只应改变布局，
      * 不能把默认值覆盖到已经收到的服务端设置上，也不能重置未确认的乐观值。
      */
     public void layout(int screenWidth, int screenHeight) {
@@ -426,7 +426,7 @@ public final class EnvironmentContextPanel {
      * <p>
      * 只接受「浮层仍打开 + session 匹配 + seq 等于最新发出」的响应，其余一律丢弃：
      * 关闭后到达的回包、旧会话回包、被新操作取代的旧序号回包都不能改写界面。
-     * 符合条件时整包更新（32 项模式 + 总开关 + 管理员状态一起应用，不部分更新），
+     * 符合条件时整包更新（35 项模式 + 总开关 + 管理员状态一起应用，不部分更新），
      * 避免半新半旧的界面。
      */
     public void applyResponse(EnvironmentContextConfigResponseMessage payload) {
@@ -518,6 +518,9 @@ public final class EnvironmentContextPanel {
             case SELF_DISABLED -> "config.maid_self_talk.screen.player_settings.context.disabled.self";
             case IDENTITY_NOT_REGISTERED -> "config.maid_self_talk.screen.player_settings.context.disabled.identity";
             case PROVIDER_MISSING -> "config.maid_self_talk.screen.player_settings.context.disabled.provider";
+            case CURIOS_NOT_LOADED -> "config.maid_self_talk.screen.player_settings.context.disabled.curios_missing";
+            case MAID_CURIOS_DISABLED ->
+                    "config.maid_self_talk.screen.player_settings.context.disabled.maid_curios_disabled";
         };
     }
 
@@ -526,20 +529,22 @@ public final class EnvironmentContextPanel {
     }
 
     /**
-     * 右侧状态按钮的悬停说明键：32 行共用一份三态通用说明。
+     * 右侧状态按钮的悬停说明键：全部行共用一份三态通用说明。
      * <p>
      * 操作处只解释「进入随机池／必定进入／必定不进入」这三个状态本身，与具体是哪一项无关；
-     * 四项环境事件／状态的专属说明改挂在左侧名称上（见 {@link #rowDescriptionKey}）。
+     * 有专属说明的行改挂在左侧名称上（见 {@link #rowDescriptionKey}）。
      */
     private static String modeTooltipKey() {
         return "config.maid_self_talk.screen.player_settings.context.row.mode";
     }
 
     /**
-     * 左侧名称的专属说明键：只有四项环境事件／状态有，其余行返回 {@code null}。
+     * 左侧名称的专属说明键：女仆身份、环境事件条目与饰品条目有，其余行返回 {@code null}。
      * <p>
-     * 其余 28 行的名称本身已是自然语言（「女仆主手物品」……），逐条写描述只会变成 28 条冗余文案，
+     * 其余行的名称本身已是自然语言（「女仆主手物品」……），逐条写描述只会变成冗余文案，
      * 因此它们的名称不挂说明——只在名称被省略号截断时补一行完整名称。
+     * <p>
+     * 两个 Curios 条目共用一条说明：它们读的是同一套槽位规则，分开写会重复同样的话。
      */
     private static String rowDescriptionKey(EnvironmentContextOption option) {
         String key = switch (option.key()) {
@@ -547,6 +552,10 @@ public final class EnvironmentContextPanel {
             case EnvironmentContextOption.KEY_DEATHS -> "deaths";
             case EnvironmentContextOption.KEY_PLAYER_HURT -> "player_hurt";
             case EnvironmentContextOption.KEY_SELF_HURT -> "self_hurt";
+            case EnvironmentContextOption.KEY_SELF_REVIVE -> "self_revive";
+            case EnvironmentContextOption.KEY_SELF_KILLS -> "self_kills";
+            case EnvironmentContextOption.KEY_MAID_BAUBLES -> "baubles";
+            case EnvironmentContextOption.KEY_MAID_CURIOS, EnvironmentContextOption.KEY_USER_CURIOS -> "curios";
             default -> null;
         };
         return key == null

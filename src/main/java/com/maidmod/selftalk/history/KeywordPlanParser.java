@@ -20,7 +20,12 @@ import java.util.Set;
 /**
  * 关键词规划输出的解析（纯文本，无 Minecraft 依赖）。
  * <p>
- * 唯一有效形状：{@code {"keywords":["下界","恶魂","保护主人"]}}。
+ * 唯一有效形状：
+ * {@code {"history_keywords":["下界","恶魂"],"persona_keywords":["钓鱼"]}}。
+ * <p>
+ * 两组关键词来自同一次规划请求：历史召回与人设召回分别检索，因此两个字段都<b>必须存在</b>
+ * 且都是字符串数组（未启用的目标要求返回空数组）。缺字段即判为格式错误并进入纠正——
+ * 「少给一组」不能当成「那组为空」，否则提示词里的两条硬要求形同虚设。
  * <p>
  * 允许的规范化<b>仅</b>三项：去首尾空白；整个输出被<b>一层</b> Markdown 代码围栏包裹时剥掉这一层；
  * 用 Gson 的严格流式读取解析一个完整 JSON 对象。除此之外一律判为格式错误：
@@ -31,14 +36,19 @@ import java.util.Set;
  *   <li>{@code JsonReader.setLenient(false)}（严格模式：单引号、无引号键、注释、尾随逗号一律拒绝）；</li>
  *   <li>自行递归读取整个值（不用 {@code JsonParser.parseString} 这类宽松入口，
  *       它对重复字段取后者、对尾随内容视而不见），读完后确认输入已到 {@code END_DOCUMENT}；</li>
- *   <li>{@code keywords} 字段在对象内只允许出现一次（重复即判错）。</li>
+ *   <li>两个关键词字段各自在对象内只允许出现一次（重复即判错）。</li>
  * </ul>
- * 无关的额外字段予以忽略（只取其 {@code keywords}）。
+ * 无关的额外字段予以忽略（只取这两个字段）。
  * <p>
  * 目标环境为 gson 2.10.1（MC 1.21.1 与 1.20.1 均自带该版本），该版本尚无
  * {@code Strictness} 枚举，因此严格性统一用 {@code setLenient(false)} 表达。
  */
 public final class KeywordPlanParser {
+
+    /** 历史关键词字段名 */
+    public static final String FIELD_HISTORY = "history_keywords";
+    /** 人设关键词字段名 */
+    public static final String FIELD_PERSONA = "persona_keywords";
 
     private KeywordPlanParser() {
     }
@@ -46,22 +56,23 @@ public final class KeywordPlanParser {
     /**
      * 解析结果。
      *
-     * @param keywords 已去空白、去空项、忽略大小写去重并截断到上限的关键词
-     * @param error    错误说明；{@code null} 表示解析成功。成功但关键词为空时 {@code error} 同样为 null
-     *                 （空数组是合法输出，不触发纠正）
+     * @param historyKeywords 已去空白、去空项、忽略大小写去重并截断到上限的历史关键词
+     * @param personaKeywords 同上，人设关键词
+     * @param error           错误说明；{@code null} 表示解析成功。成功但两个数组都为空时同样为 null
+     *                        （空数组是合法输出，不触发纠正）
      */
-    public record Result(List<String> keywords, String error) {
+    public record Result(List<String> historyKeywords, List<String> personaKeywords, String error) {
 
         public boolean ok() {
             return error == null;
         }
 
-        static Result success(List<String> keywords) {
-            return new Result(keywords, null);
+        static Result success(List<String> historyKeywords, List<String> personaKeywords) {
+            return new Result(historyKeywords, personaKeywords, null);
         }
 
         static Result failure(String error) {
-            return new Result(List.of(), error);
+            return new Result(List.of(), List.of(), error);
         }
     }
 
@@ -80,36 +91,50 @@ public final class KeywordPlanParser {
                 return Result.failure("顶层不是 JSON 对象");
             }
             JsonObject object = element.getAsJsonObject();
-            JsonElement keywords = object.get("keywords");
-            if (keywords == null) {
-                return Result.failure("缺少 keywords 字段");
+            List<String> history = readKeywordArray(object, FIELD_HISTORY);
+            if (history == null) {
+                return Result.failure("缺少 " + FIELD_HISTORY + " 字段或它不是字符串数组");
             }
-            if (!keywords.isJsonArray()) {
-                return Result.failure("keywords 不是数组");
+            List<String> persona = readKeywordArray(object, FIELD_PERSONA);
+            if (persona == null) {
+                return Result.failure("缺少 " + FIELD_PERSONA + " 字段或它不是字符串数组");
             }
-            JsonArray array = keywords.getAsJsonArray();
-            List<String> cleaned = new ArrayList<>(array.size());
-            Set<String> seen = new LinkedHashSet<>();
-            for (JsonElement item : array) {
-                if (item == null || !item.isJsonPrimitive() || !((JsonPrimitive) item).isString()) {
-                    return Result.failure("keywords 数组中含有非字符串项");
-                }
-                String value = item.getAsString().trim();
-                if (value.isEmpty()) {
-                    continue;
-                }
-                if (seen.add(value.toLowerCase(Locale.ROOT))) {
-                    cleaned.add(value);
-                }
-            }
-            if (cleaned.size() > HistoryRetrievalIndex.MAX_KEYWORDS) {
-                // 超量本身不触发纠正：截取前 N 个即可
-                cleaned = new ArrayList<>(cleaned.subList(0, HistoryRetrievalIndex.MAX_KEYWORDS));
-            }
-            return Result.success(List.copyOf(cleaned));
+            return Result.success(history, persona);
         } catch (IOException | RuntimeException e) {
             return Result.failure("无法解析为 JSON：" + e.getClass().getSimpleName());
         }
+    }
+
+    /**
+     * 读取一个关键词数组字段：去空白、去空项、忽略大小写去重、截断到上限。
+     *
+     * @return 结果列表；字段缺失或不是字符串数组时返回 {@code null}（由调用方转成具体错误说明）
+     */
+    private static List<String> readKeywordArray(JsonObject object, String field) {
+        JsonElement element = object.get(field);
+        if (element == null || !element.isJsonArray()) {
+            return null;
+        }
+        JsonArray array = element.getAsJsonArray();
+        List<String> cleaned = new ArrayList<>(array.size());
+        Set<String> seen = new LinkedHashSet<>();
+        for (JsonElement item : array) {
+            if (item == null || !item.isJsonPrimitive() || !((JsonPrimitive) item).isString()) {
+                return null;
+            }
+            String value = item.getAsString().trim();
+            if (value.isEmpty()) {
+                continue;
+            }
+            if (seen.add(value.toLowerCase(Locale.ROOT))) {
+                cleaned.add(value);
+            }
+        }
+        if (cleaned.size() > HistoryRetrievalIndex.MAX_KEYWORDS) {
+            // 超量本身不触发纠正：截取前 N 个即可
+            cleaned = new ArrayList<>(cleaned.subList(0, HistoryRetrievalIndex.MAX_KEYWORDS));
+        }
+        return List.copyOf(cleaned);
     }
 
     /** 严格读取一个完整 JSON 值，并确认输入没有剩余内容 */

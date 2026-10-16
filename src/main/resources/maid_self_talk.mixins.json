@@ -4,10 +4,31 @@
   "package": "com.maidmod.selftalk.mixin",
   "compatibilityLevel": "JAVA_17",
   "refmap": "maid_self_talk.refmap.json",
-  "mixins": ["MaidAIChatManagerAccessor", "MaidAIChatManagerMixin", "LLMCallbackMixin", "SelfTalkTtsMixin",
-    "SelfTalkSystemTtsMixin", "SelfTalkLateDisplayMixin", "EntityMaidProvenanceMixin", "HistorySummaryManagerAccessor",
-    "HistorySummaryManagerMixin", "MaidAIChatDataMixin",
-    "GameContextRegisterAccessor", "InterChatToolLifecycleMixin"],
-  "client": ["AIChatScreenMixin", "HistoryAIChatScreenMixin"],
-  "injectors": { "defaultRequire": 1 }
+  "mixins": [
+    "MaidAIChatManagerAccessor",
+    "MaidAIChatManagerMixin",
+    "LLMCallbackMixin",
+    "LLMOpenAIClientMixin",
+    "SelfTalkTtsMixin",
+    "SelfTalkSystemTtsMixin",
+    "SelfTalkLateDisplayMixin",
+    "EntityMaidProvenanceMixin",
+    "HistorySummaryManagerAccessor",
+    "HistorySummaryManagerMixin",
+    "MaidAIChatDataMixin",
+    "MaidAIChatPersonaMixin",
+    "GameContextRegisterAccessor",
+    "InterChatToolLifecycleMixin",
+    "WaitingChatBubbleDataMixin",
+    "ItemFilmMixin"
+  ],
+  "client": [
+    "AIChatScreenMixin",
+    "HistoryAIChatScreenMixin",
+    "SettingEditScreenMixin",
+    "SelfTalkChatBubbleRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
 }

@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 环境上下文目录项（固定 32 项）。
+ * 环境上下文目录项（固定 37 项）。
  * <p>
  * 本类不依赖 Minecraft / TLM 类型，便于与 {@link EnvironmentContextSelection} 一起脱离游戏自检。
  * <p>
@@ -23,10 +23,12 @@ public record EnvironmentContextOption(String key, Source source,
         TLM_PROMPT,
         /** TLM 原随机信息（tool 类分类，原本按分类随机抽 1~3 类） */
         TLM_RANDOM,
-        /** 环境事件（死亡／玩家受伤／自身受伤） */
+        /** 环境事件（死亡／受伤／神龛复活／自身击杀） */
         EVENT,
         /** 实时自身状态（着火／水下缺氧） */
-        REALTIME
+        REALTIME,
+        /** 饰品栏（女仆原生饰品栏、女仆与主人的 Curios 栏）：本 mod 直接读取，不走 TLM 提供者与 GameContextRegister */
+        ACCESSORY
     }
 
     /**
@@ -45,7 +47,13 @@ public record EnvironmentContextOption(String key, Source source,
         /** 受环境感知总开关 + 女仆自身感知开关约束 */
         EVENT_SELF,
         /** 依赖附近女仆身份提供者是否实际注册（启动时注册，改动需重启） */
-        IDENTITY_PROVIDER
+        IDENTITY_PROVIDER,
+        /** 本 mod 内置读取，不依赖任何 TLM 提供者，也不依赖 Curios */
+        BUILTIN,
+        /** 依赖 Curios 实际安装（TLM 的 Curios 兼容已初始化） */
+        CURIOS,
+        /** 依赖 Curios 已安装且 TLM 的女仆 Curios 支持未被管理员关闭 */
+        MAID_CURIOS
     }
 
     /** 是否与目录默认模式不同（即是否需要落盘为玩家覆盖） */
@@ -57,12 +65,16 @@ public record EnvironmentContextOption(String key, Source source,
 
     private static List<EnvironmentContextOption> buildAll() {
         return List.of(
-                // 1~14：TLM 原随机信息，默认随机
+                // 1~5：TLM 原随机信息，默认随机
                 random("nearby_entities"),
                 random("mainhand_item"),
                 random("offhand_item"),
                 random("inventory_items"),
                 random("armor_items"),
+                // 6~7：饰品栏（本 mod 直接读取），默认随机
+                accessory(KEY_MAID_BAUBLES, Gate.BUILTIN),
+                accessory(KEY_MAID_CURIOS, Gate.MAID_CURIOS),
+                // 8~17：TLM 原随机信息，默认随机
                 random("self_position"),
                 random("user_position"),
                 random("distance_to_user"),
@@ -71,8 +83,10 @@ public record EnvironmentContextOption(String key, Source source,
                 random("user_healthy"),
                 random("user_mainhand"),
                 random("user_armor"),
+                // 16：主人 Curios 饰品（本 mod 直接读取），默认随机
+                accessory(KEY_USER_CURIOS, Gate.CURIOS),
                 random("effects"),
-                // 15~22：TLM 固定信息 status，默认必定进入
+                // 18~25：TLM 固定信息 status，默认必定进入
                 prompt("healthy"),
                 prompt("sleep_state"),
                 prompt("follow_state"),
@@ -81,25 +95,30 @@ public record EnvironmentContextOption(String key, Source source,
                 prompt("schedule"),
                 prompt("activity"),
                 prompt("work_task"),
-                // 23~26：TLM 固定信息 world，默认必定进入
+                // 26~29：TLM 固定信息 world，默认必定进入
                 prompt("game_time"),
                 prompt("weather"),
                 prompt("dimension"),
                 prompt("biome"),
-                // 27：附近女仆身份，原附着于随机分类，默认随机
-                new EnvironmentContextOption("maid_self_talk_nearby_maid_identities",
+                // 30：附近女仆身份，原附着于随机分类，默认随机
+                new EnvironmentContextOption(KEY_IDENTITY,
                         Source.TLM_RANDOM, EnvironmentContextMode.RANDOM, Gate.IDENTITY_PROVIDER),
-                // 28~32：环境事件与实时自身状态，默认必定进入
-                new EnvironmentContextOption("maid_self_talk_recent_deaths",
+                // 31~35：环境事件与实时自身状态，默认必定进入
+                new EnvironmentContextOption(KEY_DEATHS,
                         Source.EVENT, EnvironmentContextMode.ALWAYS, Gate.EVENT_MASTER),
-                new EnvironmentContextOption("maid_self_talk_recent_player_hurt",
+                new EnvironmentContextOption(KEY_PLAYER_HURT,
                         Source.EVENT, EnvironmentContextMode.ALWAYS, Gate.EVENT_HURT),
-                new EnvironmentContextOption("maid_self_talk_recent_self_hurt",
+                new EnvironmentContextOption(KEY_SELF_HURT,
                         Source.EVENT, EnvironmentContextMode.ALWAYS, Gate.EVENT_SELF),
-                new EnvironmentContextOption("maid_self_talk_self_on_fire",
+                new EnvironmentContextOption(KEY_ON_FIRE,
                         Source.REALTIME, EnvironmentContextMode.ALWAYS, Gate.EVENT_SELF),
-                new EnvironmentContextOption("maid_self_talk_self_drowning",
-                        Source.REALTIME, EnvironmentContextMode.ALWAYS, Gate.EVENT_SELF));
+                new EnvironmentContextOption(KEY_DROWNING,
+                        Source.REALTIME, EnvironmentContextMode.ALWAYS, Gate.EVENT_SELF),
+                // 36~37：女仆本人事件（神龛复活、自身击杀），只记录到女仆本人，默认必定进入
+                new EnvironmentContextOption(KEY_SELF_REVIVE,
+                        Source.EVENT, EnvironmentContextMode.ALWAYS, Gate.EVENT_MASTER),
+                new EnvironmentContextOption(KEY_SELF_KILLS,
+                        Source.EVENT, EnvironmentContextMode.ALWAYS, Gate.EVENT_MASTER));
     }
 
     private static EnvironmentContextOption random(String key) {
@@ -112,7 +131,13 @@ public record EnvironmentContextOption(String key, Source source,
                 EnvironmentContextMode.ALWAYS, Gate.PROVIDER);
     }
 
-    /** 目录（固定 32 项，顺序即界面与渲染顺序） */
+    /** 饰品栏条目：本 mod 直接读取，不走 TLM 提供者 */
+    private static EnvironmentContextOption accessory(String key, Gate gate) {
+        return new EnvironmentContextOption(key, Source.ACCESSORY,
+                EnvironmentContextMode.RANDOM, gate);
+    }
+
+    /** 目录（固定 37 项，顺序即界面与渲染顺序） */
     public static final List<EnvironmentContextOption> ALL = buildAll();
 
     private static final Map<String, EnvironmentContextOption> BY_KEY = buildIndex();
@@ -130,7 +155,7 @@ public record EnvironmentContextOption(String key, Source source,
         return key == null ? null : BY_KEY.get(key);
     }
 
-    // ===== 事件条目与事件种类的对应（仅这三项） =====
+    // ===== 事件条目与事件种类的对应（仅这五项） =====
 
     public static final String KEY_DEATHS = "maid_self_talk_recent_deaths";
     public static final String KEY_PLAYER_HURT = "maid_self_talk_recent_player_hurt";
@@ -138,6 +163,19 @@ public record EnvironmentContextOption(String key, Source source,
     public static final String KEY_ON_FIRE = "maid_self_talk_self_on_fire";
     public static final String KEY_DROWNING = "maid_self_talk_self_drowning";
     public static final String KEY_IDENTITY = "maid_self_talk_nearby_maid_identities";
+    public static final String KEY_SELF_REVIVE = "maid_self_talk_recent_self_revive";
+    public static final String KEY_SELF_KILLS = "maid_self_talk_recent_self_kills";
+
+    // ===== 饰品条目 key =====
+
+    public static final String KEY_MAID_BAUBLES = "maid_self_talk_maid_baubles";
+    public static final String KEY_MAID_CURIOS = "maid_self_talk_maid_curios";
+    public static final String KEY_USER_CURIOS = "maid_self_talk_user_curios";
+
+    /** 是否为饰品条目 key（三个固定 key，且不依赖 {@code user_} 前缀判断） */
+    static boolean isAccessoryKey(String key) {
+        return KEY_MAID_BAUBLES.equals(key) || KEY_MAID_CURIOS.equals(key) || KEY_USER_CURIOS.equals(key);
+    }
 
     /** 事件条目 key → 事件种类；非事件条目返回 null */
     static SelfTalkEventBuffer.Kind eventKindOf(String key) {
@@ -150,6 +188,12 @@ public record EnvironmentContextOption(String key, Source source,
         if (KEY_SELF_HURT.equals(key)) {
             return SelfTalkEventBuffer.Kind.SELF_HURT;
         }
+        if (KEY_SELF_REVIVE.equals(key)) {
+            return SelfTalkEventBuffer.Kind.SELF_REVIVED;
+        }
+        if (KEY_SELF_KILLS.equals(key)) {
+            return SelfTalkEventBuffer.Kind.SELF_KILL;
+        }
         return null;
     }
 
@@ -159,6 +203,8 @@ public record EnvironmentContextOption(String key, Source source,
             case DEATH -> KEY_DEATHS;
             case PLAYER_HURT -> KEY_PLAYER_HURT;
             case SELF_HURT -> KEY_SELF_HURT;
+            case SELF_REVIVED -> KEY_SELF_REVIVE;
+            case SELF_KILL -> KEY_SELF_KILLS;
         };
     }
 }

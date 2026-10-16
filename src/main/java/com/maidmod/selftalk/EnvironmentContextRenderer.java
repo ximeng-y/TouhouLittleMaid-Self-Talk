@@ -45,7 +45,9 @@ final class EnvironmentContextRenderer {
         return switch (key) {
             case "game_time", "weather", "dimension", "biome" -> Theme.WORLD;
             case "user_name", "user_healthy", "user_position", "distance_to_user",
-                 "user_mainhand", "user_armor" -> Theme.OWNER;
+                 "user_mainhand", "user_armor",
+                 // 主人 Curios 条目的 key 不以 user_ 开头，必须显式识别，否则会落到默认的 SELF 段
+                 EnvironmentContextOption.KEY_USER_CURIOS -> Theme.OWNER;
             case "nearby_entities", EnvironmentContextOption.KEY_IDENTITY -> Theme.SURROUNDINGS;
             default -> Theme.SELF;
         };
@@ -449,6 +451,83 @@ final class EnvironmentContextRenderer {
         return String.join(zh ? "；" : "; ", parts);
     }
 
+    // ===== 饰品 =====
+
+    /**
+     * Curios 饰品快照：功能槽与外观槽两组，各自保持槽位顺序与重复堆叠。
+     * <p>
+     * 两组都为空表示「有槽位但都没戴」，是有效信息；本轮无数据不进入这里（采集侧直接返回 null）。
+     */
+    record AccessorySnapshot(List<ItemSnapshot> functional, List<ItemSnapshot> cosmetic) {
+    }
+
+    /**
+     * 饰品条目的普通模式取值（{@code - label: value} 里的 value，label 由
+     * {@link EnvironmentContextSettings#labelOf} 提供）。
+     * <p>
+     * Curios 两项把功能槽与外观槽分开写明，为空的一组也显式写 {@code Empty}，
+     * 避免主人与女仆、功能槽与外观槽的列表互相失去归属。
+     */
+    static String accessoryValue(String key, List<ItemSnapshot> functional, List<ItemSnapshot> cosmetic) {
+        if (EnvironmentContextOption.KEY_MAID_BAUBLES.equals(key)) {
+            return functional == null || functional.isEmpty() ? "Empty" : join(functional, false);
+        }
+        return "Functional slots: " + emptyIfBlank(functional)
+                + "; Cosmetic slots: " + emptyIfBlank(cosmetic);
+    }
+
+    private static String emptyIfBlank(List<ItemSnapshot> items) {
+        return items == null || items.isEmpty() ? "Empty" : join(items, false);
+    }
+
+    /**
+     * 饰品条目的自然语言表达：女仆原生饰品栏、女仆 Curios、主人 Curios 三项共用。
+     * <p>
+     * 与 {@link #items} 的关键差别：Curios 两项把功能槽与外观槽分成两组分别陈述，
+     * <b>一组为空只说明该组没戴</b>，绝不写成整个实体没戴饰品；
+     * 女仆原生饰品没有槽位分组，整栏作为一个列表表达。
+     * <p>
+     * 「功能槽」只是槽位种类名称，不声称物品正在生效；外观槽也不附加任何能力描述。
+     * 名称已由采集侧转义，本方法不截断、不聚合、不补入未被选中的内容。
+     * 主人条目的 key 不以 {@code user_} 开头，主语归属必须按固定 key 显式判定。
+     *
+     * @param functional 功能槽列表；原生饰品条目下即整栏列表
+     * @param cosmetic   外观槽列表；原生饰品条目下忽略
+     */
+    static String accessories(String key, List<ItemSnapshot> functional, List<ItemSnapshot> cosmetic,
+                              ContextLanguage lang) {
+        boolean zh = lang.isZh();
+        boolean owner = EnvironmentContextOption.KEY_USER_CURIOS.equals(key);
+        String subject = owner ? (zh ? "你的主人" : "your owner") : (zh ? "你" : "you");
+        // 英文所有格独立于主格：主语是 you，直接加 's 会拼成 You's
+        String possessive = owner ? "your owner's" : "your";
+        if (EnvironmentContextOption.KEY_MAID_BAUBLES.equals(key)) {
+            if (functional == null || functional.isEmpty()) {
+                return zh ? "你的女仆饰品栏中没有佩戴饰品。"
+                        : capitalize(possessive + " maid bauble slots hold no accessories.");
+            }
+            String list = join(functional, zh);
+            return zh ? "你的女仆饰品栏中佩戴着：" + list + "。"
+                    : capitalize(possessive + " maid bauble slots hold: " + list + ".");
+        }
+        return groupedPart(subject, possessive, functional, zh, true)
+                + groupedPart(subject, possessive, cosmetic, zh, false);
+    }
+
+    /** 单个 Curios 槽位组：有物品时列出，为空时明说该组没戴 */
+    private static String groupedPart(String subject, String possessive, List<ItemSnapshot> items,
+                                      boolean zh, boolean functional) {
+        String slotZh = functional ? "Curios 功能槽" : "Curios 外观槽";
+        String slotEn = functional ? "Curios functional slots" : "Curios cosmetic slots";
+        if (items == null || items.isEmpty()) {
+            return zh ? subject + "的" + slotZh + "中没有佩戴饰品。"
+                    : capitalize(possessive + " " + slotEn + " hold no accessories.");
+        }
+        String list = join(items, zh);
+        return zh ? subject + "的" + slotZh + "中佩戴着：" + list + "。"
+                : capitalize(possessive + " " + slotEn + " hold: " + list + ".");
+    }
+
     // ===== 状态效果 =====
 
     /**
@@ -601,8 +680,9 @@ final class EnvironmentContextRenderer {
     /**
      * 事件归并后的自然语言短段（按记录顺序，不输出编号或字段名）。
      * <p>
-     * 分组规则见 {@link SelfTalkEventBuffer#group}：只归并相邻同源记录，死亡不归并。
-     * 这里只负责按目标语言成句——同样的分组在不同语言下渲染，事实与时间都不变。
+     * 分组规则见 {@link SelfTalkEventBuffer#group}：只归并相邻同源的受伤记录，
+     * 死亡、复活与击杀不归并。这里只负责按目标语言成句——同样的分组在不同语言下渲染，
+     * 事实与时间都不变。
      * <p>
      * 归并后只说「多次」，绝不输出精确受击次数：冷却期内的受击本就没有记录，条数会被误读为真实次数。
      */
@@ -627,9 +707,22 @@ final class EnvironmentContextRenderer {
             return lang.isZh() ? relative + "，" + death.zhText() + "。"
                     : capitalize(relative + ", " + death.enText() + ".");
         }
+        if (event.fact() instanceof SelfTalkEventBuffer.ReviveFact) {
+            return lang.isZh() ? relative + "，你通过神龛复活了。"
+                    : capitalize(relative + ", you were revived at a shrine.");
+        }
+        if (event.fact() instanceof SelfTalkEventBuffer.KillFact kill) {
+            return lang.isZh() ? relative + "，你击杀了" + quote(killTargetName(kill, lang), lang) + "。"
+                    : capitalize(relative + ", you killed " + quote(killTargetName(kill, lang), lang) + ".");
+        }
         SelfTalkEventBuffer.HurtFact hurt = (SelfTalkEventBuffer.HurtFact) event.fact();
         return lang.isZh() ? relative + "，" + subject(hurt, lang) + verb(hurt, event, lang) + "。"
                 : capitalize(relative + ", " + subject(hurt, lang) + " " + verb(hurt, event, lang) + ".");
+    }
+
+    /** 击杀目标名称：中文环境用中文名，其余合法语言统一用英文快照；快照在事发时定格 */
+    private static String killTargetName(SelfTalkEventBuffer.KillFact kill, ContextLanguage lang) {
+        return lang.isZh() ? kill.zhTargetName() : kill.enTargetName();
     }
 
     /**
@@ -637,7 +730,7 @@ final class EnvironmentContextRenderer {
      * <p>
      * 措辞固定为「多次」／{@code multiple times}，<b>不</b>使用「连续多次」或 {@code continuously}，
      * 也不引入「连续受伤」的时间间隔阈值——冷却期内的受击本就没有记录，说「连续」没有事实依据。
-     * 死亡不参与归并，因此这里只可能是受伤事实。
+     * 死亡、复活与击杀不参与归并，因此这里只可能是受伤事实。
      */
     private static String repeatedSentence(SelfTalkEventBuffer.Event event, String relative, ContextLanguage lang) {
         SelfTalkEventBuffer.HurtFact hurt = (SelfTalkEventBuffer.HurtFact) event.fact();

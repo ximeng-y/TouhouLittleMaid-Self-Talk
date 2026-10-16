@@ -271,7 +271,7 @@ public final class PlayerSettingsStore {
     /**
      * 该玩家保存的环境上下文覆盖表（独立快照，不泄漏存档内部的可变 Map）。
      * <p>
-     * 只含与目录默认模式不同的项，因此可能少于 32 项，也可能是空表。
+     * 只含与目录默认模式不同的项，因此可能少于 35 项，也可能是空表。
      */
     public static Map<String, EnvironmentContextMode> getEnvironmentContextOverrides(MinecraftServer server, UUID playerUuid) {
         if (playerUuid == null) {

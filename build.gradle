@@ -52,6 +52,11 @@ repositories {
         url = 'https://api.modrinth.com/maven'
         content { includeGroup 'maven.modrinth' }
     }
+    maven {
+        name = 'IllusiveC4'
+        url = 'https://maven.theillusivec4.top/'
+        content { includeGroup 'top.theillusivec4.curios' }
+    }
 }
 
 dependencies {
@@ -59,6 +64,9 @@ dependencies {
     // 必须 fg.deobf：Modrinth 1.20.1 发布物是 SRG 名，不 deobf 编译不过
     implementation fg.deobf('maven.modrinth:touhou-little-maid:1.5.3-forge+mc1.20.1')
     compileOnly fg.deobf('maven.modrinth:cloth-config:11.1.136+forge')
+    // Curios API（仅编译期：饰品读取类引用其 API，运行时不打包、不声明前置；
+    // 未安装 Curios 时功能门拦截，不加载读取实现，不影响模组功能）
+    compileOnly fg.deobf('top.theillusivec4.curios:curios-forge:5.14.1+1.20.1:api')
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 }
 

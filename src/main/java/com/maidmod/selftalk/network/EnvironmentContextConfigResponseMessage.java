@@ -22,7 +22,7 @@ import java.util.function.Supplier;
 /**
  * S2C：环境上下文设置的权威全量快照。
  * <p>
- * 每次响应都含完整 32 项（含禁用项）：<b>不隐藏</b>不可用条目，界面只置灰并给出禁用说明。
+ * 每次响应都含完整 35 项（含禁用项）：<b>不隐藏</b>不可用条目，界面只置灰并给出禁用说明。
  * 回传的 mode 是「已存偏好补默认值」的结果，不是被管理员强制覆盖后的有效模式——
  * 玩家保存的选择必须在功能恢复后原样生效。
  *
@@ -32,10 +32,10 @@ import java.util.function.Supplier;
  *                     为 false 时界面整页禁用，禁用原因优先显示「玩家自定义配置被禁用」，
  *                     因此不必逐行改写 availability
  * @param naturalLanguageEnabled 「环境信息自然语言化」的<b>已存偏好</b>，不是管理员门控后的有效值——
- *                     与 32 项模式同口径：管理员禁用时界面要能显示玩家原来的选择，
+ *                     与 35 项模式同口径：管理员禁用时界面要能显示玩家原来的选择，
  *                     功能恢复后原样生效
  * @param historyContextModeId 历史上下文模式的<b>已存偏好</b>存储值（口径同上：不回传管理员门控后的有效值）
- * @param rows         32 行状态（顺序即目录顺序）。两个开关都不走这里，不伪装成第 33、34 项
+ * @param rows         35 行状态（顺序即目录顺序）。两个开关都不走这里，不伪装成第 33、34 项
  */
 public class EnvironmentContextConfigResponseMessage {
 
@@ -141,12 +141,12 @@ public class EnvironmentContextConfigResponseMessage {
         buf.writeUUID(msg.sessionId);
         buf.writeVarLong(msg.seq);
         buf.writeBoolean(msg.adminEnabled);
-        // 总开关排在 adminEnabled 之后、行表之前：两个布尔字段与 32 项行序无关
+        // 总开关排在 adminEnabled 之后、行表之前：两个布尔字段与 35 项行序无关
         buf.writeBoolean(msg.naturalLanguageEnabled);
         // 历史上下文模式与前两个字段同属标题区状态，排在行表之前
         buf.writeUtf(msg.historyContextModeId == null ? HistoryContextMode.FULL.id() : msg.historyContextModeId,
                 HistoryContextModeSetMessage.MAX_MODE_LENGTH);
-        // 数量先校验再写入：解码侧只会读到 0~32 行，超量包在编码侧就不可能产生
+        // 数量先校验再写入：解码侧只会读到 0~35 行，超量包在编码侧就不可能产生
         int size = msg.rows == null ? 0 : msg.rows.size();
         if (size != EnvironmentContextOption.ALL.size()) {
             buf.writeByte(0);

@@ -1,6 +1,7 @@
 package com.maidmod.selftalk.client;
 
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.client.SelfTalkClientConfig;
 import com.maidmod.selftalk.network.SelfTalkPackets;
 import com.maidmod.selftalk.network.CustomPromptConfigRequestMessage;
 import com.maidmod.selftalk.network.EnvironmentContextConfigResponseMessage;
@@ -83,6 +84,8 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private boolean toolFeatureEnabled = true;
     private boolean toolGlobalEnabled = false;
     private boolean toolMaidEnabled = false;
+    // ===== 本地气泡显示状态 =====
+    private boolean waitingBubblesEnabled = SelfTalkClientConfig.showAutonomousWaitingBubbles();
 
     // ===== 控件 =====
     private Button globalButton;
@@ -93,6 +96,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private Button sleepMaidButton;
     private Button toolGlobalButton;
     private Button toolMaidButton;
+    private Button waitingBubblesButton;
     private GuardedMultiLineEditBox globalPromptBox;
     private GuardedMultiLineEditBox maidPromptBox;
     private Button overrideButton;
@@ -152,13 +156,13 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         this.rightX = this.leftX + buttonW + COLUMN_GAP;
         this.panelWidth = panelW;
 
-        // 垂直：按钮列 8 枚（组内步进 20、组间步进 28）总高 184，矮屏时顶部钳制保证标题可见
-        this.colTop = Math.max(this.height / 2 - 92, 30);
+        // 垂直：按钮列 9 枚（组内步进 24、组间 20px 间隔）总高 196，矮屏时顶部钳制保证标题可见
+        this.colTop = Math.max(this.height / 2 - 98, 30);
         int leftX = this.leftX;
         int rightX = this.rightX;
         int colTop = this.colTop;
 
-        // 组内 0 间隙（步进 20）、组间 8px（步进 28）；现有四组相对顺序不变，Tool 组追加在最后。
+        // 组内 0 间隙（步进 20）；组间 4px（步进 24），现有四组相对顺序不变，Tool 组在最后，本地气泡按钮追加在列尾。
         // Tool 组的两枚按钮共用一条提示，与本列其余按钮一样在调用后挂 tooltip
         Tooltip toolTooltip = Tooltip.create(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.tool_cache_tooltip"));
@@ -170,29 +174,34 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                 "config.maid_self_talk.screen.player_settings.maid_toggle", maidEnabled, b -> toggleMaid());
         this.maidButton.setTooltip(Tooltip.create(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.maid_toggle.tooltip")));
-        this.interGlobalButton = addLeftButton(leftX, colTop, 48, buttonW, 20,
+        this.interGlobalButton = addLeftButton(leftX, colTop, 44, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.inter_global", interGlobalEnabled, b -> toggleInterGlobal());
         this.interGlobalButton.setTooltip(Tooltip.create(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.inter_global.tooltip")));
-        this.interMaidButton = addLeftButton(leftX, colTop, 68, buttonW, 20,
+        this.interMaidButton = addLeftButton(leftX, colTop, 64, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.inter_maid_toggle", interMaidEnabled, b -> toggleInterMaid());
         this.interMaidButton.setTooltip(Tooltip.create(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.inter_maid_toggle.tooltip")));
         // 注意极性：全局「开启」= 安静，故提示文案是「开启后不说话」而非「开启后说话」
-        this.sleepGlobalButton = addLeftButton(leftX, colTop, 96, buttonW, 20,
+        this.sleepGlobalButton = addLeftButton(leftX, colTop, 88, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.sleep_global", sleepGlobalEnabled, b -> toggleSleepGlobal());
         this.sleepGlobalButton.setTooltip(Tooltip.create(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.sleep_global.tooltip")));
-        this.sleepMaidButton = addLeftButton(leftX, colTop, 116, buttonW, 20,
+        this.sleepMaidButton = addLeftButton(leftX, colTop, 108, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.sleep_maid_toggle", sleepMaidEnabled, b -> toggleSleepMaid());
         this.sleepMaidButton.setTooltip(Tooltip.create(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.sleep_maid_toggle.tooltip")));
-        this.toolGlobalButton = addLeftButton(leftX, colTop, 144, buttonW, 20,
+        this.toolGlobalButton = addLeftButton(leftX, colTop, 132, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.tool_global", toolGlobalEnabled, b -> toggleToolGlobal());
         this.toolGlobalButton.setTooltip(toolTooltip);
-        this.toolMaidButton = addLeftButton(leftX, colTop, 164, buttonW, 20,
+        this.toolMaidButton = addLeftButton(leftX, colTop, 152, buttonW, 20,
                 "config.maid_self_talk.screen.player_settings.tool_maid_toggle", toolMaidEnabled, b -> toggleToolMaid());
         this.toolMaidButton.setTooltip(toolTooltip);
+        // 本地气泡显示按钮：只读本地配置，不经过服务端设置链
+        this.waitingBubblesButton = addLeftButton(leftX, colTop, 176, buttonW, 20,
+                "config.maid_self_talk.screen.player_settings.waiting_bubbles", waitingBubblesEnabled, b -> toggleWaitingBubbles());
+        this.waitingBubblesButton.setTooltip(Tooltip.create(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.waiting_bubbles.tooltip")));
 
         // 右侧 Prompt 面板：标题 + 输入框 + 覆盖开关（贴在按钮列同一顶部起点）。
         // 各段之间预留 12px 以上：MultiLineEditBox 的字数上限文字由基类画在 getY()+height+4 处
@@ -254,7 +263,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
      * 否则关闭界面时 flush 会把「显示空 ≠ 基线」误判为用户清空，
      * 静默发出空串 Set 包抹掉已保存的 Prompt（数据丢失路径）。
      * <p>
-     * 浮层状态（开关、滚动偏移、32 项状态、焦点、session、seq、同步标志）由浮层自身持有，
+     * 浮层状态（开关、滚动偏移、35 项状态、焦点、session、seq、同步标志）由浮层自身持有，
      * 这里只让它按新尺寸重算几何——<b>不</b>新建会话、不把默认值覆盖到已收到的设置上。
      */
     @Override
@@ -381,6 +390,13 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         SelfTalkPackets.CHANNEL.sendToServer(new ToolConfigSetMessage(Optional.of(this.maid.getUUID()), next));
         toolMaidEnabled = next;
         dirtyTool = true;
+        refreshButtonState();
+    }
+
+    private void toggleWaitingBubbles() {
+        boolean next = !waitingBubblesEnabled;
+        SelfTalkClientConfig.setShowAutonomousWaitingBubbles(next);
+        waitingBubblesEnabled = next;
         refreshButtonState();
     }
 
@@ -622,7 +638,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private void refreshButtonState() {
         if (this.globalButton == null || this.maidButton == null || this.interGlobalButton == null
                 || this.interMaidButton == null || this.sleepGlobalButton == null || this.sleepMaidButton == null
-                || this.toolGlobalButton == null || this.toolMaidButton == null
+                || this.toolGlobalButton == null || this.toolMaidButton == null || this.waitingBubblesButton == null
                 || this.globalPromptBox == null || this.maidPromptBox == null || this.overrideButton == null
                 || this.environmentContextButton == null) {
             return;
@@ -637,6 +653,8 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         // Tool：受管理员双重闸门；单只再叠加全局开关（全局关时单只不可配置，与睡觉组同思路、与自话组同形）
         this.toolGlobalButton.active = this.adminEnabled && this.toolFeatureEnabled;
         this.toolMaidButton.active = this.adminEnabled && this.toolFeatureEnabled && this.toolGlobalEnabled;
+        // 本地气泡显示：始终可点，不受管理员与任何服务端开关控制
+        this.waitingBubblesButton.active = true;
         // Prompt 控件：管理员关玩家配置时整体置灰；单只输入框在覆盖开启时仍可编辑（已填内容保留）
         this.globalPromptBox.editable = this.promptAdminEnabled;
         this.maidPromptBox.editable = this.promptAdminEnabled;
@@ -658,6 +676,8 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                 "config.maid_self_talk.screen.player_settings.tool_global", onOff(toolGlobalEnabled)));
         this.toolMaidButton.setMessage(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.tool_maid_toggle", onOff(toolMaidEnabled)));
+        this.waitingBubblesButton.setMessage(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.waiting_bubbles", onOff(waitingBubblesEnabled)));
         this.overrideButton.setMessage(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.custom_prompt.override", onOff(overrideEnabled)));
         // 环境上下文入口始终可点（管理员禁用时也要能进去看说明）
