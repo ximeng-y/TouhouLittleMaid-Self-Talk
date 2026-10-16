@@ -262,6 +262,19 @@ public final class SelfTalkContexts {
      */
     public static String renderConfiguredUserMessage(String basePrompt, String language,
                                                      EnvironmentSnapshot snapshot) {
+        return renderConfiguredUserMessage(basePrompt, language, snapshot, null);
+    }
+
+    /**
+     * 同上，并在动态资料区追加一段已渲染好的人设召回块。
+     * <p>
+     * 插入位置固定在「当前情境」之后、「感知背景」之前——人设召回属于本轮动态资料，
+     * 与当前情境相邻，由模型结合情境自行取用；空块时整段不出现，不改变既有渲染顺序。
+     * 块本身自带独立的人设资料边界与分类名称（见 {@link MaidPersonaRuntime#buildRecalledBlock}），
+     * 内容不伪装成过去的 assistant 发言。
+     */
+    public static String renderConfiguredUserMessage(String basePrompt, String language,
+                                                     EnvironmentSnapshot snapshot, String personaBlock) {
         ContextLanguage lang = snapshot.language();
         StringBuilder message = new StringBuilder();
         boolean hasFixed = appendFixedContext(message, snapshot.maid(), snapshot.selected(), snapshot.rendered(),
@@ -276,6 +289,9 @@ public final class SelfTalkContexts {
         }
         appendSituationalContext(message, snapshot.rendered(), snapshot.selected(), lang,
                 snapshot.naturalLanguage(), snapshot.naturalLanguage() && snapshot.perceptionBody().isEmpty());
+        if (personaBlock != null && !personaBlock.isBlank()) {
+            message.append(personaBlock);
+        }
         appendPerceptionContext(message, snapshot.perceptionBody(), snapshot.naturalLanguage(), lang);
         return message.toString();
     }

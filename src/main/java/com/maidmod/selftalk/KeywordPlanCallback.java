@@ -40,20 +40,22 @@ public class KeywordPlanCallback extends LLMCallback {
     /**
      * 规划结果。
      *
-     * @param ok        是否解析成功（空数组算成功）
-     * @param keywords  解析出的关键词（成功时非 null，可能为空）
-     * @param errorText 供纠正提示使用的简短具体错误说明（格式错误时非 null；
-     *                  传输类失败为 {@code null}，上层据此区分「不消耗纠正预算」的出口）
-     * @param rawOutput 模型本次的原始输出（供纠正请求回显；工具调用或传输失败时为简短说明）
+     * @param ok              是否解析成功（两组都为空数组也算成功）
+     * @param historyKeywords 用于历史召回的关键词（成功时非 null，可能为空）
+     * @param personaKeywords 用于人设召回的关键词（成功时非 null，可能为空）
+     * @param errorText       供纠正提示使用的简短具体错误说明（格式错误时非 null；
+     *                        传输类失败为 {@code null}，上层据此区分「不消耗纠正预算」的出口）
+     * @param rawOutput       模型本次的原始输出（供纠正请求回显；工具调用或传输失败时为简短说明）
      */
-    public record Outcome(boolean ok, List<String> keywords, String errorText, String rawOutput) {
+    public record Outcome(boolean ok, List<String> historyKeywords, List<String> personaKeywords,
+                          String errorText, String rawOutput) {
 
-        static Outcome success(List<String> keywords, String rawOutput) {
-            return new Outcome(true, keywords, null, rawOutput);
+        static Outcome success(List<String> historyKeywords, List<String> personaKeywords, String rawOutput) {
+            return new Outcome(true, historyKeywords, personaKeywords, null, rawOutput);
         }
 
         static Outcome failure(String errorText, String rawOutput) {
-            return new Outcome(false, List.of(), errorText, rawOutput);
+            return new Outcome(false, List.of(), List.of(), errorText, rawOutput);
         }
     }
 
@@ -92,7 +94,7 @@ public class KeywordPlanCallback extends LLMCallback {
         // 用 getChatText() 解析而不是 toString()——后者会追加 TTS 分隔部分（"chat---tts"）。
         String raw = responseChat.getChatText();
         KeywordPlanParser.Result result = KeywordPlanParser.parse(raw);
-        deliver(result.ok() ? Outcome.success(result.keywords(), raw)
+        deliver(result.ok() ? Outcome.success(result.historyKeywords(), result.personaKeywords(), raw)
                 : Outcome.failure(result.error(), raw));
     }
 

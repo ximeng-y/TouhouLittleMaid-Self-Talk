@@ -216,42 +216,56 @@ public final class HistoryCoreTest {
     // ===== 关键词 JSON 与纠正 =====
 
     private static void testKeywordJson() {
-        KeywordPlanParser.Result ok = KeywordPlanParser.parse("{\"keywords\":[\"下界\",\"恶魂\"]}");
+        KeywordPlanParser.Result ok = KeywordPlanParser.parse(
+                "{\"history_keywords\":[\"下界\",\"恶魂\"],\"persona_keywords\":[\"钓鱼\"]}");
         check("正常 JSON 解析成功", ok.error() == null);
-        check("正常 JSON 关键词正确", ok.keywords().equals(List.of("下界", "恶魂")));
+        check("正常 JSON 关键词正确", ok.historyKeywords().equals(List.of("下界", "恶魂")));
+        check("正常 JSON 人设关键词正确", ok.personaKeywords().equals(List.of("钓鱼")));
 
-        KeywordPlanParser.Result fenced =
-                KeywordPlanParser.parse("```json\n{\"keywords\":[\"下界\"]}\n```");
-        check("一层代码围栏可剥除", fenced.error() == null && fenced.keywords().equals(List.of("下界")));
+        KeywordPlanParser.Result fenced = KeywordPlanParser.parse(
+                "```json\n{\"history_keywords\":[\"下界\"],\"persona_keywords\":[]}\n```");
+        check("一层代码围栏可剥除",
+                fenced.error() == null && fenced.historyKeywords().equals(List.of("下界")));
 
-        KeywordPlanParser.Result empty = KeywordPlanParser.parse("{\"keywords\":[]}");
-        check("空数组合法", empty.error() == null && empty.keywords().isEmpty());
+        KeywordPlanParser.Result empty =
+                KeywordPlanParser.parse("{\"history_keywords\":[],\"persona_keywords\":[]}");
+        check("空数组合法", empty.error() == null && empty.historyKeywords().isEmpty());
 
         KeywordPlanParser.Result over = KeywordPlanParser.parse(
-                "{\"keywords\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\"]}");
+                "{\"history_keywords\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\"],\"persona_keywords\":[]}");
         check("超六词截取而非报错",
-                over.error() == null && over.keywords().size() == HistoryRetrievalIndex.MAX_KEYWORDS);
+                over.error() == null && over.historyKeywords().size() == HistoryRetrievalIndex.MAX_KEYWORDS);
 
-        KeywordPlanParser.Result dup = KeywordPlanParser.parse("{\"keywords\":[\"下界\",\" 下界 \"]}");
+        KeywordPlanParser.Result dup = KeywordPlanParser.parse(
+                "{\"history_keywords\":[\"下界\",\" 下界 \"],\"persona_keywords\":[]}");
         check("去首尾空白并忽略大小写去重",
-                dup.error() == null && dup.keywords().equals(List.of("下界")));
+                dup.error() == null && dup.historyKeywords().equals(List.of("下界")));
 
-        KeywordPlanParser.Result blank = KeywordPlanParser.parse("{\"keywords\":[\"\",\"  \",\"下界\"]}");
-        check("空项被剔除", blank.error() == null && blank.keywords().equals(List.of("下界")));
+        KeywordPlanParser.Result blank = KeywordPlanParser.parse(
+                "{\"history_keywords\":[\"\",\"  \",\"下界\"],\"persona_keywords\":[]}");
+        check("空项被剔除", blank.error() == null && blank.historyKeywords().equals(List.of("下界")));
 
         check("缺字段被拒", KeywordPlanParser.parse("{}").error() != null);
-        check("错误类型被拒", KeywordPlanParser.parse("{\"keywords\":\"下界\"}").error() != null);
-        check("非字符串项被拒", KeywordPlanParser.parse("{\"keywords\":[1,2]}").error() != null);
-        check("截断 JSON 被拒", KeywordPlanParser.parse("{\"keywords\":[\"下界\"").error() != null);
-        check("尾随文字被拒", KeywordPlanParser.parse("{\"keywords\":[\"下界\"]} 就这样").error() != null);
-        check("第二个 JSON 被拒",
-                KeywordPlanParser.parse("{\"keywords\":[\"下界\"]}{\"keywords\":[\"恶魂\"]}").error() != null);
-        check("单引号不被接受", KeywordPlanParser.parse("{'keywords':['下界']}").error() != null);
-        check("尾随逗号不被接受", KeywordPlanParser.parse("{\"keywords\":[\"下界\",]}").error() != null);
+        check("少一组被拒", KeywordPlanParser.parse("{\"history_keywords\":[\"下界\"]}").error() != null);
+        check("错误类型被拒", KeywordPlanParser.parse(
+                "{\"history_keywords\":\"下界\",\"persona_keywords\":[]}").error() != null);
+        check("非字符串项被拒", KeywordPlanParser.parse(
+                "{\"history_keywords\":[1,2],\"persona_keywords\":[]}").error() != null);
+        check("截断 JSON 被拒", KeywordPlanParser.parse("{\"history_keywords\":[\"下界\"").error() != null);
+        check("尾随文字被拒", KeywordPlanParser.parse(
+                "{\"history_keywords\":[\"下界\"],\"persona_keywords\":[]} 就这样").error() != null);
+        check("第二个 JSON 被拒", KeywordPlanParser.parse(
+                "{\"history_keywords\":[\"下界\"],\"persona_keywords\":[]}"
+                        + "{\"history_keywords\":[\"恶魂\"],\"persona_keywords\":[]}").error() != null);
+        check("单引号不被接受", KeywordPlanParser.parse(
+                "{'history_keywords':['下界'],'persona_keywords':[]}").error() != null);
+        check("尾随逗号不被接受", KeywordPlanParser.parse(
+                "{\"history_keywords\":[\"下界\",],\"persona_keywords\":[]}").error() != null);
         check("重复字段被拒", KeywordPlanParser.parse(
-                "{\"keywords\":[\"下界\"],\"keywords\":[\"恶魂\"]}").error() != null);
+                "{\"history_keywords\":[\"下界\"],\"history_keywords\":[\"恶魂\"],\"persona_keywords\":[]}")
+                .error() != null);
         check("无关额外字段可忽略", KeywordPlanParser.parse(
-                "{\"note\":\"x\",\"keywords\":[\"下界\"]}").error() == null);
+                "{\"note\":\"x\",\"history_keywords\":[\"下界\"],\"persona_keywords\":[]}").error() == null);
         check("裸字符串被拒", KeywordPlanParser.parse("\"下界\"").error() != null);
         check("数组顶层被拒", KeywordPlanParser.parse("[\"下界\"]").error() != null);
         check("空输入被拒", KeywordPlanParser.parse("").error() != null);

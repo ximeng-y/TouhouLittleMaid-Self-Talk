@@ -90,6 +90,26 @@ public record MaidPersonaDraft(String identity, String personality, String backg
     }
 
     /**
+     * 四栏是否存在任一「非空白」内容——运行时判定「这只女仆有没有可用人设」的口径。
+     * <p>
+     * 与 {@link #isEmpty()} 刻意分开：存储口径按严格空（纯空白是玩家有意输入，不删存档标签），
+     * 运行时口径按空白（只有空格的内容撑不起一次聊天）。任一栏非空白即算有，
+     * 也就是说只有背景或只有爱好同样算有，允许继续发起请求。
+     */
+    public boolean hasAnyContent() {
+        return !identity.isBlank() || !personality.isBlank() || !background.isBlank() || !hobbies.isBlank();
+    }
+
+    /**
+     * 是否含可召回的动态人设内容（背景或爱好任一非空白）。
+     * <p>
+     * 固定注入的身份／性格不参与召回，因此动态人设是否可用只看这两栏。
+     */
+    public boolean hasDynamicContent() {
+        return !background.isBlank() || !hobbies.isBlank();
+    }
+
+    /**
      * 从 AI 数据 tag 读草稿。标签不存在（含首次读档、清空后的存档）时返回 {@link #EMPTY}；
      * 标签存在但缺少某栏时该栏为空。调用方必须<b>整份替换</b>内存值，
      * 不能因标签缺失而保留上一次的内容。
