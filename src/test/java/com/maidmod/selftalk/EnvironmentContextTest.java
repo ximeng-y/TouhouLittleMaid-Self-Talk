@@ -43,10 +43,10 @@ public final class EnvironmentContextTest {
         System.out.println("EnvironmentContextTest passed: " + checks + " checks");
     }
 
-    /** 1. 35 个 key 唯一，18 项默认随机、17 项默认必定进入，且不含默认 NEVER */
+    /** 1. 37 个 key 唯一，18 项默认随机、19 项默认必定进入，且不含默认 NEVER */
     private static void catalogShape() {
         List<EnvironmentContextOption> all = EnvironmentContextOption.ALL;
-        check(all.size() == 35, "目录应为 35 项，实际 " + all.size());
+        check(all.size() == 37, "目录应为 37 项，实际 " + all.size());
         Set<String> keys = new LinkedHashSet<>();
         int randomDefault = 0;
         int alwaysDefault = 0;
@@ -62,7 +62,7 @@ public final class EnvironmentContextTest {
             check(EnvironmentContextOption.byKey(option.key()) == option, "byKey 回查失败：" + option.key());
         }
         check(randomDefault == 18, "默认随机应为 18 项，实际 " + randomDefault);
-        check(alwaysDefault == 17, "默认必定进入应为 17 项，实际 " + alwaysDefault);
+        check(alwaysDefault == 19, "默认必定进入应为 19 项，实际 " + alwaysDefault);
         check(EnvironmentContextOption.byKey("not_in_catalog") == null, "目录外 key 应返回 null");
         check(EnvironmentContextOption.byKey(null) == null, "null key 应返回 null");
     }
@@ -197,12 +197,16 @@ public final class EnvironmentContextTest {
                         == SelfTalkEventBuffer.Kind.PLAYER_HURT, "玩家受伤条目 → PLAYER_HURT");
         check(EnvironmentContextOption.eventKindOf(EnvironmentContextOption.KEY_SELF_HURT)
                         == SelfTalkEventBuffer.Kind.SELF_HURT, "自身受伤条目 → SELF_HURT");
+        check(EnvironmentContextOption.eventKindOf(EnvironmentContextOption.KEY_SELF_REVIVE)
+                        == SelfTalkEventBuffer.Kind.SELF_REVIVED, "神龛复活条目 → SELF_REVIVED");
+        check(EnvironmentContextOption.eventKindOf(EnvironmentContextOption.KEY_SELF_KILLS)
+                        == SelfTalkEventBuffer.Kind.SELF_KILL, "自身击杀条目 → SELF_KILL");
         check(EnvironmentContextOption.eventKindOf("healthy") == null, "非事件条目无事件种类");
         check(EnvironmentContextOption.eventKindOf(EnvironmentContextOption.KEY_ON_FIRE) == null,
                 "着火是实时状态，不是事件");
         check(EnvironmentContextOption.eventKindOf(EnvironmentContextOption.KEY_DROWNING) == null,
                 "缺氧是实时状态，不是事件");
-        // 三个事件条目与三个事件种类一一对应
+        // 五个事件条目与五个事件种类一一对应
         Set<String> eventEntryKeys = new LinkedHashSet<>();
         for (EnvironmentContextOption option : EnvironmentContextOption.ALL) {
             if (option.source() == EnvironmentContextOption.Source.EVENT) {
@@ -211,7 +215,7 @@ public final class EnvironmentContextTest {
                         "事件条目应有对应种类：" + option.key());
             }
         }
-        check(eventEntryKeys.size() == 3, "事件条目应为 3 项，实际 " + eventEntryKeys.size());
+        check(eventEntryKeys.size() == 5, "事件条目应为 5 项，实际 " + eventEntryKeys.size());
         for (SelfTalkEventBuffer.Kind kind : SelfTalkEventBuffer.Kind.values()) {
             check(eventEntryKeys.contains(EnvironmentContextOption.keyOfEventKind(kind)),
                     "事件种类缺少对应条目：" + kind);
