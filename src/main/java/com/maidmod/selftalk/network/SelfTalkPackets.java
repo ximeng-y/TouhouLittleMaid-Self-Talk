@@ -6,8 +6,9 @@ import com.maidmod.selftalk.EnvironmentContextMode;
 import com.maidmod.selftalk.EnvironmentContextOption;
 import com.maidmod.selftalk.EnvironmentContextSettings;
 import com.maidmod.selftalk.HistoryContextMode;
-import com.maidmod.selftalk.MaidPersonaDraft;
+import com.maidmod.selftalk.MaidPersonaConfig;
 import com.maidmod.selftalk.MaidPersonaHost;
+import com.maidmod.selftalk.MaidPersonaRuntime;
 import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.PlayerSettingsStore;
 import com.maidmod.selftalk.SelfTalkAttachments;
@@ -50,8 +51,10 @@ public final class SelfTalkPackets {
         // 以及新等待气泡 serializer 类型 ID（maid_self_talk:autonomous_waiting）；
         // v11：环境上下文目录由 35 项扩展至 37 项（新增神龛复活、女仆自身击杀），
         // 响应包行数与取值域随之变化，包结构不变；
+        // v12：人设保存 payload 扩展为「模式 + 四栏」整份配置并带女仆 UUID，回包同样带 UUID
+        // 与服务端确认后的完整配置；
         // 同样不做向后兼容：NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
-        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("11");
+        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("12");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,
                 SelfTalkPackets::handleConfigRequest);
         registrar.playToServer(SelfTalkConfigSetPayload.TYPE, SelfTalkConfigSetPayload.STREAM_CODEC,
@@ -533,7 +536,7 @@ public final class SelfTalkPackets {
     }
 
     /**
-     * 服务端：结构化人设草稿保存（整份替换）。
+     * 服务端：女仆人设配置保存（模式 + 四栏，整份替换）。
      * <p>
      * 与其它设置包共用每秒限流，但<b>一律回包</b>：结果码把这个请求为何没写进去如实告诉客户端，
      * 页面不会把「包已发出」当成保存成功。实体查找与写入都在服务端主线程执行
@@ -552,37 +555,49 @@ public final class SelfTalkPackets {
         });
     }
 
-    /** 实际写入路径：按顺序校验后整份替换宿主草稿，返回固定结果码对应回包（null = 无法匹配的请求，丢弃） */
+    /** 实际写入路径：按顺序校验后整份替换宿主配置，返回固定结果码对应回包（null = 无法匹配的请求，丢弃） */
     private static MaidPersonaSaveResponsePayload savePersona(ServerPlayer player, MaidPersonaSavePayload payload) {
         UUID requestId = payload.requestId();
+        UUID maidUuid = payload.maidUuid();
         if (requestId == null) {
             // 请求 id 缺失则回包无从匹配，直接丢弃（页面在等待超时后自行解除，不会误判为成功）
             return null;
         }
+        int entityId = payload.entityId();
         if (!allowConfigPacket(player.getUUID())) {
-            return new MaidPersonaSaveResponsePayload(requestId, false,
+            return MaidPersonaSaveResponsePayload.failure(requestId, entityId, maidUuid,
                     MaidPersonaSaveResponsePayload.RESULT_RATE_LIMITED);
         }
-        if (!(player.serverLevel().getEntity(payload.entityId()) instanceof EntityMaid maid)) {
-            return new MaidPersonaSaveResponsePayload(requestId, false,
+        if (!(player.serverLevel().getEntity(entityId) instanceof EntityMaid maid)) {
+            return MaidPersonaSaveResponsePayload.failure(requestId, entityId, maidUuid,
+                    MaidPersonaSaveResponsePayload.RESULT_NOT_LOADED);
+        }
+        // 双重身份校验：实体 id 只在单连接、单维度内有效，必须同时核对 UUID，
+        // 否则实体 id 复用（旧女仆卸载、新女仆顶上同一 id）会让请求改到另一只女仆身上
+        if (maidUuid == null || !maid.getUUID().equals(maidUuid)) {
+            return MaidPersonaSaveResponsePayload.failure(requestId, entityId, maidUuid,
                     MaidPersonaSaveResponsePayload.RESULT_NOT_LOADED);
         }
         if (!maid.isOwnedBy(player)) {
-            return new MaidPersonaSaveResponsePayload(requestId, false,
+            return MaidPersonaSaveResponsePayload.failure(requestId, entityId, maidUuid,
                     MaidPersonaSaveResponsePayload.RESULT_NOT_OWNER);
         }
-        MaidPersonaDraft draft = payload.toDraft();
-        if (!draft.withinLimit()) {
-            return new MaidPersonaSaveResponsePayload(requestId, false,
+        MaidPersonaConfig config = payload.toConfig();
+        if (!config.draft().withinLimit()) {
+            // 模式与内容一次成形：长度只按四栏合计判定（模式标签是固定短值）
+            return MaidPersonaSaveResponsePayload.failure(requestId, entityId, maidUuid,
                     MaidPersonaSaveResponsePayload.RESULT_TOO_LONG);
         }
-        // 整份替换：不逐栏写入，也不触碰原版整段人设
-        if (!MaidPersonaHost.replace(maid, draft)) {
-            return new MaidPersonaSaveResponsePayload(requestId, false,
+        // 整份替换：模式与四栏一次写入，不逐栏写入，也不触碰原版整段人设
+        if (!MaidPersonaHost.replace(maid, config)) {
+            return MaidPersonaSaveResponsePayload.failure(requestId, entityId, maidUuid,
                     MaidPersonaSaveResponsePayload.RESULT_UNAVAILABLE);
         }
-        return new MaidPersonaSaveResponsePayload(requestId, true, MaidPersonaSaveResponsePayload.RESULT_OK);
+        // 配置已变：清理人设索引与在链召回结果，并作废旧快照的在途规划
+        MaidPersonaRuntime.onConfigChanged(maid);
+        return MaidPersonaSaveResponsePayload.ok(requestId, entityId, maidUuid, config);
     }
+
 
     /** 客户端：收到草稿保存结果（会话匹配在页面内完成，非当前页面直接丢弃） */
     private static void handlePersonaSaveResponse(MaidPersonaSaveResponsePayload payload, IPayloadContext context) {

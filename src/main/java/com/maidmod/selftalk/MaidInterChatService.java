@@ -6,6 +6,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMSite;
 import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.persona.PersonaFragment;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
@@ -46,7 +47,8 @@ public final class MaidInterChatService {
         if (!AIConfig.LLM_ENABLED.get()) return false;
         LLMSite site = chatManager.getLLMSite();
         if (site == null || !site.enabled()) return false;
-        if (chatManager.customSetting.isBlank() && chatManager.getSetting().isEmpty()) return false;
+        // 无人设（原版模式按 TLM 口径；四栏模式按四栏内容）→ 本次互聊不触发，不自动生成人设
+        if (!MaidPersonaRuntime.hasUsablePersona(maid)) return false;
         if (chain == null) return false;
         String language = SelfTalkContexts.sanitizeLanguage(StringUtils.isBlank(chatManager.chatLanguage) ? Config.SELF_TALK_LANGUAGE.get() : chatManager.chatLanguage);
         List<LLMMessage> messages = SelfTalkContexts.fetchCleanedMessages(chatManager, language, "inter-chat");
@@ -89,6 +91,9 @@ public final class MaidInterChatService {
         // Tool 判定在派发时取（dispatcher 顺延队列是延迟派发的，入队时不判定）
         boolean toolEnabled = PlayerSettingsStore.isToolCallEnabledForMaid(maid.level().getServer(), maid);
         InterChatChain.Participant participant = chain.participant(maid);
+        // 本次会话冻结的人设配置快照：链中途切换设置不改变已开始的会话，
+        // 链上空结果/配置快照比对也以这份为准
+        MaidPersonaConfig personaConfig = MaidPersonaRuntime.configOf(maid);
         // 本轮请求身份：在会话开始前登记为本女仆「当前」互聊请求（规划/正式回调共用）。
         // 主人插话、超时、死亡/卸载借它作废在途请求；请求登记强制覆盖旧条目——同一女仆同一时刻
         // 至多一个在途互聊请求，新轮请求压着旧轮（旧轮的迟到回调按自身停止标记沉默，不误伤新轮）
@@ -98,14 +103,31 @@ public final class MaidInterChatService {
                 prompt, mode, environment, layout.systemPrefix(), layout.history(), layout.window(),
                 // 链上首次检索结果：已完成（含「结果为空」）则直接复用，不再规划、不再跑 BM25
                 participant.cachedRecall(),
+                // 人设召回结果：同样按链复用，但配置快照一变即失效（人设被改过不能复用旧结果）
+                participant.cachedPersonaRecall(personaConfig),
+                personaConfig,
+                // 本轮触发内容（对方发言时连同来源标注；发起者用场合说明）——规划资料据此判断该查什么
+                isResponder ? SelfTalkPrompts.planTriggerPeerMessage(language, peerText)
+                        : SelfTalkPrompts.planTriggerInterChatInitiator(language),
                 // 主人插话中断/请求作废后一切未发出的动作停止：规划结果不再触发正式生成、
                 // 迟到结果不再派发
                 () -> !chain.interrupted() && !request.isCancelled(),
                 // 正式派发（服务端主线程）：把本轮请求身份带上，标记正式阶段并登记回调
                 prepared -> dispatchInterChat(maid, chatManager, site, prepared, peer, peerMessageId, peerText,
                         broadcastRange, isResponder, chainRound, toolEnabled, chain, request),
-                // 检索成品回报：链上后续轮次据此判断「首次检索已完成」（空结果同样算完成）
-                blocks -> recordChainRecall(chain, maid, blocks),
+                // 召回成品回报：链上后续轮次据此判断「该目标首次召回已完成」（空结果同样算完成）；
+                // 历史与人设分别回报，互不影响
+                new HistoryContextSession.RecallReporter() {
+                    @Override
+                    public void reportHistory(List<List<LLMMessage>> blocks) {
+                        recordChainRecall(chain, maid, blocks);
+                    }
+
+                    @Override
+                    public void reportPersona(MaidPersonaConfig config, List<PersonaFragment> fragments) {
+                        chain.completePersonaRecall(maid, config, fragments);
+                    }
+                },
                 null,
                 // 会话被作废时（检索模式规划请求的终止入口）把请求一并作废：
                 // 请求的 cancel 再回来终止本会话——两者互相幂等，收敛一致

@@ -75,8 +75,8 @@ public final class MaidSelfTalkService {
         if (site == null || !site.enabled()) {
             return false;
         }
-        // 无人设（无自定义设定且无模型默认设定）→ 跳过，不自动生成人设
-        if (chatManager.customSetting.isBlank() && chatManager.getSetting().isEmpty()) {
+        // 无人设（原版模式按 TLM 口径；四栏模式按四栏内容）→ 跳过，不自动生成人设
+        if (!MaidPersonaRuntime.hasUsablePersona(maid)) {
             return false;
         }
 
@@ -127,17 +127,28 @@ public final class MaidSelfTalkService {
         SelfTalkHistoryAssembler.HistoryLayout layout =
                 SelfTalkHistoryAssembler.split(messages, historyCount, interWindow.size());
         boolean toolEnabled = PlayerSettingsStore.isToolCallEnabledForMaid(maid.level().getServer(), maid);
+        // 本次会话冻结的人设配置快照：四栏模式固定注入身份、性格，并按需召回背景、爱好
+        MaidPersonaConfig personaConfig = MaidPersonaRuntime.configOf(maid);
         // 令牌在会话开始这一刻捕获：检索模式的规划可能耗时很久，若等到正式派发时才取，
         // 清空恰好发生在规划期间就会被漏掉（迟到结果会照常写档案）
         SelfTalkRequestToken token = SelfTalkRequestToken.capture(maid.getId());
         HistoryContextSession session = new HistoryContextSession(maid, chatManager, site, selfTalkLanguage,
                 prompt, mode, environment, layout.systemPrefix(), layout.history(), layout.window(),
-                cachedRecall, token::isValid,
+                cachedRecall,
+                // 自话／欢迎语没有互聊链，人设召回不做链上缓存（传 null 即无缓存）
+                null,
+                personaConfig,
+                welcome ? SelfTalkPrompts.planTriggerWelcome(selfTalkLanguage)
+                        : SelfTalkPrompts.planTriggerSelfTalk(selfTalkLanguage),
+                token::isValid,
                 prepared -> dispatchSelfTalk(maid, chatManager, site, prepared, welcome, keep, broadcastRange,
                         toolEnabled, token),
                 null,
-                welcome ? p -> UserPromptContexts.addContext(maid, p + SelfTalkContexts.buildRandomContext(maid))
-                        : null);
+                // 欢迎语保留原有环境采集口径：人设召回块接在业务提示词之后、随机情境之前，
+                // 不改变原生 <context> 包装与随机情境的既有位置
+                welcome ? (p, personaBlock) -> UserPromptContexts.addContext(maid,
+                        p + personaBlock + SelfTalkContexts.buildRandomContext(maid)) : null,
+                null);
         // 全量/精简模式同步派发：结果如实上报；检索模式在建索引/规划期间按「已受理」收束，
         // 其后的正式派发（含失败）不再回传本次调用
         return session.start() != HistoryContextSession.StartOutcome.FAILED;
@@ -307,6 +318,9 @@ public final class MaidSelfTalkService {
         state.windowSelfTalkMsgs.clear();
         state.windowInterChatMsgs.clear();
         state.currentSelfTalkCallback = null;
+        // 在途规划一并真正取消（含玩家聊天推迟中的输入）：迟到规划结果不得再导出正式消息。
+        // 在此之后，被推迟的玩家输入即使恢复也会因清空令牌失效而放弃，不会发出请求
+        state.cancelAllPlans();
         // 互聊：走主人插话同一套收尾（禁言 + 中断链 + 丢弃顺延），另一侧不会再把消息投递进来
         InterChatChain chain = InterChatChain.activeFor(maid);
         if (chain != null) {
