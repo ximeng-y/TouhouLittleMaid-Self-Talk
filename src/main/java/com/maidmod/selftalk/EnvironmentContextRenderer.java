@@ -680,8 +680,9 @@ final class EnvironmentContextRenderer {
     /**
      * 事件归并后的自然语言短段（按记录顺序，不输出编号或字段名）。
      * <p>
-     * 分组规则见 {@link SelfTalkEventBuffer#group}：只归并相邻同源记录，死亡不归并。
-     * 这里只负责按目标语言成句——同样的分组在不同语言下渲染，事实与时间都不变。
+     * 分组规则见 {@link SelfTalkEventBuffer#group}：只归并相邻同源的受伤记录，
+     * 死亡、复活与击杀不归并。这里只负责按目标语言成句——同样的分组在不同语言下渲染，
+     * 事实与时间都不变。
      * <p>
      * 归并后只说「多次」，绝不输出精确受击次数：冷却期内的受击本就没有记录，条数会被误读为真实次数。
      */
@@ -706,9 +707,22 @@ final class EnvironmentContextRenderer {
             return lang.isZh() ? relative + "，" + death.zhText() + "。"
                     : capitalize(relative + ", " + death.enText() + ".");
         }
+        if (event.fact() instanceof SelfTalkEventBuffer.ReviveFact) {
+            return lang.isZh() ? relative + "，你通过神龛复活了。"
+                    : capitalize(relative + ", you were revived at a shrine.");
+        }
+        if (event.fact() instanceof SelfTalkEventBuffer.KillFact kill) {
+            return lang.isZh() ? relative + "，你击杀了" + quote(killTargetName(kill, lang), lang) + "。"
+                    : capitalize(relative + ", you killed " + quote(killTargetName(kill, lang), lang) + ".");
+        }
         SelfTalkEventBuffer.HurtFact hurt = (SelfTalkEventBuffer.HurtFact) event.fact();
         return lang.isZh() ? relative + "，" + subject(hurt, lang) + verb(hurt, event, lang) + "。"
                 : capitalize(relative + ", " + subject(hurt, lang) + " " + verb(hurt, event, lang) + ".");
+    }
+
+    /** 击杀目标名称：中文环境用中文名，其余合法语言统一用英文快照；快照在事发时定格 */
+    private static String killTargetName(SelfTalkEventBuffer.KillFact kill, ContextLanguage lang) {
+        return lang.isZh() ? kill.zhTargetName() : kill.enTargetName();
     }
 
     /**
@@ -716,7 +730,7 @@ final class EnvironmentContextRenderer {
      * <p>
      * 措辞固定为「多次」／{@code multiple times}，<b>不</b>使用「连续多次」或 {@code continuously}，
      * 也不引入「连续受伤」的时间间隔阈值——冷却期内的受击本就没有记录，说「连续」没有事实依据。
-     * 死亡不参与归并，因此这里只可能是受伤事实。
+     * 死亡、复活与击杀不参与归并，因此这里只可能是受伤事实。
      */
     private static String repeatedSentence(SelfTalkEventBuffer.Event event, String relative, ContextLanguage lang) {
         SelfTalkEventBuffer.HurtFact hurt = (SelfTalkEventBuffer.HurtFact) event.fact();
