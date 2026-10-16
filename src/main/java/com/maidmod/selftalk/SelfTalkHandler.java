@@ -17,6 +17,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
@@ -375,6 +376,56 @@ public final class SelfTalkHandler {
     }
 
     /**
+     * 女仆击杀归属：击杀者为女仆时，把击杀事实只记录到该女仆本人的事件缓冲。
+     * <p>
+     * 归属只认 {@code DamageSource.getEntity()}（造成伤害者），不用 {@code getDirectEntity()}
+     * 判归属——投射物按造成伤害者归属；也不通过附近女仆、最后攻击者或武器猜测归属。
+     * 死者不套旧的「玩家／有主动物／女仆」过滤：普通生物被女仆击杀同样记录。
+     * <p>
+     * 与旧 {@link #onLivingDeath} 各自独立：死者同时满足旧过滤时，附近女仆的死亡事实与
+     * 击杀女仆本人的击杀事实<b>同时存在</b>，不跨 Kind 去重或替换。
+     * 目标名称在事发时定格中英快照（英文复用 {@link DeathMessageEnglishRenderer} 的
+     * Component 渲染，不可用时保留清洗后的原名称，不猜译）。
+     * <p>
+     * 订阅在事件总线（服务端主线程），行为纪律与 {@link #onMaidTick} 相同：整体 try-catch 兜底，
+     * 绝不向外抛异常。
+     */
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onMaidKill(LivingDeathEvent event) {
+        try {
+            if (!Config.ENABLED.get() || !Config.EVENT_CONTEXT_ENABLED.get()) {
+                return;
+            }
+            if (!(event.getSource().getEntity() instanceof EntityMaid killer)) {
+                return;
+            }
+            if (!(killer.level() instanceof ServerLevel level) || !killer.isAlive()) {
+                return;
+            }
+            if (!(event.getEntity() instanceof LivingEntity dead)) {
+                return;
+            }
+            if (dead.getUUID().equals(killer.getUUID())) {
+                // 自杀（罕见路径）没有「击杀了目标」语义，跳过
+                return;
+            }
+            // 事发时定格目标名称的中英快照；英文渲染不可用时保留清洗后的原名称，不猜译
+            Component nameComponent = dead.getName();
+            String zhName = SelfTalkContexts.cleanName(nameComponent.getString());
+            String enText = DeathMessageEnglishRenderer.render(nameComponent);
+            String enName = enText == null ? zhName : SelfTalkContexts.cleanName(enText);
+            SelfTalkEventBuffer.Event record = new SelfTalkEventBuffer.Event(
+                    SelfTalkEventBuffer.Kind.SELF_KILL, level.getServer().getTickCount(),
+                    dead.getUUID(), killer.getUUID(), damageTypeKey(event.getSource()),
+                    new SelfTalkEventBuffer.KillFact(zhName, enName));
+            SelfTalkState.get(killer.getId()).eventBuffer.append(
+                    record, Config.EVENT_CONTEXT_MAX_BUFFERED.get(), hurtMaxAgeTicks());
+        } catch (Throwable t) {
+            MaidSelfTalkMod.LOGGER.error("Failed to handle maid kill event for event context", t);
+        }
+    }
+
+    /**
      * 环境感知：实际掉血时记录受伤事实（玩家与女仆各按自己的开关）。
      * <p>
      * 订阅伤害结算完成事件而非「即将受伤」事件：格挡成功、无敌帧内被忽略的伤害都不产生实际掉血，
@@ -467,6 +518,36 @@ public final class SelfTalkHandler {
     /** 受伤事件有效期（tick），取当前配置值（热重载调小时在下次入队/消费即生效） */
     static long hurtMaxAgeTicks() {
         return Config.EVENT_CONTEXT_HURT_MAX_AGE_SECONDS.get() * 20L;
+    }
+
+    /**
+     * 记录神龛复活成功：新女仆已通过 {@code Level.addFreshEntity} 加入世界后由 mixin 调用。
+     * <p>
+     * 只在服务端、总开关与环境感知总开关开启且女仆存活时记录；事实只进<b>复活女仆本人</b>
+     * 的缓冲，不广播。固定有效期由 {@link SelfTalkEventBuffer} 按 Kind 决定（180 秒）。
+     * <p>
+     * 记录阶段异常在此吞掉并记日志：本 mod 的记录失败绝不能中断 TLM 的复活流程
+     * （该方法在 {@code ItemFilm.filmToMaid} 的 {@code addFreshEntity} 位置被重定向调用）。
+     * 不恢复或搬运旧死亡实体的状态——复活是全新实体，与旧死亡记录无关联。
+     *
+     * @param maid 复活成功、已加入世界的新女仆实体
+     */
+    public static void recordShrineRevive(EntityMaid maid) {
+        try {
+            if (!Config.ENABLED.get() || !Config.EVENT_CONTEXT_ENABLED.get()) {
+                return;
+            }
+            if (!(maid.level() instanceof ServerLevel level) || !maid.isAlive()) {
+                return;
+            }
+            SelfTalkEventBuffer.Event record = new SelfTalkEventBuffer.Event(
+                    SelfTalkEventBuffer.Kind.SELF_REVIVED, level.getServer().getTickCount(),
+                    maid.getUUID(), null, null, new SelfTalkEventBuffer.ReviveFact());
+            SelfTalkState.get(maid.getId()).eventBuffer.append(
+                    record, Config.EVENT_CONTEXT_MAX_BUFFERED.get(), hurtMaxAgeTicks());
+        } catch (Throwable t) {
+            MaidSelfTalkMod.LOGGER.error("Failed to record shrine revival for maid {}", maid.getId(), t);
+        }
     }
 
     /** 造成伤害的实体 UUID（无来源实体时为 null，只用于内部比较，不输出） */
