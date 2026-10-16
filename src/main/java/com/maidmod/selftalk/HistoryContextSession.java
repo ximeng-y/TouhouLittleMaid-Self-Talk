@@ -303,9 +303,12 @@ public final class HistoryContextSession {
             boolean historyNeeded = result.hasSearchableHistory();
             if (!historyNeeded && !personaNeeded) {
                 // 没有可检索历史、也不需要人设召回：直接正式生成，不发送规划请求。
-                // 回报「已完成、结果为空」——同链后续轮次不再重复尝试
+                // 回报「已完成、结果为空」——同链后续轮次不再重复尝试。
+                // 「不需要人设召回」有两种来源：链上没有有效缓存，或是缓存仍然有效（此前某轮
+                // 已完成该配置的召回）——后者必须把缓存片段带上，换成空列表等于把已命中的
+                // 背景／爱好资料从本轮请求里抹掉
                 reportHistoryRecall(List.of());
-                dispatchAssembled(List.of(), List.of(), false);
+                dispatchAssembled(List.of(), cachedPersonaFragments(), false);
                 return;
             }
             startPlanning(historyNeeded, result);
