@@ -3,6 +3,7 @@ package com.maidmod.selftalk;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.google.common.collect.Maps;
+import com.maidmod.selftalk.persona.PersonaRetrievalIndex;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -45,6 +46,9 @@ public final class SelfTalkState {
     public static void remove(int maidId) {
         State state = STATES.remove(maidId);
         if (state != null) {
+            // 在途规划与会话一起结束：状态条目没了，任何迟到的规划回调都不该再动游戏状态。
+            // 先摘掉登记再取消，取消过程自身（或它触发的清理）不会再往已移除的状态里写登记
+            state.cancelAllPlans();
             state.clearGeneration.retire();
         }
     }
@@ -97,6 +101,50 @@ public final class SelfTalkState {
      * 窗口里是同一个 UUID，因此入站补齐与去重都按身份判定。
      */
     public record InterChatWindowEntry(UUID id, LLMMessage message) {
+    }
+
+    /**
+     * 在途静默规划的登记条目（历史召回／人设召回的共用规划请求）。
+     * <p>
+     * 登记的目的有两个：
+     * <ul>
+     *   <li><b>忙判定</b>：规划期间该女仆不应再被派发自话／欢迎／互聊，否则同一次触发会重复发起请求；</li>
+     *   <li><b>超时与作废</b>：规划请求可能永远不回来，超时或清空记忆时必须能<b>真正取消</b>这次规划，
+     *       而不是只把忙标记清掉——否则迟到的规划结果会继续导出正式消息。</li>
+     * </ul>
+     * 登记与解除都在服务端主线程；解除按对象身份进行，会话结束／失败／取消只摘掉自己的那一条。
+     */
+    public static final class PendingPlan {
+        /** 登记时的服务器 tick（与 {@code server.getTickCount()} 同基准），用于超时判定 */
+        private final long startTick;
+        /**
+         * 取消动作：由<b>发起规划的那个会话</b>提供，即该会话自己的 cancel。
+         * <p>
+         * 不直接持有规划请求的取消动作：登记表是「会话在途」的登记，取消时必须让整个会话收束
+         * （标记作废、结束在途回调、通知链与请求身份），只结束网络请求会留下一个仍在等待结果的会话。
+         */
+        private final Runnable onCancel;
+        /** 是否玩家聊天路径发起：人设保存后按新配置重新准备，而不是直接丢弃玩家输入 */
+        private final boolean playerChat;
+
+        PendingPlan(long startTick, Runnable onCancel, boolean playerChat) {
+            this.startTick = startTick;
+            this.onCancel = onCancel;
+            this.playerChat = playerChat;
+        }
+
+        public long startTick() {
+            return startTick;
+        }
+
+        public boolean playerChat() {
+            return playerChat;
+        }
+
+        /** 执行取消（登记表已先行摘除本条，取消过程中的回摘是无副作用的空操作） */
+        void runCancel() {
+            onCancel.run();
+        }
     }
 
     public static final class State {
@@ -152,5 +200,79 @@ public final class SelfTalkState {
          * 受伤采样冷却计时器随缓冲一并保存，且不因消费而重置。
          */
         public final SelfTalkEventBuffer eventBuffer = new SelfTalkEventBuffer();
+
+        // ===== 四栏人设 =====
+        /**
+         * 在途静默规划（历史召回／人设召回共用的一次关键词规划）的登记表。
+         * 见 {@link PendingPlan}：既是忙判定的一部分，也是超时／作废时能真正取消的抓手。
+         */
+        public final List<PendingPlan> pendingPlans = new ArrayList<>();
+        /** 人设索引缓存对应的配置快照（null = 尚无缓存）；配置不同即重建，见 {@link MaidPersonaRuntime} */
+        public MaidPersonaConfig personaIndexConfig = null;
+        /** 与 {@link #personaIndexConfig} 配套的人设索引（不持久化，随状态移除释放） */
+        public PersonaRetrievalIndex personaIndex = null;
+
+        /** 该女仆当前是否有在途规划（忙判定用） */
+        public boolean isPlanning() {
+            return !pendingPlans.isEmpty();
+        }
+
+        /** 登记一次在途规划，返回登记条目（会话自行持据，结束／取消时按身份摘除） */
+        public PendingPlan registerPlan(long startTick, Runnable onCancel, boolean playerChat) {
+            PendingPlan plan = new PendingPlan(startTick, onCancel, playerChat);
+            pendingPlans.add(plan);
+            return plan;
+        }
+
+        /** 按对象身份摘除登记（只摘自己那条；不属于本状态或已被摘除时无副作用） */
+        public void unregisterPlan(PendingPlan plan) {
+            pendingPlans.remove(plan);
+        }
+
+        /**
+         * 取消并摘除匹配的登记（超时、清空记忆、状态移除）。
+         *
+         * @param playerChat 只取消该来源的登记；{@code null} 表示全部
+         * @return 实际取消的条数
+         */
+        public int cancelPlans(Boolean playerChat) {
+            return cancelMatching(plan -> playerChat == null || plan.playerChat() == playerChat);
+        }
+
+        /**
+         * 取消并摘除已超过时限的在途规划（沿用既有的在途请求超时阈值）。
+         * <p>
+         * 超时必须<b>真正取消</b>规划本身，而不是只清忙标记：规划请求可能永远不会回来，
+         * 只清标记会让迟到的规划结果继续导出正式消息。
+         *
+         * @return 实际取消的条数
+         */
+        public int cancelExpiredPlans(long nowTick, long maxAgeTicks) {
+            return cancelMatching(plan -> nowTick - plan.startTick() >= maxAgeTicks);
+        }
+
+        private int cancelMatching(java.util.function.Predicate<PendingPlan> filter) {
+            List<PendingPlan> targets = new ArrayList<>();
+            for (PendingPlan plan : pendingPlans) {
+                if (filter.test(plan)) {
+                    targets.add(plan);
+                }
+            }
+            // 先整体摘除再执行取消：取消动作本身可能触发清理并回摘登记，重复摘除必须无副作用
+            pendingPlans.removeAll(targets);
+            for (PendingPlan plan : targets) {
+                try {
+                    plan.runCancel();
+                } catch (Throwable t) {
+                    MaidSelfTalkMod.LOGGER.warn("Failed to cancel a pending persona planning session", t);
+                }
+            }
+            return targets.size();
+        }
+
+        /** 取消全部在途规划（状态移除时调用） */
+        public void cancelAllPlans() {
+            cancelPlans(null);
+        }
     }
 }

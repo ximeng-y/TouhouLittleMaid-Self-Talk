@@ -141,16 +141,20 @@ public final class SelfTalkDispatcher {
     }
 
     /**
-     * 忙判定：pending/玩家 chat 在途，或女仆睡觉且玩家开启「睡觉时安静」。
+     * 忙判定：pending/玩家 chat 在途/静默规划在途，或女仆睡觉且玩家开启「睡觉时安静」。
      * <p>
      * 睡眠归入忙（而非派发失败）——顺延队列只出队不丢弃、submit 改为入队，
      * 睡眠期间"已获批的发言"保留到醒后派发；与「玩家 chat 在途则顺延」同语义。
+     * <p>
+     * 在途规划也算忙：规划是正式请求的前置阶段，此时再派发新请求会让同一次触发重复发起，
+     * 或让两次召回互相覆盖（见 {@link SelfTalkState.PendingPlan}）。
      */
     private static boolean isBusy(EntityMaid maid, SelfTalkState.State state) {
         if (maid.isSleeping() && PlayerSettingsStore.isSleepQuietForMaid(maid.level().getServer(), maid)) {
             return true;
         }
-        return state.selfTalkPending || state.interChatPending || state.playerChatCount > 0;
+        return state.selfTalkPending || state.interChatPending || state.playerChatCount > 0
+                || state.isPlanning();
     }
 
     /**
@@ -193,6 +197,7 @@ public final class SelfTalkDispatcher {
                 SelfTalkState.State peerState = SelfTalkState.get(req.peer().getId());
                 Integer peerPartner = currentPairPartner(req.peer(), nowTick);
                 if (peerState.selfTalkPending || peerState.interChatPending || peerState.playerChatCount > 0
+                        || peerState.isPlanning()
                         || (req.peer().isSleeping()
                         && PlayerSettingsStore.isSleepQuietForMaid(req.peer().level().getServer(), req.peer()))
                         || (peerPartner != null && !peerPartner.equals(maid.getId()))) {
