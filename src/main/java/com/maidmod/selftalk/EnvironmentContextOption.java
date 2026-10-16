@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 环境上下文目录项（固定 35 项）。
+ * 环境上下文目录项（固定 37 项）。
  * <p>
  * 本类不依赖 Minecraft / TLM 类型，便于与 {@link EnvironmentContextSelection} 一起脱离游戏自检。
  * <p>
@@ -23,7 +23,7 @@ public record EnvironmentContextOption(String key, Source source,
         TLM_PROMPT,
         /** TLM 原随机信息（tool 类分类，原本按分类随机抽 1~3 类） */
         TLM_RANDOM,
-        /** 环境事件（死亡／玩家受伤／自身受伤） */
+        /** 环境事件（死亡／受伤／神龛复活／自身击杀） */
         EVENT,
         /** 实时自身状态（着火／水下缺氧） */
         REALTIME,
@@ -113,7 +113,12 @@ public record EnvironmentContextOption(String key, Source source,
                 new EnvironmentContextOption(KEY_ON_FIRE,
                         Source.REALTIME, EnvironmentContextMode.ALWAYS, Gate.EVENT_SELF),
                 new EnvironmentContextOption(KEY_DROWNING,
-                        Source.REALTIME, EnvironmentContextMode.ALWAYS, Gate.EVENT_SELF));
+                        Source.REALTIME, EnvironmentContextMode.ALWAYS, Gate.EVENT_SELF),
+                // 36~37：女仆本人事件（神龛复活、自身击杀），只记录到女仆本人，默认必定进入
+                new EnvironmentContextOption(KEY_SELF_REVIVE,
+                        Source.EVENT, EnvironmentContextMode.ALWAYS, Gate.EVENT_MASTER),
+                new EnvironmentContextOption(KEY_SELF_KILLS,
+                        Source.EVENT, EnvironmentContextMode.ALWAYS, Gate.EVENT_MASTER));
     }
 
     private static EnvironmentContextOption random(String key) {
@@ -132,7 +137,7 @@ public record EnvironmentContextOption(String key, Source source,
                 EnvironmentContextMode.RANDOM, gate);
     }
 
-    /** 目录（固定 35 项，顺序即界面与渲染顺序） */
+    /** 目录（固定 37 项，顺序即界面与渲染顺序） */
     public static final List<EnvironmentContextOption> ALL = buildAll();
 
     private static final Map<String, EnvironmentContextOption> BY_KEY = buildIndex();
@@ -150,7 +155,7 @@ public record EnvironmentContextOption(String key, Source source,
         return key == null ? null : BY_KEY.get(key);
     }
 
-    // ===== 事件条目与事件种类的对应（仅这三项） =====
+    // ===== 事件条目与事件种类的对应（仅这五项） =====
 
     public static final String KEY_DEATHS = "maid_self_talk_recent_deaths";
     public static final String KEY_PLAYER_HURT = "maid_self_talk_recent_player_hurt";
@@ -158,6 +163,8 @@ public record EnvironmentContextOption(String key, Source source,
     public static final String KEY_ON_FIRE = "maid_self_talk_self_on_fire";
     public static final String KEY_DROWNING = "maid_self_talk_self_drowning";
     public static final String KEY_IDENTITY = "maid_self_talk_nearby_maid_identities";
+    public static final String KEY_SELF_REVIVE = "maid_self_talk_recent_self_revive";
+    public static final String KEY_SELF_KILLS = "maid_self_talk_recent_self_kills";
 
     // ===== 饰品条目 key =====
 
@@ -181,6 +188,12 @@ public record EnvironmentContextOption(String key, Source source,
         if (KEY_SELF_HURT.equals(key)) {
             return SelfTalkEventBuffer.Kind.SELF_HURT;
         }
+        if (KEY_SELF_REVIVE.equals(key)) {
+            return SelfTalkEventBuffer.Kind.SELF_REVIVED;
+        }
+        if (KEY_SELF_KILLS.equals(key)) {
+            return SelfTalkEventBuffer.Kind.SELF_KILL;
+        }
         return null;
     }
 
@@ -190,6 +203,8 @@ public record EnvironmentContextOption(String key, Source source,
             case DEATH -> KEY_DEATHS;
             case PLAYER_HURT -> KEY_PLAYER_HURT;
             case SELF_HURT -> KEY_SELF_HURT;
+            case SELF_REVIVED -> KEY_SELF_REVIVE;
+            case SELF_KILL -> KEY_SELF_KILLS;
         };
     }
 }

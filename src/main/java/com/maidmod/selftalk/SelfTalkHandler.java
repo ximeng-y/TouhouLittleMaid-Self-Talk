@@ -7,6 +7,7 @@ import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.google.common.collect.Maps;
 import com.maidmod.selftalk.network.SelfTalkPackets;
+import com.maidmod.selftalk.persona.PersonaSplitService;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -17,11 +18,14 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -141,6 +145,13 @@ public final class SelfTalkHandler {
             state.playerChatCount = 0;
             state.playerChatSinceTick = -1;
         }
+        // 规划超时兜底：规划请求同样可能永不返回。必须真正取消那次规划（结束在途回调、摘除登记），
+        // 只清忙标记会让迟到的规划结果继续导出正式消息（见 SelfTalkState.PendingPlan）
+        int expiredPlans = state.cancelExpiredPlans(serverTick, PENDING_TIMEOUT_TICKS);
+        if (expiredPlans > 0) {
+            MaidSelfTalkMod.LOGGER.warn("{} persona planning session(s) timed out for maid {}, cancelled",
+                    expiredPlans, maid.getId());
+        }
         // AI 前置门槛
         MaidAIChatManager chatManager = maid.getAiChatManager();
         if (chatManager == null) {
@@ -153,8 +164,8 @@ public final class SelfTalkHandler {
         if (site == null || !site.enabled()) {
             return;
         }
-        // 无人设（无自定义设定且无模型默认设定）→ 不触发，不自动生成
-        if (chatManager.customSetting.isBlank() && chatManager.getSetting().isEmpty()) {
+        // 无人设（原版模式按 TLM 口径；四栏模式按四栏内容）→ 不触发，不自动生成人设
+        if (!MaidPersonaRuntime.hasUsablePersona(maid)) {
             return;
         }
         UUID ownerUuid = maid.getOwnerUUID();
@@ -168,7 +179,9 @@ public final class SelfTalkHandler {
             return;
         }
 
-        boolean busy = state.selfTalkPending || state.interChatPending || state.playerChatCount > 0;
+        // 在途规划同样算忙：规划是正式请求的前置阶段，此时再触发会让同一次触发重复发起
+        boolean busy = state.selfTalkPending || state.interChatPending || state.playerChatCount > 0
+                || state.isPlanning();
 
         // 欢迎检查（优先于自话，一次性、需空闲；忙时窗口期内每 tick 自然重试）
         if (!busy && Config.WELCOME_ENABLED.get() && !state.welcomedPlayers.contains(ownerUuid)) {
@@ -201,7 +214,8 @@ public final class SelfTalkHandler {
         // 空闲时先派发顺延队列里的请求（若有），派发后若变忙则本 tick 不再触发新请求
         if (!busy) {
             SelfTalkDispatcher.drainDeferred(maid);
-            if (state.selfTalkPending || state.interChatPending || state.playerChatCount > 0) {
+            if (state.selfTalkPending || state.interChatPending || state.playerChatCount > 0
+                    || state.isPlanning()) {
                 return;
             }
         }
@@ -322,6 +336,20 @@ public final class SelfTalkHandler {
         SelfTalkState.removeWelcomeForPlayer(uuid);
         // 清理网络限流条目，防长期多人服务端内存缓慢增长
         SelfTalkPackets.removeRateEntry(uuid);
+        // 取消该连接发起的 AI 拆分任务（发起连接已断开，不补发结果）
+        PersonaSplitService.onPlayerLogout(uuid);
+    }
+
+    /** 全局服务器 tick 清扫：AI 拆分任务超时收尾（不依赖女仆 tick，区块卸载也能收尾） */
+    @SubscribeEvent
+    public static void onServerTickPost(ServerTickEvent.Post event) {
+        PersonaSplitService.onServerTick(event.getServer());
+    }
+
+    /** 服务器停止：取消全部在途 AI 拆分任务 */
+    @SubscribeEvent
+    public static void onServerStopped(ServerStoppedEvent event) {
+        PersonaSplitService.onServerStopped();
     }
 
     /**
@@ -371,6 +399,56 @@ public final class SelfTalkHandler {
             appendEventToNearbyMaids(level, dead.getBoundingBox(), dead.getId(), record);
         } catch (Throwable t) {
             MaidSelfTalkMod.LOGGER.error("Failed to handle living death event for event context", t);
+        }
+    }
+
+    /**
+     * 女仆击杀归属：击杀者为女仆时，把击杀事实只记录到该女仆本人的事件缓冲。
+     * <p>
+     * 归属只认 {@code DamageSource.getEntity()}（造成伤害者），不用 {@code getDirectEntity()}
+     * 判归属——投射物按造成伤害者归属；也不通过附近女仆、最后攻击者或武器猜测归属。
+     * 死者不套旧的「玩家／有主动物／女仆」过滤：普通生物被女仆击杀同样记录。
+     * <p>
+     * 与旧 {@link #onLivingDeath} 各自独立：死者同时满足旧过滤时，附近女仆的死亡事实与
+     * 击杀女仆本人的击杀事实<b>同时存在</b>，不跨 Kind 去重或替换。
+     * 目标名称在事发时定格中英快照（英文复用 {@link DeathMessageEnglishRenderer} 的
+     * Component 渲染，不可用时保留清洗后的原名称，不猜译）。
+     * <p>
+     * 订阅在事件总线（服务端主线程），行为纪律与 {@link #onMaidTick} 相同：整体 try-catch 兜底，
+     * 绝不向外抛异常。
+     */
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onMaidKill(LivingDeathEvent event) {
+        try {
+            if (!Config.ENABLED.get() || !Config.EVENT_CONTEXT_ENABLED.get()) {
+                return;
+            }
+            if (!(event.getSource().getEntity() instanceof EntityMaid killer)) {
+                return;
+            }
+            if (!(killer.level() instanceof ServerLevel level) || !killer.isAlive()) {
+                return;
+            }
+            if (!(event.getEntity() instanceof LivingEntity dead)) {
+                return;
+            }
+            if (dead.getUUID().equals(killer.getUUID())) {
+                // 自杀（罕见路径）没有「击杀了目标」语义，跳过
+                return;
+            }
+            // 事发时定格目标名称的中英快照；英文渲染不可用时保留清洗后的原名称，不猜译
+            Component nameComponent = dead.getName();
+            String zhName = SelfTalkContexts.cleanName(nameComponent.getString());
+            String enText = DeathMessageEnglishRenderer.render(nameComponent);
+            String enName = enText == null ? zhName : SelfTalkContexts.cleanName(enText);
+            SelfTalkEventBuffer.Event record = new SelfTalkEventBuffer.Event(
+                    SelfTalkEventBuffer.Kind.SELF_KILL, level.getServer().getTickCount(),
+                    dead.getUUID(), killer.getUUID(), damageTypeKey(event.getSource()),
+                    new SelfTalkEventBuffer.KillFact(zhName, enName));
+            SelfTalkState.get(killer.getId()).eventBuffer.append(
+                    record, Config.EVENT_CONTEXT_MAX_BUFFERED.get(), hurtMaxAgeTicks());
+        } catch (Throwable t) {
+            MaidSelfTalkMod.LOGGER.error("Failed to handle maid kill event for event context", t);
         }
     }
 
@@ -469,6 +547,36 @@ public final class SelfTalkHandler {
         return Config.EVENT_CONTEXT_HURT_MAX_AGE_SECONDS.get() * 20L;
     }
 
+    /**
+     * 记录神龛复活成功：新女仆已通过 {@code Level.addFreshEntity} 加入世界后由 mixin 调用。
+     * <p>
+     * 只在服务端、总开关与环境感知总开关开启且女仆存活时记录；事实只进<b>复活女仆本人</b>
+     * 的缓冲，不广播。固定有效期由 {@link SelfTalkEventBuffer} 按 Kind 决定（180 秒）。
+     * <p>
+     * 记录阶段异常在此吞掉并记日志：本 mod 的记录失败绝不能中断 TLM 的复活流程
+     * （该方法在 {@code ItemFilm.filmToMaid} 的 {@code addFreshEntity} 位置被重定向调用）。
+     * 不恢复或搬运旧死亡实体的状态——复活是全新实体，与旧死亡记录无关联。
+     *
+     * @param maid 复活成功、已加入世界的新女仆实体
+     */
+    public static void recordShrineRevive(EntityMaid maid) {
+        try {
+            if (!Config.ENABLED.get() || !Config.EVENT_CONTEXT_ENABLED.get()) {
+                return;
+            }
+            if (!(maid.level() instanceof ServerLevel level) || !maid.isAlive()) {
+                return;
+            }
+            SelfTalkEventBuffer.Event record = new SelfTalkEventBuffer.Event(
+                    SelfTalkEventBuffer.Kind.SELF_REVIVED, level.getServer().getTickCount(),
+                    maid.getUUID(), null, null, new SelfTalkEventBuffer.ReviveFact());
+            SelfTalkState.get(maid.getId()).eventBuffer.append(
+                    record, Config.EVENT_CONTEXT_MAX_BUFFERED.get(), hurtMaxAgeTicks());
+        } catch (Throwable t) {
+            MaidSelfTalkMod.LOGGER.error("Failed to record shrine revival for maid {}", maid.getId(), t);
+        }
+    }
+
     /** 造成伤害的实体 UUID（无来源实体时为 null，只用于内部比较，不输出） */
     private static UUID entityUuid(Entity entity) {
         return entity == null ? null : entity.getUUID();
@@ -535,7 +643,7 @@ public final class SelfTalkHandler {
     }
 
     /**
-     * 从候选中随机挑一只可用回答者：过滤在途（pending）/无 AI/开关关闭/互聊对锁中的女仆。
+     * 从候选中随机挑一只可用回答者：过滤在途（pending/规划）/无 AI/无人设/开关关闭/互聊对锁中的女仆。
      * 同 tick 双发起者选中同一回答者的竞态已被两点规避：发起者派发走 5~8s 全局节流（一次只放行一个发起者），
      * 且此处按 pending 过滤掉已在途女仆，故无需为回答者单独加「预留」标记。
      */
@@ -544,7 +652,7 @@ public final class SelfTalkHandler {
         long nowTick = level.getServer().getTickCount();
         for (EntityMaid m : candidates) {
             SelfTalkState.State s = SelfTalkState.get(m.getId());
-            if (s.selfTalkPending || s.interChatPending || s.playerChatCount > 0) {
+            if (s.selfTalkPending || s.interChatPending || s.playerChatCount > 0 || s.isPlanning()) {
                 continue;
             }
             // 互聊对锁：该女仆正与他人连续互聊中，不能被发起互聊
@@ -562,7 +670,8 @@ public final class SelfTalkHandler {
             if (site == null || !site.enabled()) {
                 continue;
             }
-            if (cm.customSetting.isBlank() && cm.getSetting().isEmpty()) {
+            // 无人设（原版模式按 TLM 口径；四栏模式按四栏内容）：不能作为回答者
+            if (!MaidPersonaRuntime.hasUsablePersona(m)) {
                 continue;
             }
             // 睡眠中的女仆不可被邀请当回答者（玩家开启睡觉时安静时，与本女仆自话 gate 同语义）

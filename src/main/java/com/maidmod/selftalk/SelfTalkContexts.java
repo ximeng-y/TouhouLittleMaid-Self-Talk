@@ -44,7 +44,7 @@ public final class SelfTalkContexts {
      * status/world 属于 prompt 类分类，欢迎语经 {@link UserPromptContexts#addContext} 前缀恒量注入，
      * 不再放入随机池，避免同一消息中重复出现浪费 token。
      * <p>
-     * 自话与互聊已改走 {@link EnvironmentContextOption} 的逐项目录（35 项，含 status/world），
+     * 自话与互聊已改走 {@link EnvironmentContextOption} 的逐项目录（37 项，含 status/world），
      * 本列表只服务欢迎语的旧路径。
      */
     private static final List<String> CONTEXT_CATEGORIES = List.of(
@@ -117,7 +117,7 @@ public final class SelfTalkContexts {
      * 单次请求内固定按此顺序执行（顺序即语义，不得调换）：
      * <ol>
      *   <li>取主人 UUID（离线也按 UUID 查存档；无主女仆用目录默认模式）；</li>
-     *   <li>算 35 项有效模式（管理员关玩家配置时用默认值）与逐项功能可用性，各只算一次；
+     *   <li>算 37 项有效模式（管理员关玩家配置时用默认值）与逐项功能可用性，各只算一次；
      *       同时读取「环境信息自然语言化」有效开关（默认关闭的实验模式）；</li>
      *   <li>环境感知总开关开启时<b>调用且只调用一次</b> {@code drain}——即使三个事件项全是 NEVER
      *       也照样 drain，不能留下旧事件等以后重新打开；总开关关闭时既不注入也不消费（原行为）；</li>
@@ -157,7 +157,7 @@ public final class SelfTalkContexts {
      * 单次采集内固定按此顺序执行（顺序即语义，不得调换）：
      * <ol>
      *   <li>取主人 UUID（离线也按 UUID 查存档；无主女仆用目录默认模式）；</li>
-     *   <li>算 35 项有效模式（管理员关玩家配置时用默认值）与逐项功能可用性，各只算一次；
+     *   <li>算 37 项有效模式（管理员关玩家配置时用默认值）与逐项功能可用性，各只算一次；
      *       同时读取「环境信息自然语言化」有效开关（默认关闭的实验模式）；</li>
      *   <li>环境感知总开关开启时<b>调用且只调用一次</b> {@code drain}——即使三个事件项全是 NEVER
      *       也照样 drain，不能留下旧事件等以后重新打开；总开关关闭时既不注入也不消费（原行为）；</li>
@@ -262,6 +262,19 @@ public final class SelfTalkContexts {
      */
     public static String renderConfiguredUserMessage(String basePrompt, String language,
                                                      EnvironmentSnapshot snapshot) {
+        return renderConfiguredUserMessage(basePrompt, language, snapshot, null);
+    }
+
+    /**
+     * 同上，并在动态资料区追加一段已渲染好的人设召回块。
+     * <p>
+     * 插入位置固定在「当前情境」之后、「感知背景」之前——人设召回属于本轮动态资料，
+     * 与当前情境相邻，由模型结合情境自行取用；空块时整段不出现，不改变既有渲染顺序。
+     * 块本身自带独立的人设资料边界与分类名称（见 {@link MaidPersonaRuntime#buildRecalledBlock}），
+     * 内容不伪装成过去的 assistant 发言。
+     */
+    public static String renderConfiguredUserMessage(String basePrompt, String language,
+                                                     EnvironmentSnapshot snapshot, String personaBlock) {
         ContextLanguage lang = snapshot.language();
         StringBuilder message = new StringBuilder();
         boolean hasFixed = appendFixedContext(message, snapshot.maid(), snapshot.selected(), snapshot.rendered(),
@@ -276,6 +289,9 @@ public final class SelfTalkContexts {
         }
         appendSituationalContext(message, snapshot.rendered(), snapshot.selected(), lang,
                 snapshot.naturalLanguage(), snapshot.naturalLanguage() && snapshot.perceptionBody().isEmpty());
+        if (personaBlock != null && !personaBlock.isBlank()) {
+            message.append(personaBlock);
+        }
         appendPerceptionContext(message, snapshot.perceptionBody(), snapshot.naturalLanguage(), lang);
         return message.toString();
     }

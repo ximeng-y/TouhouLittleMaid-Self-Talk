@@ -12,11 +12,13 @@
     "MaidAIChatManagerAccessor",
     "MaidAIChatManagerMixin",
     "LLMCallbackMixin",
+    "LLMOpenAIClientMixin",
     "SelfTalkTtsMixin",
     "SelfTalkSystemTtsMixin",
     "SelfTalkLateDisplayMixin",
     "GameContextRegisterAccessor",
-    "WaitingChatBubbleDataMixin"
+    "WaitingChatBubbleDataMixin",
+    "ItemFilmMixin"
   ],
   "client": [
     "AIChatScreenMixin",
