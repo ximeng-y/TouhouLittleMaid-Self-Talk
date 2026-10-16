@@ -243,29 +243,37 @@ public final class PlayerPersonaChatSession {
         if (cancelled || resumed) {
             return;
         }
-        restarting = true;
-        try {
-            if (planning != null) {
-                KeywordPlanningSession current = planning;
-                planning = null;
-                // 先摘引用再取消：取消会回调本会话的收尾，不能让收尾把新规划一起带走
+        // 保护窗口只包住「取消旧规划」这一步：那次取消回调针对的是旧快照作废，不是本次输入作废。
+        // 新规划必须在这个窗口之外启动——它的许可条件是 !restarting，窗口内启动会当场自我取消，
+        // 既没有在途登记、也不再受状态表超时清理，输入就永远停在待恢复名单里
+        if (planning != null) {
+            KeywordPlanningSession current = planning;
+            planning = null;
+            // 先摘引用再取消：取消会回调本会话的收尾，不能让收尾把新规划一起带走
+            restarting = true;
+            try {
                 current.cancel();
+            } finally {
+                restarting = false;
             }
-            MaidPersonaConfig current = MaidPersonaRuntime.configOf(maid);
-            personaConfig = current;
-            if (!MaidPersonaRuntime.hasDynamicPersona(current)) {
-                // 新配置没有动态人设：不注入任何召回块，直接按原生路径派发
-                personaBlock = StringUtils.EMPTY;
-                performResume();
-                return;
-            }
-            if (!rebuildNativeMessages()) {
-                return;
-            }
-            startPlanning();
-        } finally {
-            restarting = false;
         }
+        MaidPersonaConfig current = MaidPersonaRuntime.configOf(maid);
+        personaConfig = current;
+        // 无论新配置要不要召回，正式消息前缀都必须先按新配置重建：
+        // 四栏模式下它含「身份 → 性格」的核心正文，沿用旧的那份等于仍按旧人设生成回复
+        if (!rebuildNativeMessages()) {
+            // 新配置下已无可用人设（或重建失败）：重建方法已给出原生「缺少人设」提示。
+            // 本次输入到此结束——从待恢复名单摘除，不留没有在途登记的悬挂会话
+            cancel();
+            return;
+        }
+        if (!MaidPersonaRuntime.hasDynamicPersona(current)) {
+            // 新配置没有动态人设：不注入任何召回块，直接按原生路径派发
+            personaBlock = StringUtils.EMPTY;
+            performResume();
+            return;
+        }
+        startPlanning();
     }
 
     /**
@@ -285,7 +293,7 @@ public final class PlayerPersonaChatSession {
             return false;
         }
         if (rebuilt == null || rebuilt.isEmpty()) {
-            // 新配置下已无可用的固定正文（身份、性格都空）：与一次性构建时一样，
+            // 新配置下四栏已全部空白（原版模式则是设定缺失）：与一次性构建时一样，
             // 显示原生「缺少人设」提示，不静默吞掉玩家这次输入
             maid.getChatBubbleManager()
                     .addTextChatBubble("ai.touhou_little_maid.chat.llm.role_no_setting");

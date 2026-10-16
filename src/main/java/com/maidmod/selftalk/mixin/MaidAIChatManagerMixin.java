@@ -85,13 +85,15 @@ public abstract class MaidAIChatManagerMixin {
         // 主人名称、可用技能与输出格式，再走 TLM 原生 buildMessage（摘要与历史读取顺序不变）。
         // 背景、爱好与召回结果不得进入这里，也不临时改写/清空/恢复 customSetting——
         // 两种模式的内容各自独立，本 mod 不在它们之间搬运
-        String core = MaidPersonaRuntime.coreBody(personaConfig.draft(), language);
-        if (core.isBlank()) {
-            // 四栏没有可用的核心正文：返回空列表，走上原生「缺少人设」提示
+        if (!personaConfig.draft().hasAnyContent()) {
+            // 四栏全部空白才算「没有人设」：返回空列表，走上原生「缺少人设」提示
             // （不回落 customSetting：那等于把另一套人设当成四栏模式的内容）
             cir.setReturnValue(new ArrayList<>());
             return;
         }
+        // 只有背景／爱好、身份与性格为空时核心正文为空串，但仍要发请求（本轮靠召回提供角色资料），
+        // 因此照常经过 replaceSetting 与原生 buildMessage：语言、主人名称、技能与输出格式框架都保留
+        String core = MaidPersonaRuntime.coreBody(personaConfig.draft(), language);
         String setting = PapiReplacer.replaceSetting(core, maid, language);
         cir.setReturnValue(((MaidAIChatManagerAccessor) (Object) this)
                 .invokeBuildMessage(setting, maid, chatManager.getHistory()));
