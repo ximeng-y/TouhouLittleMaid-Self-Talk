@@ -12,6 +12,7 @@ import com.maidmod.selftalk.network.SelfTalkPackets;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraftforge.network.PacketDistributor;
 
 import java.util.HashMap;
@@ -24,8 +25,9 @@ import java.util.UUID;
  * <p>
  * 每名玩家同时最多一个整理任务：重复请求返回 {@code busy}，不排队不覆盖。
  * 任务冻结发起时刻的原文、模型站点与发起连接；结果（成功/失败/超时）按任务身份
- * 只处理一次，回包先发、私信后发，且只发给仍是同一连接的发起玩家——
- * 发起连接断开后不向重连的新连接补发（按玩家列表中的实例身份判断）。
+ * 只处理一次，回包先发、私信后发，且只发给仍是同一连接会话的发起玩家——
+ * 重生更换的玩家实体复用同一连接会话（{@code ServerPlayer.connection}），照常交付；
+ * 连接断开后重连得到的是新连接会话，不向其补发。
  * <p>
  * 请求不经过自话/互聊闸门，不占用其 pending、对锁、历史规划或取消登记：
  * {@link PersonaSplitCallback} 是完全独立的静默回调，不写任何聊天状态。
@@ -50,8 +52,10 @@ public final class PersonaSplitService {
         final UUID maidUuid;
         /** 发起时刻冻结的女仆名称（完成时实体可能已卸载，不能届时再取） */
         final String maidName;
-        /** 发起连接的玩家实例：完成时按实例身份判断「是否仍是同一连接」 */
+        /** 发起玩家实例：跨重生仍持有有效 server 引用，仅供主线程调度使用 */
         final ServerPlayer player;
+        /** 发起时刻冻结的连接会话：重生换实体但复用同一实例，重连（或已离线）才是新会话 */
+        final ServerGamePacketListenerImpl connection;
         final long startTick;
         PersonaSplitCallback callback;
         boolean finished;
@@ -61,6 +65,7 @@ public final class PersonaSplitService {
             this.maidUuid = maidUuid;
             this.maidName = maidName;
             this.player = player;
+            this.connection = player.connection;
             this.startTick = startTick;
         }
     }
@@ -160,8 +165,10 @@ public final class PersonaSplitService {
             outcome = PersonaSplitCallback.Outcome.failure(
                     MaidPersonaSplitResponseMessage.RESULT_TOO_LONG);
         }
-        // 发起连接已断开（含重连后的新实体实例）：不向重连的新连接补发
-        if (task.player.server.getPlayerList().getPlayer(task.player.getUUID()) != task.player) {
+        // 只交付给仍是同一连接会话的发起玩家：重生换实体但会话不变照常交付；
+        // 已离线或重连（新连接会话）不补发
+        ServerPlayer current = task.player.server.getPlayerList().getPlayer(task.player.getUUID());
+        if (current == null || current.connection != task.connection) {
             return;
         }
         MaidPersonaSplitResponseMessage response = outcome.ok()
@@ -169,8 +176,8 @@ public final class PersonaSplitService {
                 : MaidPersonaSplitResponseMessage.failure(task.requestId, task.maidUuid,
                 outcome.resultCode());
         // 结果包先发送，再发送私信（同一主线程批内顺序固定）
-        SelfTalkPackets.CHANNEL.send(PacketDistributor.PLAYER.with(() -> task.player), response);
-        task.player.sendSystemMessage(outcome.ok()
+        SelfTalkPackets.CHANNEL.send(PacketDistributor.PLAYER.with(() -> current), response);
+        current.sendSystemMessage(outcome.ok()
                 ? Component.translatable("chat.maid_self_talk.split.done", task.maidName)
                 : Component.translatable("chat.maid_self_talk.split.failed"));
     }
