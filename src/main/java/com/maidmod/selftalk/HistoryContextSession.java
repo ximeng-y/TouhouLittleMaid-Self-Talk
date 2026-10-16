@@ -303,9 +303,12 @@ public final class HistoryContextSession {
             boolean historyNeeded = result.hasSearchableHistory();
             if (!historyNeeded && !personaNeeded) {
                 // 没有可检索历史、也不需要人设召回：直接正式生成，不发送规划请求。
-                // 回报「已完成、结果为空」——同链后续轮次不再重复尝试
+                // 回报「已完成、结果为空」——同链后续轮次不再重复尝试。
+                // 「不需要人设召回」有两种来源：链上没有有效缓存，或是缓存仍然有效（此前某轮
+                // 已完成该配置的召回）——后者必须把缓存片段带上，换成空列表等于把已命中的
+                // 背景／爱好资料从本轮请求里抹掉
                 reportHistoryRecall(List.of());
-                dispatchAssembled(List.of(), List.of(), false);
+                dispatchAssembled(List.of(), cachedPersonaFragments(), false);
                 return;
             }
             startPlanning(historyNeeded, result);
@@ -326,9 +329,11 @@ public final class HistoryContextSession {
         }
         planningHistoryEnabled = historyEnabled;
         planningPersonaEnabled = personaEnabled;
+        // 静默取消的出口接回本会话：状态表的超时／保存人设／状态移除取消的是规划本身，
+        // 没有这条回边，外层不再收到任何取消——互聊请求身份、活动链与配对锁都留在原地没人收尾
         planning = new KeywordPlanningSession(maid, chatManager, site, historyEnabled, personaEnabled,
                 this::planningMessages, this::allowed,
-                plan -> onPlanned(plan, historyEnabled, personaEnabled, result), null, false);
+                plan -> onPlanned(plan, historyEnabled, personaEnabled, result), this::cancel, false);
         planning.start();
     }
 
@@ -372,14 +377,24 @@ public final class HistoryContextSession {
             historyRecalled = !recalledBlocks.isEmpty();
             reportHistoryRecall(blocks);
         } else if (mode == HistoryContextMode.RETRIEVAL) {
-            // 检索模式下历史目标本轮未发起检索：回报「已完成、结果为空」。
-            // 链上已有结果时该回报本就是空操作（同一女仆同一链只生效一次）
-            reportHistoryRecall(List.of());
+            if (cachedRecall != null && cachedRecall.completed()) {
+                // 本轮只为另一个目标重新规划（人设变更等），历史召回链上已有成品：
+                // 把它原样带回来。清空等于用一次单目标规划抹掉本轮已有的历史上下文
+                recalledBlocks = flattenAlive(cachedRecall.blocks());
+                historyRecalled = !recalledBlocks.isEmpty();
+            } else {
+                // 检索模式下历史目标本轮未发起检索且链上无结果：回报「已完成、结果为空」。
+                // 链上已有结果时该回报本就是空操作（同一女仆同一链只生效一次）
+                reportHistoryRecall(List.of());
+            }
         }
         List<PersonaFragment> fragments = List.of();
         if (personaEnabled) {
             fragments = MaidPersonaRuntime.recall(maid, personaConfig, plan.personaKeywords());
             reportPersonaRecall(personaConfig, fragments);
+        } else {
+            // 反向情形：本轮只为历史目标规划，人设缓存若仍有效则沿用，不传空把另一目标清掉
+            fragments = cachedPersonaFragments();
         }
         dispatchAssembled(recalledBlocks, fragments, historyRecalled);
     }

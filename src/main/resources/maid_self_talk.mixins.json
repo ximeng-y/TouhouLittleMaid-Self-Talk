@@ -19,7 +19,8 @@
     "MaidAIChatPersonaMixin",
     "GameContextRegisterAccessor",
     "InterChatToolLifecycleMixin",
-    "WaitingChatBubbleDataMixin"
+    "WaitingChatBubbleDataMixin",
+    "ItemFilmMixin"
   ],
   "client": [
     "AIChatScreenMixin",
