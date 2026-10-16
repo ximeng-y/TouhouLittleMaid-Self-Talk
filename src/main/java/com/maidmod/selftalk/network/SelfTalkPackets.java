@@ -12,7 +12,9 @@ import com.maidmod.selftalk.MaidPersonaRuntime;
 import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.PlayerSettingsStore;
 import com.maidmod.selftalk.SelfTalkAttachments;
+import com.maidmod.selftalk.client.MaidPersonaSplitClient;
 import com.maidmod.selftalk.client.SelfTalkPlayerSettingsClient;
+import com.maidmod.selftalk.persona.PersonaSplitService;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -51,8 +53,9 @@ public final class SelfTalkPackets {
         // 以及新等待气泡 serializer 类型 ID（maid_self_talk:autonomous_waiting）；
         // v12：人设保存 payload 扩展为「模式 + 四栏」整份配置并带女仆 UUID，回包同样带 UUID
         // 与服务端确认后的完整配置（v11 由另一批在途改动占用，此处直接跳到 12 避免版本串复用）；
+        // v13：新增 AI 拆分人设的请求/结果 payload（C2S SplitRequest + S2C SplitResponse）；
         // 同样不做向后兼容：NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
-        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("12");
+        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("13");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,
                 SelfTalkPackets::handleConfigRequest);
         registrar.playToServer(SelfTalkConfigSetPayload.TYPE, SelfTalkConfigSetPayload.STREAM_CODEC,
@@ -102,6 +105,10 @@ public final class SelfTalkPackets {
                 SelfTalkPackets::handlePersonaSave);
         registrar.playToClient(MaidPersonaSaveResponsePayload.TYPE, MaidPersonaSaveResponsePayload.STREAM_CODEC,
                 SelfTalkPackets::handlePersonaSaveResponse);
+        registrar.playToServer(MaidPersonaSplitRequestPayload.TYPE, MaidPersonaSplitRequestPayload.STREAM_CODEC,
+                SelfTalkPackets::handlePersonaSplitRequest);
+        registrar.playToClient(MaidPersonaSplitResponsePayload.TYPE, MaidPersonaSplitResponsePayload.STREAM_CODEC,
+                SelfTalkPackets::handlePersonaSplitResponse);
     }
 
     /** 服务端：响应玩家的自话设置查询（全局值 + 请求女仆的单只有效值；1.1.2 起读世界存档、离线亦可查） */
@@ -482,8 +489,8 @@ public final class SelfTalkPackets {
                 && player.getUUID().equals(maid.getOwnerUUID());
     }
 
-    /** 每玩家每秒限流：防恶意客户端包风暴（正常设置界面操作远低于该频率） */
-    private static boolean allowConfigPacket(UUID playerUuid) {
+    /** 每玩家每秒限流：防恶意客户端包风暴（正常设置界面操作远低于该频率；人设拆分链共用） */
+    public static boolean allowConfigPacket(UUID playerUuid) {
         long second = System.currentTimeMillis() / 1000;
         long[] entry = PACKET_RATE.get(playerUuid);
         if (entry == null) {
@@ -600,6 +607,22 @@ public final class SelfTalkPackets {
     /** 客户端：收到草稿保存结果（会话匹配在页面内完成，非当前页面直接丢弃） */
     private static void handlePersonaSaveResponse(MaidPersonaSaveResponsePayload payload, IPayloadContext context) {
         context.enqueueWork(() -> SelfTalkPlayerSettingsClient.onPersonaSaveResponse(payload));
+    }
+
+    /** 服务端：AI 拆分人设请求（校验与任务管理在 PersonaSplitService，失败同样回固定结果码） */
+    private static void handlePersonaSplitRequest(MaidPersonaSplitRequestPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer) {
+                PersonaSplitService.handleSplitRequest(serverPlayer, payload.requestId(),
+                        payload.entityId(), payload.maidUuid(), payload.sourceText());
+            }
+        });
+    }
+
+    /** 客户端：收到 AI 拆分结果（登记与身份匹配在整理缓存内完成，未登记的响应直接丢弃） */
+    private static void handlePersonaSplitResponse(MaidPersonaSplitResponsePayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> MaidPersonaSplitClient.onSplitResponse(payload));
     }
 
     /** 客户端：收到环境上下文设置响应（会话/序号校验在客户端浮层内完成） */

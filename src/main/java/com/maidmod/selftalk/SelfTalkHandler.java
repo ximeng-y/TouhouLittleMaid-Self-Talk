@@ -7,6 +7,7 @@ import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.google.common.collect.Maps;
 import com.maidmod.selftalk.network.SelfTalkPackets;
+import com.maidmod.selftalk.persona.PersonaSplitService;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -22,6 +23,8 @@ import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -332,6 +335,20 @@ public final class SelfTalkHandler {
         SelfTalkState.removeWelcomeForPlayer(uuid);
         // 清理网络限流条目，防长期多人服务端内存缓慢增长
         SelfTalkPackets.removeRateEntry(uuid);
+        // 取消该连接发起的 AI 拆分任务（发起连接已断开，不补发结果）
+        PersonaSplitService.onPlayerLogout(uuid);
+    }
+
+    /** 全局服务器 tick 清扫：AI 拆分任务超时收尾（不依赖女仆 tick，区块卸载也能收尾） */
+    @SubscribeEvent
+    public static void onServerTickPost(ServerTickEvent.Post event) {
+        PersonaSplitService.onServerTick(event.getServer());
+    }
+
+    /** 服务器停止：取消全部在途 AI 拆分任务 */
+    @SubscribeEvent
+    public static void onServerStopped(ServerStoppedEvent event) {
+        PersonaSplitService.onServerStopped();
     }
 
     /**
