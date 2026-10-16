@@ -353,6 +353,10 @@ public class MaidPersonaEditScreen extends Screen {
      * 有可载入的 READY 候选时弹「载入 AI 整理结果？」确认（页面 tick 中检查，不在 init 里切屏）。
      * 保存等待门禁优先：门禁期间不弹，解除后下一 tick 再弹。每次页面访问只弹一次；
      * ESC 仅暂缓（候选保留），本次访问不再弹。
+     * <p>
+     * 本页成功路径刚自动填入的候选（loadedSplitRequestId 一致）不再重复询问——
+     * 自动填入本身就是确认结果；候选仍保留，未保存离开后重开页面（新实例、
+     * loadedSplitRequestId 为空）会照常询问。
      */
     private void maybeShowSplitLoadConfirm() {
         if (this.leftPage || this.splitConfirmShown || this.awaitingConfirmation || this.minecraft == null) {
@@ -360,6 +364,9 @@ public class MaidPersonaEditScreen extends Screen {
         }
         MaidPersonaSplitClient.Entry entry = MaidPersonaSplitClient.entryFor(this.maid.getUUID());
         if (entry == null || entry.status() != MaidPersonaSplitClient.Status.READY) {
+            return;
+        }
+        if (entry.requestId().equals(this.loadedSplitRequestId)) {
             return;
         }
         this.splitConfirmShown = true;

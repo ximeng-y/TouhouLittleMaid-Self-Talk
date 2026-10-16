@@ -22,7 +22,8 @@ import java.util.function.Consumer;
  *   <li>{@code needAddTools = false}：模型看不到任何工具定义；</li>
  *   <li>{@code shouldCacheTokenUsage() = false}：拆分 token 不覆盖 {@code lastChatTokenUsage}；</li>
  *   <li>{@code onSuccess} <b>不调</b>父类：不写历史、不发气泡、不发事件、不播报，
- *       只读取 {@link ResponseChat#getChatText()} 交给解析器；</li>
+ *       只读取 {@link ResponseChat#getChatText()}（由 onTextCall mixin 保留的
+ *       未按 {@code ---} 分割的原文）交给解析器；</li>
  *   <li>{@code onFailure} <b>不调</b>父类：不向玩家抛技术错误（私信由服务统一发送，
  *       只说「整理失败」，不泄露异常或密钥）；</li>
  *   <li>{@code onFunctionCall} <b>不调</b>父类：绝不执行任何游戏工具，按格式失败收敛，
@@ -82,7 +83,8 @@ public class PersonaSplitCallback extends LLMCallback {
     @Override
     public void onSuccess(ResponseChat responseChat) {
         // 不调父类：拆分结果不写历史、不上屏、不触发任何玩家可见行为。
-        // 用 getChatText() 解析而不是 toString()——后者会追加 TTS 分隔部分（"chat---tts"）。
+        // 解析的是 LLMOpenAIClientMixin 保留的完整原文——单参 ResponseChat 构造器
+        // 会按 --- 切分并删除分隔符，切分结果无法还原，toString() 同样不能。
         String raw = responseChat.getChatText();
         PersonaSplitParser.Result result = PersonaSplitParser.parse(raw);
         deliver(result.ok() ? Outcome.success(result.draft())
