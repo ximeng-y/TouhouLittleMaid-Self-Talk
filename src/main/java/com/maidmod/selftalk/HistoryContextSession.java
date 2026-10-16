@@ -1,23 +1,31 @@
 package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
-import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMSite;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.history.DialogueBlock;
+import com.maidmod.selftalk.persona.PersonaFragment;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
- * 一次自话／欢迎语／互聊触发的历史组装会话：按模式决定注入哪些历史，
- * 检索模式另加静默关键词规划与纠正，最终把成品消息列表交给调用方派发。
+ * 一次自话／欢迎语／互聊触发的历史与人设组装会话：按模式决定注入哪些历史，
+ * 需要召回时另加一次静默关键词规划与纠正，最终把成品消息列表交给调用方派发。
  * <p>
- * 生命周期与「一次请求」严格对应，模式在构造时冻结——同一互聊链中每位参与者沿用各自
- * 首次发言时取得的模式，链中途切换设置不改变已开始的会话。
+ * 两个召回目标互相独立：
+ * <ul>
+ *   <li><b>历史目标</b>：历史模式为 RETRIEVAL，且存在需要检索的历史；</li>
+ *   <li><b>人设目标</b>：四栏模式、动态人设非空，且链上没有本配置的召回结果。</li>
+ * </ul>
+ * 任一目标需要规划即调用一次共用规划（{@link KeywordPlanningSession}），两组关键词随后分别
+ * 检索各自的索引；组装始终按<b>原历史模式</b>进行——FULL 保留全量历史、COMPACT 保留现有精简规则，
+ * 绝不因为启用了人设召回就变成历史检索模式。
+ * <p>
+ * 生命周期与「一次请求」严格对应，模式与人设配置在构造时冻结——同一互聊链中每位参与者沿用各自
+ * 首次发言时取得的快照，链中途切换设置不改变已开始的会话。
  * <p>
  * 环境快照由调用方传入（本次触发只采集一次），因此关键词规划、纠正与最终回复看到的是
  * 同一份环境事实，感知事件也只被消费一次。
@@ -26,9 +34,6 @@ import java.util.function.Supplier;
  * 规划回调可能在响应线程返回，因此结果一律投递回主线程再继续。
  */
 public final class HistoryContextSession {
-
-    /** 关键词规划最多纠正次数（不开放用户配置） */
-    public static final int MAX_CORRECTIONS = 3;
 
     /** 成品消息列表的派发口：返回是否真正发出（false 表示放弃本次触发） */
     public interface Dispatcher {
@@ -49,14 +54,45 @@ public final class HistoryContextSession {
     }
 
     /**
-     * 本次检索的成品结果回报口（互聊链专用）。
+     * 本次召回结果的回报口（互聊链专用）。
      * <p>
-     * 检索模式到达任一终态（正常召回、无可用历史、纠正耗尽、非格式失败）时调用一次，
-     * <b>空结果也回报</b>——链上后续轮次据此判断「已完成首次检索」，不再重复规划。
+     * 历史与人设<b>分别</b>回报，且各自到达任一终态时调用一次，<b>空结果也回报</b>——
+     * 链上后续轮次据此判断「本链该目标已完成首次召回」，不再重复规划。
+     * 两者的可用性独立判断：不能因为历史无需召回就跳过人设回报（或反之）。
      * 自话／欢迎语没有链，传 null。
      */
     public interface RecallReporter {
-        void report(List<List<LLMMessage>> blocks);
+        void reportHistory(List<List<LLMMessage>> blocks);
+
+        void reportPersona(MaidPersonaConfig config, List<PersonaFragment> fragments);
+    }
+
+    /**
+     * 最终 user message 的渲染口（可空）：入参是拼装完毕的提示词（业务指令 + 各类说明段）
+     * 与本轮的人设召回块（可能为空串），返回完整的 user message 文本。
+     * 欢迎语等自带环境采集口径的调用方借此保留原有消息形态；为 null 时默认按环境快照渲染
+     * （含 {@code <context>} 包装，人设块插在当前情境与感知背景之间）。
+     */
+    public interface FinalMessageRenderer {
+        String render(String prompt, String personaBlock);
+    }
+
+    /** 链上首次历史检索的成品结果（为空也是成品，不能靠空列表判断「还没算过」） */
+    public record CachedRecall(boolean completed, List<List<LLMMessage>> blocks) {
+
+        public static CachedRecall empty() {
+            return new CachedRecall(true, List.of());
+        }
+    }
+
+    /**
+     * 链上已完成的人设召回结果。
+     * <p>
+     * 携带取得该结果时的<b>完整配置快照</b>：配置不同（含模式切换、四栏内容改动）即视为无缓存，
+     * 必须重新召回，旧结果不得复用。
+     */
+    public record CachedPersonaRecall(boolean completed, MaidPersonaConfig config,
+                                      List<PersonaFragment> fragments) {
     }
 
     private final EntityMaid maid;
@@ -95,35 +131,21 @@ public final class HistoryContextSession {
      */
     private final SelfTalkHistoryAssembler.SourceIndex sourceIndex =
             new SelfTalkHistoryAssembler.SourceIndex();
-    /** 链上已完成的首次检索结果；非 null 表示不再规划、不再跑 BM25 */
+    /** 链上已完成的首次历史检索结果；非 null 表示不再规划历史、不再跑历史 BM25 */
     private final CachedRecall cachedRecall;
+    /** 链上已完成的人设召回结果；配置快照不一致时视为无缓存 */
+    private final CachedPersonaRecall cachedPersonaRecall;
+    /** 本次会话冻结的人设配置快照（模式 + 四栏） */
+    private final MaidPersonaConfig personaConfig;
+    /** 本轮触发内容（写进规划资料，供模型判断该查什么；可为 null） */
+    private final String triggerText;
     /** 派发许可：插话中断、请求作废等情况下返回 false 即放弃 */
     private final Supplier<Boolean> stillAllowed;
     private final Dispatcher dispatcher;
-    /** 检索成品的回报口（互聊链用；自话为 null） */
+    /** 召回成品的回报口（互聊链用；自话为 null） */
     private final RecallReporter recallReporter;
-    /**
-     * 最终 user message 的自定义渲染器（可空）：入参是拼装完毕的提示词（业务指令 + 各类说明段），
-     * 返回完整的 user message 文本。欢迎语等自带环境采集口径的调用方借此保留原有消息形态；
-     * 为 null 时默认按环境快照渲染（含 {@code <context>} 包装）。
-     */
-    private final Function<String, String> finalMessageRenderer;
-
-    /** 链上首次检索的成品结果（为空也是成品，不能靠空列表判断「还没算过」） */
-    public record CachedRecall(boolean completed, List<List<LLMMessage>> blocks) {
-
-        public static CachedRecall empty() {
-            return new CachedRecall(true, List.of());
-        }
-    }
-
-    private int corrections;
-    /** 本次会话是否已经派发过正式请求（防重复派发） */
-    private boolean dispatched;
-    /** 本次会话是否已被作废（作废后不再产生任何派发/纠正/召回回报；幂等标记） */
-    private boolean cancelled;
-    /** 本次会话的检索结果是否已回报（回报口只被调用一次） */
-    private boolean recallReported;
+    /** 最终 user message 的自定义渲染器（可空），见 {@link FinalMessageRenderer} */
+    private final FinalMessageRenderer finalMessageRenderer;
 
     /**
      * 可选的会话终止回调：本会话被 {@link #cancel()} 主动作废时在服务端主线程调用一次。
@@ -133,54 +155,32 @@ public final class HistoryContextSession {
      */
     private final Runnable onCancelled;
 
+    /** 在途的共用规划会话（无规划时 null；作废时一并静默收尾） */
+    private KeywordPlanningSession planning;
+    /** 本次规划的目标开关（供规划消息构造使用，与规划会话同源） */
+    private boolean planningHistoryEnabled;
+    private boolean planningPersonaEnabled;
+
+    /** 本次会话是否已经派发过正式请求（防重复派发） */
+    private boolean dispatched;
+    /** 本次会话是否已被作废（作废后不再产生任何派发/纠正/召回回报；幂等标记） */
+    private boolean cancelled;
+    /** 本次会话的历史检索结果是否已回报（回报口只被调用一次） */
+    private boolean historyReported;
     /**
-     * 在途规划请求的回调引用：作废/发出纠正时用于静默结束当前规划请求（迟到结果不再导出动作）。
-     * 全量/精简模式没有规划请求，恒为 null；正式请求已派发后也不再持有。
+     * 同步路径的收束结果：{@link #start()} 期间内联完成（缓存命中、无历史可检索、
+     * 同步发送失败）时置位，由 start 原样回传；异步路径保持 null。
      */
-    private KeywordPlanCallback activePlanCallback;
+    private StartOutcome syncOutcome;
 
     public HistoryContextSession(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
                                  String language, String basePrompt, HistoryContextMode mode,
                                  SelfTalkContexts.EnvironmentSnapshot environment,
                                  List<LLMMessage> systemPrefix, List<LLMMessage> fullHistory,
                                  List<LLMMessage> windowMessages, CachedRecall cachedRecall,
-                                 Supplier<Boolean> stillAllowed, Dispatcher dispatcher) {
-        this(maid, chatManager, site, language, basePrompt, mode, environment, systemPrefix,
-                fullHistory, windowMessages, cachedRecall, stillAllowed, dispatcher, null, null, null);
-    }
-
-    public HistoryContextSession(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
-                                 String language, String basePrompt, HistoryContextMode mode,
-                                 SelfTalkContexts.EnvironmentSnapshot environment,
-                                 List<LLMMessage> systemPrefix, List<LLMMessage> fullHistory,
-                                 List<LLMMessage> windowMessages, CachedRecall cachedRecall,
-                                 Supplier<Boolean> stillAllowed, Dispatcher dispatcher,
-                                 RecallReporter recallReporter) {
-        this(maid, chatManager, site, language, basePrompt, mode, environment, systemPrefix,
-                fullHistory, windowMessages, cachedRecall, stillAllowed, dispatcher, recallReporter, null, null);
-    }
-
-    public HistoryContextSession(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
-                                 String language, String basePrompt, HistoryContextMode mode,
-                                 SelfTalkContexts.EnvironmentSnapshot environment,
-                                 List<LLMMessage> systemPrefix, List<LLMMessage> fullHistory,
-                                 List<LLMMessage> windowMessages, CachedRecall cachedRecall,
-                                 Supplier<Boolean> stillAllowed, Dispatcher dispatcher,
-                                 RecallReporter recallReporter,
-                                 Function<String, String> finalMessageRenderer) {
-        this(maid, chatManager, site, language, basePrompt, mode, environment, systemPrefix,
-                fullHistory, windowMessages, cachedRecall, stillAllowed, dispatcher, recallReporter,
-                finalMessageRenderer, null);
-    }
-
-    public HistoryContextSession(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
-                                 String language, String basePrompt, HistoryContextMode mode,
-                                 SelfTalkContexts.EnvironmentSnapshot environment,
-                                 List<LLMMessage> systemPrefix, List<LLMMessage> fullHistory,
-                                 List<LLMMessage> windowMessages, CachedRecall cachedRecall,
-                                 Supplier<Boolean> stillAllowed, Dispatcher dispatcher,
-                                 RecallReporter recallReporter,
-                                 Function<String, String> finalMessageRenderer,
+                                 CachedPersonaRecall cachedPersonaRecall, MaidPersonaConfig personaConfig,
+                                 String triggerText, Supplier<Boolean> stillAllowed, Dispatcher dispatcher,
+                                 RecallReporter recallReporter, FinalMessageRenderer finalMessageRenderer,
                                  Runnable onCancelled) {
         this.maid = maid;
         this.chatManager = chatManager;
@@ -193,6 +193,9 @@ public final class HistoryContextSession {
         this.fullHistory = fullHistory;
         this.windowMessages = windowMessages;
         this.cachedRecall = cachedRecall;
+        this.cachedPersonaRecall = cachedPersonaRecall;
+        this.personaConfig = personaConfig == null ? MaidPersonaConfig.DEFAULT : personaConfig;
+        this.triggerText = triggerText;
         this.stillAllowed = stillAllowed;
         this.dispatcher = dispatcher;
         this.recallReporter = recallReporter;
@@ -201,21 +204,19 @@ public final class HistoryContextSession {
     }
 
     /**
-     * 会话被作废（业务判定本请求不再期待任何结果）时调用：终止在途规划请求并触发外部收尾。
+     * 会话被作废（业务判定本请求不再期待任何结果）时调用：静默结束在途规划并触发外部收尾。
      * <p>
-     * 不在此置 dispatched／改 dispatched 之外的状态：迟到结果仍可能进入 {@link #deliver} 系列，
-     * 但已被别的入口（如请求身份的停止标记、链中断）判过许可而沉默；本方法只负责把「规划请求
-     * 仍在飞行」这件事收束掉——让规划回调的迟到结果不再导出下一步动作。
-     * 幂等：第二次调用不再重复终止。
+     * 规划会话的取消不回调消费者，因此作废后不会再有正式派发、纠正或召回回报；
+     * 迟到结果由规划回调自身的作废标记挡下。幂等：第二次调用不再重复终止。
      */
     void cancel() {
         if (cancelled) {
             return;
         }
         cancelled = true;
-        if (activePlanCallback != null) {
-            activePlanCallback.completeSilently();
-            activePlanCallback = null;
+        if (planning != null) {
+            planning.cancel();
+            planning = null;
         }
         if (onCancelled != null) {
             onCancelled.run();
@@ -230,8 +231,8 @@ public final class HistoryContextSession {
     /**
      * 开始本次会话。
      * <p>
-     * 全量模式与精简模式都是同步完成；检索模式在需要规划时先发一次静默规划请求，
-     * 索引重建时先让出主线程算索引，再由回调驱动后续纠正或正式生成。
+     * 没有召回目标时同步完成（全量/精简模式的常规路径，以及链上已缓存全部结果的检索模式）；
+     * 需要规划时先发一次静默规划请求，再由回调驱动纠正或正式生成。
      * <p>
      * 互聊链上下文的「继续与否」判据是本次会话的<b>成品结果是否真正交付</b>（见 {@link Dispatcher}），
      * 因此插话中断后的迟到结果不会被链误认成「尚未结束」。
@@ -239,44 +240,267 @@ public final class HistoryContextSession {
      * @return 受理结果：同步派发成功／异步流程已受理／同步派发失败，见 {@link StartOutcome}
      */
     public StartOutcome start() {
-        return switch (mode) {
-            case FULL -> dispatchFull();
-            case COMPACT -> dispatchReduced(null, false);
+        switch (mode) {
+            case FULL, COMPACT -> {
+                if (needsPersonaRecall()) {
+                    // 全量／精简模式同样支持人设召回：只发规划，历史组装仍按原模式进行
+                    startPlanning(false, null);
+                } else {
+                    dispatchAssembled(List.of(), cachedPersonaFragments(), false);
+                }
+            }
             case RETRIEVAL -> startRetrieval();
-        };
+        }
+        return syncOutcome != null ? syncOutcome : StartOutcome.ACCEPTED_ASYNC;
     }
 
-    // ===== 全量模式 =====
+    // ===== 召回目标的判定 =====
 
     /**
-     * 全量：保留现有历史组装行为，不发规划请求、不建索引、不加新的说明段。
+     * 本轮是否需要为人设发起规划：四栏模式且动态人设非空，且链上没有本配置的召回结果。
      * <p>
-     * 全量模式不观测召回，链进入交付等待（不是「等不到」）——否则同链下一轮会在
+     * 「链上已完成（含空结果）+ 配置快照一致」才算有效缓存；人设一改，旧结果立即失效。
+     */
+    private boolean needsPersonaRecall() {
+        if (cachedPersonaRecall != null && cachedPersonaRecall.completed()
+                && personaConfig.equals(cachedPersonaRecall.config())) {
+            return false;
+        }
+        return MaidPersonaRuntime.hasDynamicPersona(personaConfig);
+    }
+
+    /** 链上可复用的人设召回片段（无有效缓存时为空列表） */
+    private List<PersonaFragment> cachedPersonaFragments() {
+        if (cachedPersonaRecall == null || !cachedPersonaRecall.completed()
+                || !personaConfig.equals(cachedPersonaRecall.config())) {
+            return List.of();
+        }
+        return cachedPersonaRecall.fragments();
+    }
+
+    // ===== 检索模式 =====
+
+    private void startRetrieval() {
+        // 链上已完成首次历史检索（含「结果为空」）：历史不再规划，但人设目标独立判断
+        if (cachedRecall != null && cachedRecall.completed()) {
+            if (needsPersonaRecall()) {
+                startPlanning(false, null);
+            } else {
+                dispatchAssembled(flattenAlive(cachedRecall.blocks()), cachedPersonaFragments(), true);
+            }
+            return;
+        }
+        boolean personaNeeded = needsPersonaRecall();
+        // 同步性判定：indexFor 的回调可能在缓存命中/构建失败时内联执行（此时透传同步派发结果），
+        // 也可能在索引重建后异步执行（此时按「已受理」收束）。收束规则：一旦发出规划请求，
+        // 本次触发即异步受理；未进入规划请求的路径全部同步透传
+        HistoryRetrievalCache.indexFor(maid, fullHistory, result -> {
+            // 索引可能是在文本执行器线程算完再回主线程的；本回调统一在主线程执行
+            if (!allowed()) {
+                syncOutcome = StartOutcome.FAILED;
+                return;
+            }
+            boolean historyNeeded = result.hasSearchableHistory();
+            if (!historyNeeded && !personaNeeded) {
+                // 没有可检索历史、也不需要人设召回：直接正式生成，不发送规划请求。
+                // 回报「已完成、结果为空」——同链后续轮次不再重复尝试
+                reportHistoryRecall(List.of());
+                dispatchAssembled(List.of(), List.of(), false);
+                return;
+            }
+            startPlanning(historyNeeded, result);
+        });
+    }
+
+    /**
+     * 发出共用的一次关键词规划（历史与人设两组关键词由同一次请求返回）。
+     *
+     * @param historyEnabled 历史目标是否启用（不需要时提示词要求返回空数组，消费端同样强制忽略）
+     * @param result         历史检索索引结果；历史目标未启用时为 null
+     */
+    private void startPlanning(boolean historyEnabled, HistoryRetrievalCache.Result result) {
+        boolean personaEnabled = needsPersonaRecall();
+        if (!historyEnabled && !personaEnabled) {
+            dispatchAssembled(List.of(), cachedPersonaFragments(), false);
+            return;
+        }
+        planningHistoryEnabled = historyEnabled;
+        planningPersonaEnabled = personaEnabled;
+        planning = new KeywordPlanningSession(maid, chatManager, site, historyEnabled, personaEnabled,
+                this::planningMessages, this::allowed,
+                plan -> onPlanned(plan, historyEnabled, personaEnabled, result), null, false);
+        planning.start();
+    }
+
+    /**
+     * 规划请求的消息列表：独立系统提示 + 一份「资料」用户消息。
+     * <p>
+     * 刻意<b>不</b>复用正式请求的整段 Prompt——那里含「正式台词输出格式」「Tool 策略」等业务指令，
+     * 会与「只输出一个 JSON 对象」的要求竞争。
+     *
+     * @param previousOutput 上次的错误输出（纠正时非 null）
+     * @param errorText      简短具体的错误说明（纠正时非 null）
+     */
+    private List<LLMMessage> planningMessages(String previousOutput, String errorText) {
+        List<LLMMessage> messages = new ArrayList<>(2);
+        messages.add(LLMMessage.systemChat(maid, SelfTalkPrompts.KEYWORD_PLAN_SYSTEM));
+        messages.add(LLMMessage.userChat(maid,
+                SelfTalkPrompts.buildKeywordPlanInput(language, systemPrefix, planningRecentDialogue(),
+                        latestSelfTalkMessage(), windowMessages, environment, triggerText,
+                        planningPersonaEnabled ? personaConfig.draft() : null,
+                        planningHistoryEnabled, planningPersonaEnabled, previousOutput, errorText)));
+        return messages;
+    }
+
+    /**
+     * 规划结果处理：两组关键词分别进入各自的索引，随后按原历史模式组装。
+     * <p>
+     * 规划会话已在终局时按目标开关过滤过关键词（未启用的目标恒为空），此处再按实际启用的目标
+     * 分别检索，不会因为模型多给了关键词就发起不该有的检索。
+     */
+    private void onPlanned(KeywordPlanningSession.Plan plan, boolean historyEnabled,
+                           boolean personaEnabled, HistoryRetrievalCache.Result result) {
+        planning = null;
+        if (!allowed()) {
+            return;
+        }
+        List<LLMMessage> recalledBlocks = List.of();
+        boolean historyRecalled = false;
+        if (historyEnabled && result != null) {
+            List<List<LLMMessage>> blocks = retrieve(plan.historyKeywords(), result);
+            recalledBlocks = SelfTalkHistoryAssembler.flattenBlocks(blocks);
+            historyRecalled = !recalledBlocks.isEmpty();
+            reportHistoryRecall(blocks);
+        } else if (mode == HistoryContextMode.RETRIEVAL) {
+            // 检索模式下历史目标本轮未发起检索：回报「已完成、结果为空」。
+            // 链上已有结果时该回报本就是空操作（同一女仆同一链只生效一次）
+            reportHistoryRecall(List.of());
+        }
+        List<PersonaFragment> fragments = List.of();
+        if (personaEnabled) {
+            fragments = MaidPersonaRuntime.recall(maid, personaConfig, plan.personaKeywords());
+            reportPersonaRecall(personaConfig, fragments);
+        }
+        dispatchAssembled(recalledBlocks, fragments, historyRecalled);
+    }
+
+    /** 最近一轮可检索玩家对话（规划资料用；不因用于规划就自动进入最终请求） */
+    private List<LLMMessage> planningRecentDialogue() {
+        var searchable = SelfTalkHistoryAssembler.filterSearchable(
+                SelfTalkHistoryAssembler.toSearchableView(fullHistory),
+                SelfTalkHistoryAssembler.selfTalkFingerprints(maid));
+        if (searchable.isEmpty()) {
+            return List.of();
+        }
+        List<DialogueBlock> blocks = com.maidmod.selftalk.history.PlayerDialogueLibrary
+                .buildBlocks(searchable.searchable());
+        if (blocks.isEmpty()) {
+            return List.of();
+        }
+        DialogueBlock last = blocks.get(blocks.size() - 1);
+        List<LLMMessage> recent = new ArrayList<>();
+        for (int i = last.startIndex(); i < last.endIndex(); i++) {
+            int historyIndex = searchable.historyIndexAt(i);
+            if (historyIndex >= 0) {
+                recent.add(fullHistory.get(historyIndex));
+            }
+        }
+        return List.copyOf(recent);
+    }
+
+    /** 把召回结果按块回报给链（同一女仆同一链只生效一次；空结果同样回报） */
+    private void reportHistoryRecall(List<List<LLMMessage>> blocks) {
+        if (recallReporter == null || historyReported) {
+            return;
+        }
+        historyReported = true;
+        recallReporter.reportHistory(blocks);
+    }
+
+    /** 把人设召回结果回报给链（配置快照一并带上；空结果同样算已完成） */
+    private void reportPersonaRecall(MaidPersonaConfig config, List<PersonaFragment> fragments) {
+        if (recallReporter == null) {
+            return;
+        }
+        recallReporter.reportPersona(config, fragments);
+    }
+
+    /** 按关键词跑 BM25，并把命中块映射回原始历史区消息（按块切分，顺序同历史） */
+    private List<List<LLMMessage>> retrieve(List<String> keywords, HistoryRetrievalCache.Result result) {
+        List<DialogueBlock> blocks = result.index().search(keywords);
+        if (blocks.isEmpty()) {
+            return List.of();
+        }
+        List<List<LLMMessage>> recalled = new ArrayList<>(blocks.size());
+        for (DialogueBlock block : blocks) {
+            List<LLMMessage> messages = SelfTalkHistoryAssembler.selectRecalledMessages(
+                    fullHistory, result.searchable(), List.of(block));
+            if (!messages.isEmpty()) {
+                recalled.add(messages);
+            }
+        }
+        return List.copyOf(recalled);
+    }
+
+    // ===== 组装与派发 =====
+
+    /**
+     * 按<b>原历史模式</b>组装并派发。
+     * <p>
+     * 人设召回块只进入本轮最后一条 user 消息的动态资料区（与当前情境相邻），
+     * 不进入历史区、不进检索库、也不伪装成过去的 assistant 发言。
+     *
+     * @param recalledBlocks   检索模式召回的历史块（已按历史顺序展平）；其他模式为空
+     * @param personaFragments 本轮的人设召回片段（可能为空：未命中即整段省略）
+     * @param recallNote       是否追加「召回片段是历史资料」的说明（仅历史召回需要）
+     */
+    private StartOutcome dispatchAssembled(List<LLMMessage> recalledBlocks,
+                                           List<PersonaFragment> personaFragments, boolean recallNote) {
+        String personaBlock = MaidPersonaRuntime.buildRecalledBlock(personaFragments, language);
+        StartOutcome outcome = switch (mode) {
+            case FULL -> dispatchFull(personaBlock);
+            case COMPACT -> dispatchReduced(null, personaBlock, false);
+            case RETRIEVAL -> dispatchReduced(recalledBlocks, personaBlock, recallNote);
+        };
+        syncOutcome = outcome;
+        return outcome;
+    }
+
+    /** 链上缓存的历史块需先按当前历史区复核有效性，再按历史顺序展平（与首次检索的成品同构） */
+    private List<LLMMessage> flattenAlive(List<List<LLMMessage>> blocks) {
+        return SelfTalkHistoryAssembler.flattenBlocks(
+                SelfTalkHistoryAssembler.retainAliveBlocks(blocks, fullHistory));
+    }
+
+    /**
+     * 全量：保留现有历史组装行为，不加新的历史说明段。
+     * <p>
+     * 全量模式不观测历史召回，链进入交付等待（不是「等不到」）——否则同链下一轮会在
      * 前一跳尚未交付时就派发，破坏串行语义。
      */
-    private StartOutcome dispatchFull() {
+    private StartOutcome dispatchFull(String personaBlock) {
         List<LLMMessage> history = rebuildHistoryWithSelfTalk();
         List<LLMMessage> messages = new ArrayList<>(systemPrefix);
         messages.addAll(history);
         messages.addAll(windowMessages);
         String prompt = basePrompt + SelfTalkContexts.latestSelfTalkNote(language, !selfTalkMessages.isEmpty())
                 + SelfTalkContexts.recalledHistoryNote(language, false);
-        messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt)));
+        messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt, personaBlock)));
         int historyCount = systemPrefix.size() + history.size();
         SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowMessages.size(), sourceIndex);
         return deliver(messages);
     }
-
-    // ===== 精简模式 =====
 
     /**
      * 精简：不注入玩家聊天原文，只保留已有摘要（在 systemPrefix 内）、
      * 最近一条可识别自话与当前互聊窗口。
      *
      * @param recalledBlocks 检索模式的召回块；精简模式传 null
+     * @param personaBlock   人设召回块（可能为空串）
      * @param recallNote     是否追加「召回片段是历史资料」的说明（仅检索模式）
      */
-    private StartOutcome dispatchReduced(List<LLMMessage> recalledBlocks, boolean recallNote) {
+    private StartOutcome dispatchReduced(List<LLMMessage> recalledBlocks, String personaBlock,
+                                         boolean recallNote) {
         // 合并视图先建：最新一条自话与它取自同一条记录，两条路径的段标签判据一致
         rebuildHistoryWithSelfTalk();
         LLMMessage latestSelfTalk = latestSelfTalkMessage();
@@ -294,17 +518,17 @@ public final class HistoryContextSession {
                 + SelfTalkContexts.latestSelfTalkNote(language, latestSelfTalk != null)
                 + SelfTalkContexts.recalledHistoryNote(language,
                 recallNote && recalledBlocks != null && !recalledBlocks.isEmpty());
-        messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt)));
+        messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt, personaBlock)));
         SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowMessages.size(), sourceIndex);
         return deliver(messages);
     }
 
     /** 渲染本轮最终 user message：默认按环境快照渲染；注入了自定义渲染器（如欢迎语）时走调用方口径 */
-    private String renderFinalUserMessage(String prompt) {
+    private String renderFinalUserMessage(String prompt, String personaBlock) {
         if (finalMessageRenderer != null) {
-            return finalMessageRenderer.apply(prompt);
+            return finalMessageRenderer.render(prompt, personaBlock);
         }
-        return SelfTalkContexts.renderConfiguredUserMessage(prompt, language, environment);
+        return SelfTalkContexts.renderConfiguredUserMessage(prompt, language, environment, personaBlock);
     }
 
     /**
@@ -347,181 +571,6 @@ public final class HistoryContextSession {
         return SelfTalkHistoryAssembler.asRequestMessage(record, sourceIndex);
     }
 
-    // ===== 检索模式 =====
-
-    private StartOutcome startRetrieval() {
-        // 链上已完成首次检索（含「结果为空」）：直接复用，不再规划、不再跑 BM25
-        if (cachedRecall != null && cachedRecall.completed()) {
-            return dispatchReduced(SelfTalkHistoryAssembler.flattenBlocks(
-                    SelfTalkHistoryAssembler.retainAliveBlocks(cachedRecall.blocks(), fullHistory)), true);
-        }
-        // 同步性判定：indexFor 的回调可能在缓存命中/构建失败时内联执行（此时透传同步派发结果），
-        // 也可能在索引重建后异步执行（此时按「已受理」收束，正式派发结果不回传本次调用）。
-        // 收束规则：一旦发出规划请求，本次触发即异步受理；未进入规划请求的路径全部同步透传
-        StartOutcome[] inlineOutcome = { null };
-        HistoryRetrievalCache.indexFor(maid, fullHistory, result -> {
-            // 索引可能是在文本执行器线程算完再回主线程的；本回调统一在主线程执行
-            if (!allowed()) {
-                inlineOutcome[0] = StartOutcome.FAILED;
-                return;
-            }
-            if (!result.hasSearchableHistory()) {
-                // 没有可检索历史：直接正式生成，不发送规划请求。
-                // 回报「已完成、结果为空」——同链后续轮次不再重复尝试
-                reportRecall(List.of());
-                inlineOutcome[0] = dispatchReduced(List.of(), false);
-                return;
-            }
-            inlineOutcome[0] = sendPlanRequest(planningMessages(null, null), result);
-        });
-        return inlineOutcome[0] == null ? StartOutcome.ACCEPTED_ASYNC : inlineOutcome[0];
-    }
-
-    /**
-     * 规划请求的消息列表：独立系统提示 + 一份「资料」用户消息。
-     * <p>
-     * 刻意<b>不</b>复用正式请求的整段 Prompt——那里含「正式台词输出格式」「Tool 策略」等业务指令，
-     * 会与「只输出一个 JSON 对象」的要求竞争。
-     *
-     * @param previousOutput 上次的错误输出（纠正时非 null）
-     * @param errorText      简短具体的错误说明（纠正时非 null）
-     */
-    private List<LLMMessage> planningMessages(String previousOutput, String errorText) {
-        List<LLMMessage> messages = new ArrayList<>(2);
-        messages.add(LLMMessage.systemChat(maid, SelfTalkPrompts.KEYWORD_PLAN_SYSTEM));
-        messages.add(LLMMessage.userChat(maid,
-                SelfTalkPrompts.buildKeywordPlanInput(language, systemPrefix, fullHistory,
-                        planningRecentDialogue(), latestSelfTalkMessage(), windowMessages,
-                        environment, previousOutput, errorText)));
-        return messages;
-    }
-
-    /** 最近一轮可检索玩家对话（规划资料用；不因用于规划就自动进入最终请求） */
-    private List<LLMMessage> planningRecentDialogue() {
-        var searchable = SelfTalkHistoryAssembler.filterSearchable(
-                SelfTalkHistoryAssembler.toSearchableView(fullHistory),
-                SelfTalkHistoryAssembler.selfTalkFingerprints(maid));
-        if (searchable.isEmpty()) {
-            return List.of();
-        }
-        List<DialogueBlock> blocks = com.maidmod.selftalk.history.PlayerDialogueLibrary
-                .buildBlocks(searchable.searchable());
-        if (blocks.isEmpty()) {
-            return List.of();
-        }
-        DialogueBlock last = blocks.get(blocks.size() - 1);
-        List<LLMMessage> recent = new ArrayList<>();
-        for (int i = last.startIndex(); i < last.endIndex(); i++) {
-            int historyIndex = searchable.historyIndexAt(i);
-            if (historyIndex >= 0) {
-                recent.add(fullHistory.get(historyIndex));
-            }
-        }
-        return List.copyOf(recent);
-    }
-
-    /**
-     * 发送关键词规划请求（结果经 {@link #onPlanOutcome} 异步回来）。
-     *
-     * @return 内联调用（缓存命中）时同步收束：请求未发出的各出口回传对应派发结果，
-     *         请求真实发出后为 {@link StartOutcome#ACCEPTED_ASYNC}；
-     *         纠正路径（onPlanOutcome）在异步上下文调用，返回值不消费
-     */
-    private StartOutcome sendPlanRequest(List<LLMMessage> messages, HistoryRetrievalCache.Result result) {
-        if (!allowed()) {
-            return StartOutcome.FAILED;
-        }
-        // 规划与纠正共用同一次在途身份：不重复经过全局发起限流，也不重设触发冷却
-        LLMClient client = site.client();
-        try {
-            KeywordPlanCallback planCallback = new KeywordPlanCallback(chatManager, messages, outcome ->
-                    onServerThread(() -> onPlanOutcome(outcome, result)));
-            activePlanCallback = planCallback;
-            client.chat(planCallback);
-        } catch (Throwable t) {
-            activePlanCallback = null;
-            // 传输阶段就抛异常（site.url 非法等）：本次不召回，仍进入一次正式生成
-            MaidSelfTalkMod.LOGGER.warn("Failed to dispatch keyword plan for maid {}, continue without recall",
-                    maid.getId(), t);
-            // 与其他失败出口一致：同步抛出同样回报「首次检索完成、结果为空」，
-            // 否则互聊链上本女仆的后续轮次会重复规划
-            reportRecall(List.of());
-            return dispatchReduced(List.of(), false);
-        }
-        return StartOutcome.ACCEPTED_ASYNC;
-    }
-
-    /**
-     * 规划结果处理。
-     * <p>
-     * 三条出口互斥：
-     * <ul>
-     *   <li>传输类失败（{@code errorText == null}）：本次不召回，进入一次正式生成，不消耗纠正预算；</li>
-     *   <li>格式错误且预算未耗尽：再发一次纠正请求（保留同一份规划基础输入，只附上次错误）；</li>
-     *   <li>成功：跑 BM25 召回，随后正式生成。</li>
-     * </ul>
-     * 第三次纠正仍失败时，本次召回结果为空，继续基础上下文的正式回复——
-     * 不回退全量、不编造关键词、不调用其他「修复模型」。
-     */
-    private void onPlanOutcome(KeywordPlanCallback.Outcome outcome, HistoryRetrievalCache.Result result) {
-        // 当前规划回调已收敛（正常成功/失败/格式错误都到这里），解除在途跟踪；
-        // 后续纠正请求由 sendPlanRequest 重新登记，作废时只对真正在途的规划请求收束
-        activePlanCallback = null;
-        if (!allowed()) {
-            return;
-        }
-        if (outcome.ok()) {
-            List<List<LLMMessage>> blocks = retrieve(outcome.keywords(), result);
-            reportRecall(blocks);
-            dispatchReduced(SelfTalkHistoryAssembler.flattenBlocks(blocks), true);
-            return;
-        }
-        if (outcome.errorText() == null) {
-            // 非格式错误（网络/HTTP/认证/限流/响应信封）：不用纠正预算盲目重试
-            reportRecall(List.of());
-            dispatchReduced(List.of(), false);
-            return;
-        }
-        if (corrections >= MAX_CORRECTIONS) {
-            MaidSelfTalkMod.LOGGER.warn("Keyword plan failed after {} corrections for maid {}, no recall",
-                    MAX_CORRECTIONS, maid.getId());
-            reportRecall(List.of());
-            dispatchReduced(List.of(), false);
-            return;
-        }
-        corrections++;
-        // 保留同一份规划基础输入，只附上上一次的错误输出与简短说明（不累积全部错误历史）
-        sendPlanRequest(planningMessages(outcome.rawOutput(), outcome.errorText()), result);
-    }
-
-    /** 把召回结果按块回报给链（同一女仆同一链只生效一次；空结果同样回报） */
-    private void reportRecall(List<List<LLMMessage>> blocks) {
-        if (recallReporter == null || recallReported) {
-            return;
-        }
-        recallReported = true;
-        recallReporter.report(blocks);
-    }
-
-    /** 按关键词跑 BM25，并把命中块映射回原始历史区消息（按块切分，顺序同历史） */
-    private List<List<LLMMessage>> retrieve(List<String> keywords, HistoryRetrievalCache.Result result) {
-        List<DialogueBlock> blocks = result.index().search(keywords);
-        if (blocks.isEmpty()) {
-            return List.of();
-        }
-        List<List<LLMMessage>> recalled = new ArrayList<>(blocks.size());
-        for (DialogueBlock block : blocks) {
-            List<LLMMessage> messages = SelfTalkHistoryAssembler.selectRecalledMessages(
-                    fullHistory, result.searchable(), List.of(block));
-            if (!messages.isEmpty()) {
-                recalled.add(messages);
-            }
-        }
-        return List.copyOf(recalled);
-    }
-
-    // ===== 派发 =====
-
     private boolean allowed() {
         return !dispatched && !cancelled && maid.isAlive() && (stillAllowed == null || stillAllowed.get());
     }
@@ -542,19 +591,10 @@ public final class HistoryContextSession {
         return StartOutcome.FAILED;
     }
 
-    /** 把响应线程的结果投递回服务端主线程 */
-    private void onServerThread(Runnable runnable) {
-        if (maid.level().getServer() == null || maid.level().getServer().isSameThread()) {
-            runnable.run();
-        } else {
-            maid.level().getServer().execute(runnable);
-        }
-    }
-
     /** 派发失败（含被中断／请求作废）时回报空召回：失败同样算「首次检索完成」，链不得继续等待 */
     private void settle(boolean delivered) {
         if (!delivered) {
-            reportRecall(List.of());
+            reportHistoryRecall(List.of());
         }
     }
 }

@@ -142,6 +142,13 @@ public final class SelfTalkHandler {
             state.playerChatCount = 0;
             state.playerChatSinceTick = -1;
         }
+        // 规划超时兜底：规划请求同样可能永不返回。必须真正取消那次规划（结束在途回调、摘除登记），
+        // 只清忙标记会让迟到的规划结果继续导出正式消息（见 SelfTalkState.PendingPlan）
+        int expiredPlans = state.cancelExpiredPlans(serverTick, PENDING_TIMEOUT_TICKS);
+        if (expiredPlans > 0) {
+            MaidSelfTalkMod.LOGGER.warn("{} persona planning session(s) timed out for maid {}, cancelled",
+                    expiredPlans, maid.getId());
+        }
         // AI 前置门槛
         MaidAIChatManager chatManager = maid.getAiChatManager();
         if (chatManager == null) {
@@ -154,8 +161,8 @@ public final class SelfTalkHandler {
         if (site == null || !site.enabled()) {
             return;
         }
-        // 无人设（无自定义设定且无模型默认设定）→ 不触发，不自动生成
-        if (chatManager.customSetting.isBlank() && chatManager.getSetting().isEmpty()) {
+        // 无人设（原版模式按 TLM 口径；四栏模式按四栏内容）→ 不触发，不自动生成人设
+        if (!MaidPersonaRuntime.hasUsablePersona(maid)) {
             return;
         }
         UUID ownerUuid = maid.getOwnerUUID();
@@ -169,7 +176,9 @@ public final class SelfTalkHandler {
             return;
         }
 
-        boolean busy = state.selfTalkPending || state.interChatPending || state.playerChatCount > 0;
+        // 在途规划同样算忙：规划是正式请求的前置阶段，此时再触发会让同一次触发重复发起
+        boolean busy = state.selfTalkPending || state.interChatPending || state.playerChatCount > 0
+                || state.isPlanning();
 
         // 欢迎检查（优先于自话，一次性、需空闲；忙时窗口期内每 tick 自然重试）
         if (!busy && Config.WELCOME_ENABLED.get() && !state.welcomedPlayers.contains(ownerUuid)) {
@@ -202,7 +211,8 @@ public final class SelfTalkHandler {
         // 空闲时先派发顺延队列里的请求（若有），派发后若变忙则本 tick 不再触发新请求
         if (!busy) {
             SelfTalkDispatcher.drainDeferred(maid);
-            if (state.selfTalkPending || state.interChatPending || state.playerChatCount > 0) {
+            if (state.selfTalkPending || state.interChatPending || state.playerChatCount > 0
+                    || state.isPlanning()) {
                 return;
             }
         }
@@ -543,7 +553,7 @@ public final class SelfTalkHandler {
     }
 
     /**
-     * 从候选中随机挑一只可用回答者：过滤在途（pending）/无 AI/开关关闭/互聊对锁中的女仆。
+     * 从候选中随机挑一只可用回答者：过滤在途（pending/规划）/无 AI/无人设/开关关闭/互聊对锁中的女仆。
      * 同 tick 双发起者选中同一回答者的竞态已被两点规避：发起者派发走 5~8s 全局节流（一次只放行一个发起者），
      * 且此处按 pending 过滤掉已在途女仆，故无需为回答者单独加「预留」标记。
      */
@@ -552,7 +562,7 @@ public final class SelfTalkHandler {
         long nowTick = level.getServer().getTickCount();
         for (EntityMaid m : candidates) {
             SelfTalkState.State s = SelfTalkState.get(m.getId());
-            if (s.selfTalkPending || s.interChatPending || s.playerChatCount > 0) {
+            if (s.selfTalkPending || s.interChatPending || s.playerChatCount > 0 || s.isPlanning()) {
                 continue;
             }
             // 互聊对锁：该女仆正与他人连续互聊中，不能被发起互聊
@@ -570,7 +580,8 @@ public final class SelfTalkHandler {
             if (site == null || !site.enabled()) {
                 continue;
             }
-            if (cm.customSetting.isBlank() && cm.getSetting().isEmpty()) {
+            // 无人设（原版模式按 TLM 口径；四栏模式按四栏内容）：不能作为回答者
+            if (!MaidPersonaRuntime.hasUsablePersona(m)) {
                 continue;
             }
             // 睡眠中的女仆不可被邀请当回答者（玩家开启睡觉时安静时，与本女仆自话 gate 同语义）

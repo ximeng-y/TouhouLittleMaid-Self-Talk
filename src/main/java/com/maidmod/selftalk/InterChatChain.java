@@ -2,6 +2,7 @@ package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.persona.PersonaFragment;
 
 import java.util.HashMap;
 import java.util.List;
@@ -57,6 +58,15 @@ public final class InterChatChain {
         private boolean recallCompleted;
         /** 首次召回的历史块（每项是一块按历史顺序排列的消息） */
         private List<List<LLMMessage>> blocks = List.of();
+        /**
+         * 该女仆在本链的人设召回是否已完成（「未命中/空结果」也算完成）。
+         * 与历史召回<b>分别</b>判断：FULL／COMPACT 下历史无需召回，人设结果照样记录与复用。
+         */
+        private boolean personaRecallCompleted;
+        /** 取得人设召回结果时的完整配置快照；与当前配置不一致即视为无缓存 */
+        private MaidPersonaConfig personaRecallConfig;
+        /** 首次召回的动态人设片段 */
+        private List<PersonaFragment> personaFragments = List.of();
         /** 本链该女仆的正式请求是否已实际派发：链上第 3 轮起的交接判据 */
         private boolean formalPhase;
         /** 是否被主人插话禁言：旧回复不得显示、播报、写窗口 */
@@ -91,6 +101,28 @@ public final class InterChatChain {
         private void completeRecall(List<List<LLMMessage>> recalled) {
             this.recallCompleted = true;
             this.blocks = recalled == null ? List.of() : List.copyOf(recalled);
+        }
+
+        /** 链上的人设召回结果；未完成、或配置快照已变（人设被改过）时返回 null，不得复用旧结果 */
+        public HistoryContextSession.CachedPersonaRecall cachedPersonaRecall(MaidPersonaConfig current) {
+            if (!personaRecallCompleted || current == null || !current.equals(personaRecallConfig)) {
+                return null;
+            }
+            return new HistoryContextSession.CachedPersonaRecall(true, personaRecallConfig, personaFragments);
+        }
+
+        /** 记下本链首次人设召回的成品结果（未命中也是成品） */
+        private void completePersonaRecall(MaidPersonaConfig config, List<PersonaFragment> fragments) {
+            this.personaRecallCompleted = true;
+            this.personaRecallConfig = config;
+            this.personaFragments = fragments == null ? List.of() : List.copyOf(fragments);
+        }
+
+        /** 人设已变更：本链该女仆的人设召回结果作废，后续轮次按新配置重新召回 */
+        private void clearPersonaRecall() {
+            this.personaRecallCompleted = false;
+            this.personaRecallConfig = null;
+            this.personaFragments = List.of();
         }
 
         /** 本链该女仆的正式请求是否已实际派发（规划／建索引阶段不算） */
@@ -273,6 +305,40 @@ public final class InterChatChain {
         Participant participant = participant(maid);
         if (!participant.recallCompleted) {
             participant.completeRecall(recalled);
+        }
+    }
+
+    /**
+     * 登记该女仆本链的人设召回结果（同一女仆只生效一次；未命中同样是成品）。
+     * <p>
+     * 与历史召回的缓存<b>分开</b>：FULL／COMPACT 下历史不需要召回，人设结果照样记录并复用；
+     * 缓存的可用性由 {@code personaRecallConfig} 与当前配置比对决定。
+     */
+    public void completePersonaRecall(EntityMaid maid, MaidPersonaConfig config,
+                                      List<PersonaFragment> fragments) {
+        Participant participant = participant(maid);
+        if (!participant.personaRecallCompleted) {
+            participant.completePersonaRecall(config, fragments);
+        }
+    }
+
+    /**
+     * 人设配置已变更：作废该女仆所在链上的人设召回结果，后续轮次按新配置重新召回。
+     * <p>
+     * 只清人设缓存，不动历史召回（历史与人设的召回互不影响）；女仆不在任何链上时无副作用。
+     */
+    public static void invalidatePersonaRecall(int maidId) {
+        Long chainId = ACTIVE_BY_MAID.get(maidId);
+        if (chainId == null) {
+            return;
+        }
+        InterChatChain chain = CHAINS.get(chainId);
+        if (chain == null) {
+            return;
+        }
+        Participant participant = chain.participants.get(maidId);
+        if (participant != null) {
+            participant.clearPersonaRecall();
         }
     }
 }
