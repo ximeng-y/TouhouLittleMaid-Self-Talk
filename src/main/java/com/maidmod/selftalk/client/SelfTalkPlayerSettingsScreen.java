@@ -119,6 +119,10 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     private Button environmentContextButton;
     /** 环境上下文浮层（本 Screen 内部管理的组件，不是另一个 Screen） */
     private final EnvironmentContextPanel environmentContextPanel;
+    /** 预制复用入口按钮（与环境上下文同排右半） */
+    private Button reuseEntryButton;
+    /** 预制复用浮层（同上；与环境上下文浮层互斥打开） */
+    private final SelfTalkReusePanel reusePanel;
     /** 布局（init 计算，render 复用；resize 重建时刷新） */
     private int leftX;
     private int rightX;
@@ -137,6 +141,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         this.parent = parent;
         // Screen.font 要到 init 才赋值，此处使用已初始化的客户端字体，并保留同一浮层实例。
         this.environmentContextPanel = new EnvironmentContextPanel(Minecraft.getInstance().font);
+        this.reusePanel = new SelfTalkReusePanel(Minecraft.getInstance().font);
     }
 
     @Override
@@ -236,27 +241,63 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                         "config.maid_self_talk.screen.player_settings.custom_prompt.override.tooltip")))
                 .build());
         // 环境上下文入口：放在右侧 Prompt 区（左列已有 8 枚按钮，再往左列追加会把页面继续撑高）。
+        // 原整行单按钮拆为同排两枚等高按钮（页面高度不增加）：短标签显示，全名与说明进 tooltip。
         // 入口本身始终可打开——即使管理员禁止编辑，也要能进去看到禁用说明
+        int entryWidth = panelW / 2 - 2;
         this.environmentContextButton = this.addRenderableWidget(Button.builder(
-                        Component.translatable("config.maid_self_talk.screen.player_settings.context.entry"),
+                        Component.translatable("config.maid_self_talk.screen.player_settings.context.entry.short"),
                         b -> openEnvironmentContextPanel())
-                .bounds(rightX, colTop + 172, panelW, 20)
-                .tooltip(Tooltip.create(Component.translatable(
-                        "config.maid_self_talk.screen.player_settings.context.entry.tooltip")))
+                .bounds(rightX, colTop + 172, entryWidth, 20)
+                .tooltip(Tooltip.create(entryTooltip("context.entry", false)))
+                .build());
+        this.reuseEntryButton = this.addRenderableWidget(Button.builder(
+                        Component.translatable("config.maid_self_talk.screen.player_settings.reuse.entry.short"),
+                        b -> openReusePanel())
+                .bounds(rightX + panelW - entryWidth, colTop + 172, entryWidth, 20)
+                .tooltip(Tooltip.create(entryTooltip("reuse.entry", true)))
                 .build());
         this.environmentContextPanel.layout(this.width, this.height);
+        this.reusePanel.layout(this.width, this.height);
         refreshButtonState();
     }
 
     /**
+     * 入口按钮 tooltip：完整名称 + 说明；预制复用追加金黄色实验警告（按钮原生 tooltip
+     * 不支持逐行配色，用带样式的兄弟组件拼出多行）。
+     */
+    private static Component entryTooltip(String detailKey, boolean experimental) {
+        Component detail = Component.translatable(
+                "config.maid_self_talk.screen.player_settings." + detailKey + ".tooltip");
+        if (!experimental) {
+            return detail;
+        }
+        return Component.empty()
+                .append(detail)
+                .append("\n")
+                .append(Component.translatable(
+                                "config.maid_self_talk.screen.player_settings.reuse.warning")
+                        .withStyle(net.minecraft.ChatFormatting.GOLD));
+    }
+
+    /**
      * 打开环境上下文浮层：先 flush Prompt 编辑（清掉输入框焦点，内容不清空——关闭浮层后仍要能继续编辑），
-     * 再让浮层换新会话并请求快照。
+     * 再让浮层换新会话并请求快照；预制复用浮层一并关闭（两个浮层互斥，避免叠加遮挡）。
      */
     private void openEnvironmentContextPanel() {
         flushPromptEdits();
         this.setFocused(null);
+        this.reusePanel.close();
         this.environmentContextPanel.layout(this.width, this.height);
         this.environmentContextPanel.open();
+    }
+
+    /** 打开预制复用浮层（与环境上下文浮层互斥）；会话与快照语义见 {@link SelfTalkReusePanel} */
+    private void openReusePanel() {
+        flushPromptEdits();
+        this.setFocused(null);
+        this.environmentContextPanel.close();
+        this.reusePanel.layout(this.width, this.height);
+        this.reusePanel.open(this.maid.getUUID());
     }
 
     /**
@@ -281,6 +322,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         }
         this.suspendPromptListener = false;
         this.environmentContextPanel.layout(width, height);
+        this.reusePanel.layout(width, height);
     }
 
     private Button addLeftButton(int leftX, int colTop, int yOffset, int w, int h,
@@ -535,6 +577,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     public void tick() {
         super.tick();
         this.environmentContextPanel.tick();
+        this.reusePanel.tick();
         // 焦点从某个输入框切出时保存（界面关闭另有 onClose 兜底）
         AbstractWidget focused = this.getFocused() instanceof AbstractWidget w ? w : null;
         if (this.lastFocusedBox != null && this.lastFocusedBox != focused) {
@@ -566,11 +609,11 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     }
 
     /**
-     * 导航协商（供 {@link SelfTalkSettingsBridge} 调用）：环境浮层打开时返回 false
+     * 导航协商（供 {@link SelfTalkSettingsBridge} 调用）：任一浮层打开时返回 false
      * （不保存、不切页，防止浮层输入状态带出）；否则保存 Prompt 编辑并清除输入框焦点后返回 true。
      */
     boolean prepareForNavigation() {
-        if (this.environmentContextPanel.isOpen()) {
+        if (this.environmentContextPanel.isOpen() || this.reusePanel.isOpen()) {
             return false;
         }
         flushPromptEdits();
@@ -578,15 +621,19 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         return true;
     }
 
-    // ===== 环境上下文浮层：事件转发（浮层优先，未使用也不透传） =====
+    // ===== 浮层：事件转发（浮层优先，未使用也不透传） =====
 
     /**
-     * 浮层打开时，鼠标点击／释放／拖动、滚轮、按键与字符输入一律先交给浮层；
+     * 任一浮层打开时，鼠标点击／释放／拖动、滚轮、按键与字符输入一律先交给浮层；
      * 浮层未用到的这些事件<b>也不得</b>透传给 Prompt 输入框或左列开关——
      * 浮层是模态的（点击面板外只拦截、不关闭、不透传）。
+     * 两个浮层互斥打开（打开一个会关另一个），转发按打开者分派。
      */
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (this.reusePanel.isOpen()) {
+            return this.reusePanel.mouseClicked(mouseX, mouseY, button);
+        }
         if (this.environmentContextPanel.isOpen()) {
             return this.environmentContextPanel.mouseClicked(mouseX, mouseY, button);
         }
@@ -595,6 +642,9 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (this.reusePanel.isOpen()) {
+            return this.reusePanel.mouseReleased(mouseX, mouseY, button);
+        }
         if (this.environmentContextPanel.isOpen()) {
             return this.environmentContextPanel.mouseReleased(mouseX, mouseY, button);
         }
@@ -603,6 +653,9 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (this.reusePanel.isOpen()) {
+            return this.reusePanel.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+        }
         if (this.environmentContextPanel.isOpen()) {
             return this.environmentContextPanel.mouseDragged(mouseX, mouseY, button, dragX, dragY);
         }
@@ -612,6 +665,9 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     /** NeoForge 1.21.1 的滚轮回调带横、纵两个滚动量，浮层只关心纵向 */
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (this.reusePanel.isOpen()) {
+            return this.reusePanel.mouseScrolled(scrollY);
+        }
         if (this.environmentContextPanel.isOpen()) {
             return this.environmentContextPanel.mouseScrolled(scrollY);
         }
@@ -621,6 +677,9 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     /** Esc 先关浮层，浮层关闭后才恢复原 Screen 的关闭行为 */
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (this.reusePanel.isOpen()) {
+            return this.reusePanel.keyPressed(keyCode, scanCode, modifiers);
+        }
         if (this.environmentContextPanel.isOpen()) {
             return this.environmentContextPanel.keyPressed(keyCode, scanCode, modifiers);
         }
@@ -629,6 +688,9 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
 
     @Override
     public boolean charTyped(char codePoint, int modifiers) {
+        if (this.reusePanel.isOpen()) {
+            return this.reusePanel.charTyped(codePoint, modifiers);
+        }
         if (this.environmentContextPanel.isOpen()) {
             return this.environmentContextPanel.charTyped(codePoint, modifiers);
         }
@@ -638,6 +700,11 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
     /** 环境上下文浮层的权威快照回包（会话/序号校验在浮层内完成） */
     public void applyEnvironmentContextResponse(EnvironmentContextConfigResponsePayload payload) {
         this.environmentContextPanel.applyResponse(payload);
+    }
+
+    /** 预制复用浮层的权威快照回包（会话/序号校验在浮层内完成） */
+    public void applyReuseConfigResponse(com.maidmod.selftalk.network.ReuseConfigResponsePayload payload) {
+        this.reusePanel.applyResponse(payload);
     }
 
     private void refreshButtonState() {
@@ -685,13 +752,14 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
                 "config.maid_self_talk.screen.player_settings.waiting_bubbles", onOff(waitingBubblesEnabled)));
         this.overrideButton.setMessage(Component.translatable(
                 "config.maid_self_talk.screen.player_settings.custom_prompt.override", onOff(overrideEnabled)));
-        // 环境上下文入口始终可点（管理员禁用时也要能进去看说明）
+        // 两个浮层入口始终可点（管理员禁用时也要能进去看说明）
         this.environmentContextButton.active = true;
+        this.reuseEntryButton.active = true;
     }
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        boolean panelOpen = this.environmentContextPanel.isOpen();
+        boolean panelOpen = this.environmentContextPanel.isOpen() || this.reusePanel.isOpen();
         // 浮层打开时把原页面控件按屏幕外鼠标坐标绘制：底层按钮不产生悬停高亮，
         // 也就不会与浮层的悬停提示叠加。浮层与其 tooltip 最后绘制，位于最上层。
         if (panelOpen) {
@@ -745,6 +813,7 @@ public class SelfTalkPlayerSettingsScreen extends Screen {
         }
         if (panelOpen) {
             this.environmentContextPanel.render(graphics, mouseX, mouseY, partialTick);
+            this.reusePanel.render(graphics, mouseX, mouseY, partialTick);
         }
     }
 

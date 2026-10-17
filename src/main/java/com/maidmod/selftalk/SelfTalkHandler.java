@@ -21,6 +21,7 @@ import net.minecraft.world.phys.AABB;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
@@ -346,10 +347,20 @@ public final class SelfTalkHandler {
         PersonaSplitService.onServerTick(event.getServer());
     }
 
-    /** 服务器停止：取消全部在途 AI 拆分任务 */
+    /** 服务器停止：取消全部在途 AI 拆分任务；预制复用库写出脏文件并释放内存缓存 */
     @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
         PersonaSplitService.onServerStopped();
+        SelfTalkReuseStore.release(event.getServer());
+    }
+
+    /** overworld 存档：预制复用库写出脏文件（每指纹一文件的增量保存，只写脏的） */
+    @SubscribeEvent
+    public static void onLevelSave(LevelEvent.Save event) {
+        if (event.getLevel() instanceof ServerLevel serverLevel
+                && serverLevel.getServer().overworld() == serverLevel) {
+            SelfTalkReuseStore.of(serverLevel.getServer()).saveDirty();
+        }
     }
 
     /**

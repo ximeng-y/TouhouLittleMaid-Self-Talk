@@ -94,6 +94,16 @@ public final class Config {
     /** 自话／欢迎语／互聊独立展示档案的总保留条数（每只女仆各自计算） */
     public static ModConfigSpec.IntValue CHAT_HISTORY_MAX_STORED;
 
+    // ===== 预制复用（实验性，默认关闭） =====
+    /** 环境匹配下限 n：候选条目与本次注入环境逐 key 严格相等的数量达标才算候选 */
+    public static ModConfigSpec.IntValue PREBUILT_MIN_MATCHING_CONTEXTS;
+    /** 命中概率（0~100）：候选充足后按此概率决定是否复用 */
+    public static ModConfigSpec.IntValue PREBUILT_HIT_CHANCE_PERCENT;
+    /** 候选条数下限 m：达标候选不足该数量时直接走真实生成 */
+    public static ModConfigSpec.IntValue PREBUILT_MIN_ELIGIBLE_ENTRIES;
+    /** 每个指纹每个来源（欢迎语／自话各自计）的库存条数上限 k */
+    public static ModConfigSpec.IntValue PREBUILT_MAX_ENTRIES_PER_SOURCE;
+
     // ===== 附近女仆身份 =====
     /** 附近女仆身份上下文注入开关（仅启动时读取，改动需重启） */
     public static ModConfigSpec.BooleanValue MAID_IDENTITY_ENABLED;
@@ -257,6 +267,25 @@ public final class Config {
                 调小后重新读档按最旧淘汰超出部分，被淘汰的展示记录不可恢复。
                 只允许在此配置文件修改，游戏内设置界面不提供该项。""")
                 .defineInRange("maxStoredMessages", 1000, 1, 100000);
+        builder.pop();
+
+        builder.push("prebuilt_reuse");
+        PREBUILT_MIN_MATCHING_CONTEXTS = builder.comment("""
+                预制复用的环境匹配下限 n：一条缓存回复的逐 key 环境内容与本次实际注入环境
+                严格相等（key 相同且值完全相同）的数量达到 n，该条才成为候选。
+                调大会让复用更难命中。正整数。""")
+                .defineInRange("minMatchingContexts", 4, 1, 64);
+        PREBUILT_HIT_CHANCE_PERCENT = builder.comment("""
+                预制复用的命中概率（0~100）：候选条数充足后按此概率决定本次是否复用，
+                未命中照常真实生成。0 = 从不复用，100 = 候选充足时必定复用。""")
+                .defineInRange("hitChancePercent", 60, 0, 100);
+        PREBUILT_MIN_ELIGIBLE_ENTRIES = builder.comment("""
+                预制复用的候选条数下限 m：达标候选不足该数量时不掷概率、直接真实生成。正整数。""")
+                .defineInRange("minEligibleEntries", 8, 1, 100000);
+        PREBUILT_MAX_ENTRIES_PER_SOURCE = builder.comment("""
+                每个指纹每个来源的库存条数上限 k：欢迎语与自话两组各自计算。
+                追加时超出上限按存储日期移除最旧项；调小后在下一次新增时裁剪。正整数。""")
+                .defineInRange("maxEntriesPerSource", 300, 1, 100000);
         builder.pop();
 
         builder.push("maid_identity");

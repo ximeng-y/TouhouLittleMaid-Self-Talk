@@ -152,6 +152,27 @@ public final class SelfTalkAttachments {
                             .serialize(Codec.unboundedMap(Codec.STRING, Codec.STRING)).build());
 
     /**
+     * 预制复用玩家默认开关(Level):玩家 UUID -> true（仅存 true 项，缺失 = 关闭）。
+     * <p>
+     * 实验性功能，默认关闭。管理员关闭玩家配置时有效值为关闭，但这里的已存偏好必须保留，
+     * 功能恢复后继续生效。
+     */
+    public static final Supplier<AttachmentType<Map<String, Boolean>>> LEVEL_PREBUILT_REUSE_ENABLED =
+            ATTACHMENT_TYPES.register("level_prebuilt_reuse_enabled",
+                    () -> AttachmentType.builder((Supplier<Map<String, Boolean>>) HashMap::new)
+                            .serialize(Codec.unboundedMap(Codec.STRING, Codec.BOOL)).build());
+
+    /**
+     * 预制复用单只覆盖(Level):玩家 UUID -> 女仆 UUID -> 显式布尔。
+     * <p>
+     * 与自话/互聊名单不同：<b>条目存在即覆盖</b>（true/false 都是显式覆盖），
+     * 恢复继承才删键；两种显式值都占覆盖条目容量。
+     */
+    public static final Supplier<AttachmentType<Map<String, Map<String, Boolean>>>> LEVEL_PREBUILT_REUSE_MAID_OVERRIDES =
+            ATTACHMENT_TYPES.register("level_prebuilt_reuse_maid_overrides",
+                    SelfTalkAttachments::buildLevelMaidOverrides);
+
+    /**
      * 女仆自话回复指纹集（来源判定用，挂女仆实体）。
      * <p>
      * 指纹 = (role, message, gameTime) 三元组拼接串。TLM 历史 deque 中自话回复与主人聊天回复

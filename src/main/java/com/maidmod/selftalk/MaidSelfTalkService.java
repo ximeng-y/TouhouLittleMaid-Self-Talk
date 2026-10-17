@@ -2,17 +2,19 @@ package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.HistoryMessagesCheck;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
-import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.UserPromptContexts;
+import com.github.tartaricacid.touhoulittlemaid.ai.manager.response.ResponseChat;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMSite;
 import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import net.minecraft.server.MinecraftServer;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 女仆自话服务：新公开入口（本 mod 定义，供状态机调用）。
@@ -119,11 +121,15 @@ public final class MaidSelfTalkService {
 
         // 欢迎语与自话共用同一套历史上下文模式组装（全量/精简/检索对欢迎语同样生效）；
         // 环境采集保留欢迎语原有口径：分类级随机 + TLM 固定上下文，不读三态偏好、不消费感知事件——
-        // 通过自定义最终消息渲染器实现，会话的环境快照传 null（检索规划输入对此 null 安全）
+        // 通过自定义最终消息渲染器实现，会话的环境快照传 null（检索规划输入对此 null 安全）。
+        // 欢迎语快照在触发时一次定格（固定分类行 + 抽中情境 + 逐 key 匹配表），
+        // 渲染与预制复用匹配都读这份快照，不再重跑抽样辅助方法
         HistoryContextMode mode = PlayerSettingsStore.getHistoryContextModeForMaid(
                 maid.level().getServer(), maid);
         SelfTalkContexts.EnvironmentSnapshot environment = welcome ? null
                 : SelfTalkContexts.collectEnvironment(maid, selfTalkLanguage);
+        SelfTalkContexts.WelcomeEnvironmentSnapshot welcomeEnvironment = welcome
+                ? SelfTalkContexts.collectWelcomeEnvironment(maid) : null;
         SelfTalkHistoryAssembler.HistoryLayout layout =
                 SelfTalkHistoryAssembler.split(messages, historyCount, interWindow.size());
         boolean toolEnabled = PlayerSettingsStore.isToolCallEnabledForMaid(maid.level().getServer(), maid);
@@ -132,6 +138,45 @@ public final class MaidSelfTalkService {
         // 令牌在会话开始这一刻捕获：检索模式的规划可能耗时很久，若等到正式派发时才取，
         // 清空恰好发生在规划期间就会被漏掉（迟到结果会照常写档案）
         SelfTalkRequestToken token = SelfTalkRequestToken.capture(maid.getId());
+
+        // 预制复用（实验性，默认关闭）：有效开关按玩家默认 + 单只三态判定；
+        // 命中即直接投放旧稿（跳过历史检索/人设召回/真实生成），未命中带冻结凭据继续正常生成链
+        if (PlayerSettingsStore.isPrebuiltReuseEnabledForMaid(maid.level().getServer(), maid)) {
+            String fingerprint = SelfTalkReuseService.fingerprintOf(maid);
+            String source = welcome ? SelfTalkReuseStore.SOURCE_WELCOME : SelfTalkReuseStore.SOURCE_SELF_TALK;
+            Map<String, String> matchEntries = welcome
+                    ? welcomeEnvironment.matchEntries() : environment.injectedEntries();
+            SelfTalkReuseStore.PrebuiltEntry reused = SelfTalkReuseService.tryMatch(
+                    maid.level().getServer(), maid.getRandom(), source, fingerprint,
+                    matchEntries, selfTalkLanguage);
+            if (reused != null) {
+                return deliverReused(maid, chatManager, site, fingerprint, reused, welcome, keep,
+                        broadcastRange, toolEnabled, token, messages);
+            }
+            SelfTalkReuseService.ArchiveData archiveData = SelfTalkReuseService.archiveData(
+                    fingerprint, source, matchEntries, selfTalkLanguage);
+            return startGeneration(maid, chatManager, site, selfTalkLanguage, prompt, mode, environment,
+                    welcomeEnvironment, layout, cachedRecall, personaConfig, toolEnabled, token,
+                    welcome, keep, broadcastRange, archiveData);
+        }
+        return startGeneration(maid, chatManager, site, selfTalkLanguage, prompt, mode, environment,
+                welcomeEnvironment, layout, cachedRecall, personaConfig, toolEnabled, token,
+                welcome, keep, broadcastRange, null);
+    }
+
+    /**
+     * 创建历史上下文会话并启动（复用未命中或功能关闭时的正常生成链；环境/人设/令牌均已冻结）。
+     */
+    private static boolean startGeneration(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
+                                           String selfTalkLanguage, String prompt, HistoryContextMode mode,
+                                           SelfTalkContexts.EnvironmentSnapshot environment,
+                                           SelfTalkContexts.WelcomeEnvironmentSnapshot welcomeEnvironment,
+                                           SelfTalkHistoryAssembler.HistoryLayout layout,
+                                           HistoryContextSession.CachedRecall cachedRecall,
+                                           MaidPersonaConfig personaConfig, boolean toolEnabled,
+                                           SelfTalkRequestToken token, boolean welcome, int keep,
+                                           double broadcastRange,
+                                           SelfTalkReuseService.ArchiveData archiveData) {
         HistoryContextSession session = new HistoryContextSession(maid, chatManager, site, selfTalkLanguage,
                 prompt, mode, environment, layout.systemPrefix(), layout.history(), layout.window(),
                 cachedRecall,
@@ -142,12 +187,12 @@ public final class MaidSelfTalkService {
                         : SelfTalkPrompts.planTriggerSelfTalk(selfTalkLanguage),
                 token::isValid,
                 prepared -> dispatchSelfTalk(maid, chatManager, site, prepared, welcome, keep, broadcastRange,
-                        toolEnabled, token),
+                        toolEnabled, token, archiveData),
                 null,
-                // 欢迎语保留原有环境采集口径：人设召回块接在业务提示词之后、随机情境之前，
+                // 欢迎语用触发时定格的快照渲染：人设召回块接在业务提示词之后、随机情境之前，
                 // 不改变原生 <context> 包装与随机情境的既有位置
-                welcome ? (p, personaBlock) -> UserPromptContexts.addContext(maid,
-                        p + personaBlock + SelfTalkContexts.buildRandomContext(maid)) : null,
+                welcome ? (p, personaBlock) -> SelfTalkContexts.renderFrozenWelcomeUserMessage(
+                        p, personaBlock, welcomeEnvironment) : null,
                 null);
         // 全量/精简模式同步派发：结果如实上报；检索模式在建索引/规划期间按「已受理」收束，
         // 其后的正式派发（含失败）不再回传本次调用
@@ -155,13 +200,71 @@ public final class MaidSelfTalkService {
     }
 
     /**
+     * 投放复用命中的旧稿（服务端主线程）：置位 pending、挂等待气泡后按是否需要 TTS 翻译分流——
+     * <ul>
+     *   <li>无需翻译（TTS 关闭／站点不可用／缓存语言与当前一致）：直接走
+     *       {@link SelfTalkCallback#deliverReused} 的统一交付链；</li>
+     *   <li>需要翻译：翻译会话走静默在途路径（清空/人设变更/状态移除/超时统一取消），
+     *       成功且条目仍在库内则只覆写该条目的 TTS 段（淘汰条目绝不复活），
+     *       失败则纯文本投放（显示缓存上屏文本，不发错误语言的 TTS，不回退全量生成）。</li>
+     * </ul>
+     * 复用结果由 archiveData=null 豁免入库，绝不二次入库翻新时间戳。
+     */
+    private static boolean deliverReused(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
+                                         String fingerprint, SelfTalkReuseStore.PrebuiltEntry entry,
+                                         boolean welcome, int keep, double broadcastRange, boolean toolEnabled,
+                                         SelfTalkRequestToken token, List<LLMMessage> messages) {
+        SelfTalkState.State state = SelfTalkState.get(maid.getId());
+        state.selfTalkPending = true;
+        state.selfTalkPendingSinceTick = maid.level().getServer().getTickCount();
+        SelfTalkCallback callback = new SelfTalkCallback(chatManager, messages, welcome, keep,
+                broadcastRange, toolEnabled, token);
+        state.currentSelfTalkCallback = callback;
+
+        boolean ttsActive = AIConfig.TTS_ENABLED.get() && chatManager.getTTSSite() != null
+                && chatManager.getTTSSite().enabled();
+        String targetLanguage = chatManager.getTTSLanguage();
+        boolean needsTranslation = ttsActive && entry.ttsLanguage != null
+                && !entry.ttsLanguage.equals(targetLanguage);
+        if (!needsTranslation) {
+            callback.deliverReused(new ResponseChat(entry.chatText, entry.ttsText));
+            return true;
+        }
+        MinecraftServer server = maid.level().getServer();
+        new SelfTalkTtsTranslationSession(maid, chatManager, site, entry.chatText,
+                entry.ttsLanguage, targetLanguage, token::isValid, outcome -> {
+            // 交付前重判：令牌、有效开关、请求身份（回调仍是「当前」自话请求）任一失效即静默作废
+            SelfTalkState.State st = SelfTalkState.peek(maid.getId());
+            boolean stillCurrent = st != null && st.currentSelfTalkCallback == callback;
+            if (!token.isValid() || !maid.isAlive() || !stillCurrent
+                    || !PlayerSettingsStore.isPrebuiltReuseEnabledForMaid(server, maid)) {
+                callback.discardReusedDelivery();
+                return;
+            }
+            if (outcome.ok()) {
+                // 只覆写仍在库内的同一条目；条目已被淘汰则仅投放、不回写
+                SelfTalkReuseStore.of(server).updateTts(fingerprint, welcome
+                                ? SelfTalkReuseStore.SOURCE_WELCOME : SelfTalkReuseStore.SOURCE_SELF_TALK,
+                        entry, outcome.translated(), targetLanguage);
+                callback.deliverReused(new ResponseChat(entry.chatText, outcome.translated()));
+            } else {
+                callback.deliverReusedTextOnly(new ResponseChat(entry.chatText, entry.ttsText));
+            }
+        }, callback::discardReusedDelivery).start();
+        return true;
+    }
+
+    /**
      * 派发自话请求（消息列表已按模式组装完毕）。
      * <p>
      * Tool 判定在派发时取（dispatcher 顺延队列是延迟派发的，入队时不判定）。
+     * {@code archiveData} 为本次触发冻结的预制复用入库凭据（未启用时 null），
+     * 回复验证通过后据此追加一条入库。
      */
     private static boolean dispatchSelfTalk(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
                                             List<LLMMessage> messages, boolean welcome, int keep,
-                                            double broadcastRange, boolean toolEnabled, SelfTalkRequestToken token) {
+                                            double broadcastRange, boolean toolEnabled, SelfTalkRequestToken token,
+                                            SelfTalkReuseService.ArchiveData archiveData) {
         // 标记进行中（防重入）
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.selfTalkPending = true;
@@ -171,7 +274,7 @@ public final class MaidSelfTalkService {
         SelfTalkCallback callback = null;
         try {
             callback = new SelfTalkCallback(chatManager, messages, welcome, keep,
-                    broadcastRange, toolEnabled, token);
+                    broadcastRange, toolEnabled, token, archiveData, false);
             state.currentSelfTalkCallback = callback;
             client.chat(callback);
         } catch (Throwable t) {

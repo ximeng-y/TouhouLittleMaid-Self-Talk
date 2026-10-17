@@ -1,14 +1,27 @@
 package com.maidmod.selftalk.mixin;
 
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback;
+import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.tts.TTSSite;
 import com.maidmod.selftalk.SelfTalkCallback;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * 给自话／欢迎语<b>未开启 TTS 时</b>的聊天文本上屏补上清空令牌判定。
+ * 自话／欢迎语回调的两处窄注入：
+ * <ul>
+ *   <li><b>延迟文字上屏的清空判定</b>：未开启 TTS 时 {@code LLMCallback.onSuccess} 改为
+ *       {@code server.submit} 一个主线程任务写气泡与主人聊天栏，外层判定与任务执行之间
+ *       仍可能插进一次清空，任务执行当下再判一次（见下）；</li>
+ *   <li><b>翻译失败的纯文本投放</b>：预制复用命中后 TTS 翻译失败时，
+ *       {@code SelfTalkCallback} 带纯文本标记走 {@code super.onSuccess}——
+ *       这里把 {@code getTTSSite()} 窄重定向为 null（<b>仅</b>当宿主是带标记的
+ *       {@link SelfTalkCallback}），让缓存的上屏文本走 TLM 原生文字分支，
+ *       绝不把错误语言的缓存 TTS 段送合成。其余回调（玩家聊天、互聊、普通自话）不受影响。</li>
+ * </ul>
  * <p>
  * 关闭 TTS（或 TTS 站点不可用）时，{@code LLMCallback.onSuccess} 不发起语音合成，而是
  * {@code server.submit} 一个主线程任务，由本 mixin 注入的 {@code lambda$onSuccess$1} 把旧聊天文本
@@ -32,4 +45,20 @@ public abstract class SelfTalkLateDisplayMixin {
             ci.cancel();
         }
     }
+
+    /**
+     * 翻译失败后的纯文本投放：宿主为带标记的 {@link SelfTalkCallback} 时，
+     * {@code onSuccess} 里的 {@code getTTSSite()} 判定改返回 null，
+     * 强制 TLM 走 else 分支（延迟文字上屏，仍受上面的清空判定保护）。
+     */
+    @Redirect(method = "onSuccess",
+            at = @At(value = "INVOKE",
+                    target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/manager/entity/MaidAIChatManager;getTTSSite()Lcom/github/tartaricacid/touhoulittlemaid/ai/service/tts/TTSSite;"))
+    private TTSSite maid_self_talk$forceTextOnlyDelivery(MaidAIChatManager chatManager) {
+        if ((Object) this instanceof SelfTalkCallback selfTalk && selfTalk.forceTextOnly()) {
+            return null;
+        }
+        return chatManager.getTTSSite();
+    }
 }
+
