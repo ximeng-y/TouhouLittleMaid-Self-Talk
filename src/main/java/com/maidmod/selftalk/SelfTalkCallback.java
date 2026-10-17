@@ -50,15 +50,37 @@ public class SelfTalkCallback extends LLMCallback {
      * 不发事件、不广播，只清自己的资源；pending 复位也不得误清新请求的状态。
      */
     private final SelfTalkRequestToken token;
+    /**
+     * 预制复用的入库凭据（真实生成链携带）：回复验证通过后据此追加一条入库；
+     * 命中复用的投放为 null（复用结果绝不二次入库），携带凭据但中途失败时自然作废。
+     */
+    private final SelfTalkReuseService.ArchiveData archiveData;
+    /** 本回调是否为「复用投放」（只影响入库豁免，展示/广播/档案照常） */
+    private final boolean reusedSource;
+    /**
+     * 翻译失败后的纯文本投放标记：仅作用于本次 {@code super.onSuccess}，
+     * 令 TLM 的 getTTSSite() 判空（经 {@code SelfTalkLateDisplayMixin} 的窄重定向），
+     * 让缓存的上屏文本走原生文字分支、不发错误语言的 TTS。
+     */
+    private boolean forceTextOnly;
 
     public SelfTalkCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
                             boolean welcome, int keepSelfTalkCount, double broadcastRange, boolean toolEnabled,
                             SelfTalkRequestToken token) {
+        this(chatManager, messages, welcome, keepSelfTalkCount, broadcastRange, toolEnabled, token, null, false);
+    }
+
+    public SelfTalkCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
+                            boolean welcome, int keepSelfTalkCount, double broadcastRange, boolean toolEnabled,
+                            SelfTalkRequestToken token, SelfTalkReuseService.ArchiveData archiveData,
+                            boolean reusedSource) {
         super(chatManager, messages);
         this.welcome = welcome;
         this.keepSelfTalkCount = keepSelfTalkCount;
         this.broadcastRange = broadcastRange;
         this.token = token;
+        this.archiveData = archiveData;
+        this.reusedSource = reusedSource;
         // Tool 关闭时模型看不到工具定义；开启时由 TLM 工具循环接管
         this.needAddTools = toolEnabled;
         // 父构造器已创建等待气泡，这里在 welcome 等字段赋值后标记来源（欢迎语不标记，
@@ -153,10 +175,64 @@ public class SelfTalkCallback extends LLMCallback {
             // 与玩家 chat 路径写入 TLM 历史的形态一致，模型侧契约无变化
             AutonomousChatRecord record = archiveSelfTalk(maid, responseChat.toString(),
                     responseChat.getChatText());
+            // 预制复用入库：真实生成链凭据齐全且开关仍开时追加一条（复用投放 archiveData 为 null，天然豁免）
+            maybeAppendPrebuilt(maid, responseChat);
             MinecraftForge.EVENT_BUS.post(new MaidChatReplyEvent(maid, responseChat.getChatText(), welcome));
             MaidSelfTalkService.onSelfTalkFinished(maid, this, record);
             broadcastToNearby(maid, responseChat.getChatText());
         });
+    }
+
+    /**
+     * 预制复用入库判定（服务端主线程）：凭据存在、非复用投放、令牌有效、
+     * 聊天与 TTS 两段都非空白（段标签清洗已在 super.onSuccess 头部完成）、
+     * 且当轮有效开关仍开——任一不满足即放弃，绝不写入半个条目。
+     * 入库数据用<b>触发时冻结</b>的凭据（指纹/环境表/上屏语言），不读当下的新环境与人设。
+     */
+    private void maybeAppendPrebuilt(EntityMaid maid, ResponseChat responseChat) {
+        if (archiveData == null || reusedSource || isRequestInvalidated()) {
+            return;
+        }
+        if (responseChat.getChatText() == null || responseChat.getChatText().isBlank()
+                || responseChat.getTtsText() == null || responseChat.getTtsText().isBlank()) {
+            return;
+        }
+        if (!PlayerSettingsStore.isPrebuiltReuseEnabledForMaid(maid.level().getServer(), maid)) {
+            return;
+        }
+        SelfTalkReuseService.appendEntry(maid.level().getServer(), archiveData,
+                responseChat.getChatText(), responseChat.getTtsText(), chatManager.getTTSLanguage());
+    }
+
+    /**
+     * 复用投放入口（服务端主线程调用）：命中旧稿后走与真实回复完全一致的交付链
+     * （气泡、主人聊天栏、独立档案、有效上下文、回复事件、遗忘检查、附近广播、原生 TTS），
+     * 区别仅是跳过入库（archiveData 为 null）且不产生任何 LLM 请求。
+     */
+    public void deliverReused(ResponseChat responseChat) {
+        forceTextOnly = false;
+        onSuccess(responseChat);
+    }
+
+    /**
+     * 翻译失败后的纯文本投放：缓存的上屏文本照常显示，但强制 TLM 走原生文字分支，
+     * 绝不发出错误语言的 TTS；不改库、不回退全量生成。
+     * ResponseChat 仍携带非空白的缓存 TTS 段（仅供上游空白校验），真正送合成前已被重定向拦下。
+     */
+    public void deliverReusedTextOnly(ResponseChat responseChat) {
+        forceTextOnly = true;
+        onSuccess(responseChat);
+    }
+
+    /** 复用投放在交付前的静默作废（翻译会话被清空等取消时调用）：只清本请求的气泡与 pending */
+    public void discardReusedDelivery() {
+        discardWaitingBubble();
+        resetSelfTalkPending();
+    }
+
+    /** 是否为纯文本投放（供 {@code SelfTalkLateDisplayMixin} 的 getTTSSite 重定向读取） */
+    public boolean forceTextOnly() {
+        return forceTextOnly;
     }
 
     /**
@@ -243,9 +319,10 @@ public class SelfTalkCallback extends LLMCallback {
 
     /**
      * 复位本请求的自话 pending（服务端主线程）：只清仍指向本回调的条目，
-     * 清空作废的旧回调不得清掉清空之后新请求的 pending。
+     * 清空作废的旧回调不得经 {@code get()} 重建状态条目，
+     * 也不得清掉清空之后新请求的 pending。包级私有：复用投放在交付前的静默作废同样收尾于此。
      */
-    private void resetSelfTalkPending() {
+    void resetSelfTalkPending() {
         SelfTalkState.State state = SelfTalkState.peek(getMaid().getId());
         if (state == null || !isRequestOwner(state)) {
             return;

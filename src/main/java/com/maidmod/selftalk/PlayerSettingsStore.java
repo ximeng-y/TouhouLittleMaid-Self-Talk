@@ -396,4 +396,76 @@ public final class PlayerSettingsStore {
         }
         return getHistoryContextMode(server, ownerUuid);
     }
+
+    // ===== 预制复用 =====
+
+    /**
+     * 玩家预制复用默认开关（缺省 = 关闭，实验性功能）。
+     * <p>
+     * 只表达玩家自己的选择；有效值由 {@link #isPrebuiltReuseEnabledForMaid} 统一计算
+     * （管理员关闸或无主女仆时有效值为关闭，但玩家原来的选择必须保留）。
+     */
+    public static boolean isPrebuiltReuseEnabled(MinecraftServer server, UUID playerUuid) {
+        if (playerUuid == null) {
+            return false;
+        }
+        return data(server).isPrebuiltReuseEnabled(playerUuid);
+    }
+
+    /** 玩家预制复用默认开关：开启时存 true，关闭时删键（缺省即关闭，不落无意义的 false） */
+    public static void setPrebuiltReuseEnabled(MinecraftServer server, UUID playerUuid, boolean enabled) {
+        if (playerUuid == null) {
+            return;
+        }
+        data(server).setPrebuiltReuseEnabled(playerUuid, enabled);
+    }
+
+    /**
+     * 单只女仆的预制复用覆盖：条目存在返回显式布尔（true/false 都是覆盖），
+     * 无条目返回 {@code null} = 跟随玩家默认。
+     */
+    public static Boolean getPrebuiltReuseMaidOverride(MinecraftServer server, UUID playerUuid, UUID maidUuid) {
+        if (playerUuid == null || maidUuid == null) {
+            return null;
+        }
+        return data(server).getPrebuiltReuseMaidOverride(playerUuid, maidUuid);
+    }
+
+    /** 单只覆盖条目数（两种显式布尔都占条目；恢复继承删除条目） */
+    public static int countPrebuiltReuseMaidOverrides(MinecraftServer server, UUID playerUuid) {
+        return data(server).countPrebuiltReuseMaidOverrides(playerUuid);
+    }
+
+    /**
+     * 写单只覆盖：非 null 写显式布尔（true/false 都落盘为覆盖条目），
+     * {@code null} 恢复继承并删键。空内表时移除外层键（轻量化惯例）。
+     */
+    public static void setPrebuiltReuseMaidOverride(MinecraftServer server, UUID playerUuid,
+                                                    UUID maidUuid, Boolean override) {
+        if (playerUuid == null || maidUuid == null) {
+            return;
+        }
+        data(server).setPrebuiltReuseMaidOverride(playerUuid, maidUuid, override);
+    }
+
+    /**
+     * 女仆预制复用<b>有效值</b>（派发侧统一判定口，须在<b>实际触发时</b>调用）。
+     * <p>
+     * 有效 = 管理员允许玩家配置 && 女仆有主人 UUID && 单只覆盖优先、否则玩家默认（缺省关闭）。
+     * <ul>
+     *   <li>主人离线同样按 UUID 查世界存档，设置继续生效；</li>
+     *   <li>无主女仆或管理员关闭玩家配置时有效值为关闭，但<b>不</b>删除玩家原来的偏好。</li>
+     * </ul>
+     */
+    public static boolean isPrebuiltReuseEnabledForMaid(MinecraftServer server, EntityMaid maid) {
+        if (!Config.PLAYER_OPTION_ENABLED.get()) {
+            return false;
+        }
+        UUID ownerUuid = maid.getOwnerUUID();
+        if (ownerUuid == null) {
+            return false;
+        }
+        Boolean override = getPrebuiltReuseMaidOverride(server, ownerUuid, maid.getUUID());
+        return override != null ? override : isPrebuiltReuseEnabled(server, ownerUuid);
+    }
 }

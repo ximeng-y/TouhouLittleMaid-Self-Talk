@@ -6,6 +6,7 @@ import com.maidmod.selftalk.network.CustomPromptConfigResponseMessage;
 import com.maidmod.selftalk.network.EnvironmentContextConfigResponseMessage;
 import com.maidmod.selftalk.network.InterChatConfigResponseMessage;
 import com.maidmod.selftalk.network.MaidPersonaSaveResponseMessage;
+import com.maidmod.selftalk.network.ReuseConfigResponseMessage;
 import com.maidmod.selftalk.network.SelfTalkConfigResponseMessage;
 import com.maidmod.selftalk.network.SleepQuietConfigResponseMessage;
 import com.maidmod.selftalk.network.ToolConfigResponseMessage;
@@ -96,6 +97,14 @@ public final class SelfTalkPlayerSettingsClient {
         Minecraft mc = Minecraft.getInstance();
         if (mc.screen instanceof SelfTalkPlayerSettingsScreen screen) {
             screen.applyEnvironmentContextResponse(msg);
+        }
+    }
+
+    /** 收到服务端预制复用设置响应后转交浮层（会话与序号校验在浮层内） */
+    public static void onReuseConfigResponse(ReuseConfigResponseMessage msg) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.screen instanceof SelfTalkPlayerSettingsScreen screen) {
+            screen.applyReuseConfigResponse(msg);
         }
     }
 

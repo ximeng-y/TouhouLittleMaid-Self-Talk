@@ -70,6 +70,20 @@ public final class PlayerSettingsSavedData extends SavedData {
      * 管理员关闭玩家配置时有效值为全量，但这里的已存偏好必须保留，功能恢复后继续生效。
      */
     private final Map<String, String> historyContextModes = new HashMap<>();
+    /**
+     * 预制复用玩家默认开关：玩家 UUID -> true（仅存 true 项，缺失 = 关闭）。
+     * <p>
+     * 实验性功能，默认关闭。管理员关闭玩家配置时有效值为关闭，但这里的已存偏好必须保留，
+     * 功能恢复后继续生效。
+     */
+    private final Map<String, Boolean> prebuiltReuseEnabled = new HashMap<>();
+    /**
+     * 预制复用单只覆盖：玩家 UUID -> 女仆 UUID -> 显式布尔。
+     * <p>
+     * 与其它单只名单不同，<b>true / false 都是有效覆盖</b>（条目存在 = 不跟随玩家默认），
+     * 恢复继承只能删条目；内层表清空后删外层键。
+     */
+    private final Map<String, Map<String, Boolean>> prebuiltReuseMaidOverrides = new HashMap<>();
 
     private PlayerSettingsSavedData() {
     }
@@ -96,6 +110,8 @@ public final class PlayerSettingsSavedData extends SavedData {
         readMaidStringList(tag, "environmentContextModes", data.environmentContextModes);
         readGlobal(tag, "environmentContextNaturalLanguage", data.environmentContextNaturalLanguage);
         readStringGlobal(tag, "historyContextModes", data.historyContextModes);
+        readGlobal(tag, "prebuiltReuseEnabled", data.prebuiltReuseEnabled);
+        readMaidList(tag, "prebuiltReuseMaidOverrides", data.prebuiltReuseMaidOverrides);
         return data;
     }
 
@@ -115,6 +131,8 @@ public final class PlayerSettingsSavedData extends SavedData {
         writeMaidStringList(tag, "environmentContextModes", environmentContextModes);
         writeGlobal(tag, "environmentContextNaturalLanguage", environmentContextNaturalLanguage);
         writeStringGlobal(tag, "historyContextModes", historyContextModes);
+        writeGlobal(tag, "prebuiltReuseEnabled", prebuiltReuseEnabled);
+        writeMaidList(tag, "prebuiltReuseMaidOverrides", prebuiltReuseMaidOverrides);
         return tag;
     }
 
@@ -252,6 +270,58 @@ public final class PlayerSettingsSavedData extends SavedData {
     /** 单只 Tool 关闭名单：关闭时存 false，恢复时移除 */
     public void setToolCallMaidDisabled(UUID playerUuid, UUID maidUuid, boolean disabled) {
         setMaidItem(toolCallMaidOverrides, playerUuid, maidUuid, disabled, false);
+    }
+
+    // ===== 预制复用（实验性） =====
+
+    /** 玩家预制复用默认开关（缺失 = false 关闭，实验性功能默认关闭） */
+    public boolean isPrebuiltReuseEnabled(UUID playerUuid) {
+        return prebuiltReuseEnabled.getOrDefault(playerUuid.toString(), false);
+    }
+
+    /** 玩家预制复用默认开关：开启存 true，关闭移除键（缺省即关闭，不落无意义的 false） */
+    public void setPrebuiltReuseEnabled(UUID playerUuid, boolean enabled) {
+        setGlobalBool(prebuiltReuseEnabled, playerUuid, enabled, false);
+    }
+
+    /** 单只覆盖：条目存在返回显式布尔（true/false 都是覆盖），不存在返回 {@code null} = 跟随玩家默认 */
+    public Boolean getPrebuiltReuseMaidOverride(UUID playerUuid, UUID maidUuid) {
+        Map<String, Boolean> list = prebuiltReuseMaidOverrides.get(playerUuid.toString());
+        return list == null ? null : list.get(maidUuid.toString());
+    }
+
+    /** 某玩家预制复用单只覆盖条数（容量上限检查用；两种显式布尔都占条目） */
+    public int countPrebuiltReuseMaidOverrides(UUID playerUuid) {
+        return countMaidOverrides(prebuiltReuseMaidOverrides, playerUuid);
+    }
+
+    /**
+     * 写单只覆盖：非 {@code null} 写显式布尔（true/false 都落盘为覆盖条目），
+     * {@code null} 恢复继承并删条目；内层表清空后删外层键。
+     * <p>
+     * 值未变化时不动存档，避免同值 Set 造成无意义的世界文件写入。
+     */
+    public void setPrebuiltReuseMaidOverride(UUID playerUuid, UUID maidUuid, Boolean override) {
+        String playerKey = playerUuid.toString();
+        String maidKey = maidUuid.toString();
+        Map<String, Boolean> inner = prebuiltReuseMaidOverrides.get(playerKey);
+        Boolean current = inner == null ? null : inner.get(maidKey);
+        if (current == null ? override == null : current.equals(override)) {
+            return;
+        }
+        if (override == null) {
+            inner.remove(maidKey);
+            if (inner.isEmpty()) {
+                prebuiltReuseMaidOverrides.remove(playerKey);
+            }
+        } else {
+            if (inner == null) {
+                inner = new HashMap<>();
+                prebuiltReuseMaidOverrides.put(playerKey, inner);
+            }
+            inner.put(maidKey, override);
+        }
+        setDirty();
     }
 
     // ===== 环境上下文三态偏好 =====
