@@ -2,7 +2,10 @@ package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.google.common.collect.Maps;
+import com.maidmod.selftalk.persona.PersonaSplitService;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -89,8 +92,21 @@ public final class SelfTalkDispatcher {
             // 互聊优先：清掉队内自话（互相聊天顶掉自言自语）
             state.deferredRequests.removeIf(r -> r.kind() == SelfTalkState.RequestKind.SELF_TALK);
             // 同一女仆只保留一条互聊请求：本女仆又拿到新互聊任务时，队里的旧互聊请求必然已失效
-            // （链已结束、回复已返回或被插话），留在队里只会占位并拖到超时
+            // （链已结束、回复已返回或被插话），留在队里只会占位并拖到超时。
+            // 被替换的旧请求若属于别的链，必须在此释放该链：链的登记与配对锁不会因请求出队而自清。
+            // 同一链的替换不释放——那是本链自己的续接/重派，释放会让本次请求失去归属
+            List<Long> replacedChains = new ArrayList<>();
+            for (SelfTalkState.DeferredRequest old : state.deferredRequests) {
+                if (old.kind() != SelfTalkState.RequestKind.SELF_TALK
+                        && old.chainId() != req.chainId()
+                        && !replacedChains.contains(old.chainId())) {
+                    replacedChains.add(old.chainId());
+                }
+            }
             state.deferredRequests.removeIf(r -> r.kind() != SelfTalkState.RequestKind.SELF_TALK);
+            for (long chainId : replacedChains) {
+                InterChatChain.releaseById(chainId);
+            }
         } else if (state.interChatPending || hasQueuedInterChat(state)
                 || isMaidInterChatLocked(maid, maid.level().getServer().getTickCount())) {
             // 自话与互聊冲突（互聊在途/已在队/本人处于互聊对锁中）：吞掉自话。
@@ -141,16 +157,26 @@ public final class SelfTalkDispatcher {
     }
 
     /**
-     * 忙判定：pending/玩家 chat 在途/静默规划在途，或女仆睡觉且玩家开启「睡觉时安静」。
+     * 忙判定：pending/玩家 chat 在途/静默规划在途/人设拆分在途，或女仆睡觉且玩家开启「睡觉时安静」。
      * <p>
      * 睡眠归入忙（而非派发失败）——顺延队列只出队不丢弃、submit 改为入队，
      * 睡眠期间"已获批的发言"保留到醒后派发；与「玩家 chat 在途则顺延」同语义。
      * <p>
      * 在途规划也算忙：规划是正式请求的前置阶段，此时再派发新请求会让同一次触发重复发起，
      * 或让两次召回互相覆盖（见 {@link SelfTalkState.PendingPlan}）。
+     * <p>
+     * 人设拆分在途同样算忙：拆分是同一只女仆上的另一路 LLM 请求，期间不再派发自动聊天；
+     * 只拦新派发，已在途的请求不受影响。
+     * <p>
+     * 互聊对锁<b>不在</b>本查询内：它表示「这只女仆正在与某只互聊」，语义与派发资格不同，
+     * 调用方按需另查（见 {@link #isMaidInterChatLocked}）。本方法包内可复用，
+     * 供 handler 的欢迎／出队／回答者筛选与互聊 peer 复核共用同一口径。
      */
-    private static boolean isBusy(EntityMaid maid, SelfTalkState.State state) {
+    static boolean isBusy(EntityMaid maid, SelfTalkState.State state) {
         if (maid.isSleeping() && PlayerSettingsStore.isSleepQuietForMaid(maid.level().getServer(), maid)) {
+            return true;
+        }
+        if (PersonaSplitService.isSplitting(maid.getUUID())) {
             return true;
         }
         return state.selfTalkPending || state.interChatPending || state.playerChatCount > 0
@@ -196,10 +222,7 @@ public final class SelfTalkDispatcher {
                 // 注意锁语义:peer 与本人的配对锁=链进行中(放行);被他人锁定=漂移(断链)
                 SelfTalkState.State peerState = SelfTalkState.get(req.peer().getId());
                 Integer peerPartner = currentPairPartner(req.peer(), nowTick);
-                if (peerState.selfTalkPending || peerState.interChatPending || peerState.playerChatCount > 0
-                        || peerState.isPlanning()
-                        || (req.peer().isSleeping()
-                        && PlayerSettingsStore.isSleepQuietForMaid(req.peer().level().getServer(), req.peer()))
+                if (isBusy(req.peer(), peerState)
                         || (peerPartner != null && !peerPartner.equals(maid.getId()))) {
                     // 仅当双方当前仍互为配对才解锁:漂移后旧链对锁已被新链 lockPair 前置清理,
                     // 无条件 unlockPair 会误拆第三方在途新链(不能触碰不属于本对的锁)
@@ -320,6 +343,17 @@ public final class SelfTalkDispatcher {
     /** 女仆死亡/卸载时清理其互聊锁（连同配对者对称释放） */
     public static void onMaidRemoved(int maidId) {
         clearPairFor(maidId);
+    }
+
+    /**
+     * 服务器停止时整体清空对锁三张表（进程内存而已，显式清掉便于同一 JVM 内反复开世界）。
+     * <p>
+     * 只清对锁：顺延队列、pending 等属于 {@link SelfTalkState}，由它自己的整体释放负责。
+     */
+    public static void dropAll() {
+        INTER_CHAT_LOCK_UNTIL.clear();
+        INTER_CHAT_PAIR_PARTNER.clear();
+        INTER_CHAT_PAIR_CHAIN.clear();
     }
 
     /**

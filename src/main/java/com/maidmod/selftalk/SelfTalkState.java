@@ -58,6 +58,34 @@ public final class SelfTalkState {
         return STATES.entrySet();
     }
 
+    /**
+     * 服务器停止时整体释放全部状态（同一 JVM 内再开世界不得继承上一世界的残留）。
+     * <p>
+     * 不直接清表，按顺序收尾每个条目：
+     * <ol>
+     *   <li>退役世代——此前捕获的请求令牌立即永久失效；</li>
+     *   <li>对持有的自话正式回调经生命周期桥静默作废——取消上游 HTTP/排队/重试/deadline，
+     *       迟到结果挡在公共响应调用点；</li>
+     *   <li>逐个走 {@link #remove(int)} 移除条目并取消在途规划。</li>
+     * </ol>
+     * 先取快照再处理：收尾过程会修改状态表，边遍历边改会破坏 HashMap 的迭代。
+     */
+    public static void dropAll() {
+        List<Map.Entry<Integer, State>> snapshot = new ArrayList<>(STATES.entrySet());
+        for (Map.Entry<Integer, State> entry : snapshot) {
+            State state = entry.getValue();
+            state.clearGeneration.retire();
+            SelfTalkCallback callback = state.currentSelfTalkCallback;
+            if (callback != null) {
+                state.currentSelfTalkCallback = null;
+                AgentTweaksLifecycleBridge.cancel(callback);
+            }
+        }
+        for (Map.Entry<Integer, State> entry : snapshot) {
+            remove(entry.getKey());
+        }
+    }
+
     /** 玩家登出：清除所有女仆对该玩家的欢迎标记，下次登录窗口内可再次欢迎 */
     public static void removeWelcomeForPlayer(UUID playerUuid) {
         for (State state : STATES.values()) {
