@@ -176,6 +176,9 @@ public final class SelfTalkReuseStore {
 
         FingerprintFile(Path path) {
             this.path = path;
+            // 新建库的根对象必须带版本字段：读取侧（ensureLoaded）以 schemaVersion 判定可读性，
+            // 漏写会让首次落盘的文件在下次启动时被自己判为坏档，该指纹此后既不读也不写
+            this.root.addProperty("schemaVersion", SCHEMA_VERSION);
         }
     }
 
