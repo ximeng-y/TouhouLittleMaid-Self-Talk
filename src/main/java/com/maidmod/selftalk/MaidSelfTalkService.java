@@ -231,7 +231,9 @@ public final class MaidSelfTalkService {
             return true;
         }
         MinecraftServer server = maid.level().getServer();
-        new SelfTalkTtsTranslationSession(maid, chatManager, site, entry.chatText,
+        // 待译文本必须是缓存的 TTS 段本身：上屏段与语音段允许措辞不同，
+        // 且 sourceLanguage 声明的正是 ttsText 的语言（用 chatText 会译错段落并覆盖缓存语音）
+        new SelfTalkTtsTranslationSession(maid, chatManager, site, entry.ttsText,
                 entry.ttsLanguage, targetLanguage, token::isValid, outcome -> {
             // 交付前重判：令牌、有效开关、请求身份（回调仍是「当前」自话请求）任一失效即静默作废
             SelfTalkState.State st = SelfTalkState.peek(maid.getId());
