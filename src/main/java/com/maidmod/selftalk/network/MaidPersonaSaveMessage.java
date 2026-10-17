@@ -6,6 +6,7 @@ import com.maidmod.selftalk.MaidPersonaDraft;
 import com.maidmod.selftalk.MaidPersonaHost;
 import com.maidmod.selftalk.MaidPersonaMode;
 import com.maidmod.selftalk.MaidPersonaRuntime;
+import com.maidmod.selftalk.persona.PersonaSplitService;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
@@ -146,6 +147,12 @@ public class MaidPersonaSaveMessage {
         if (!player.getUUID().equals(maid.getOwnerUUID())) {
             return MaidPersonaSaveResponseMessage.failure(requestId, entityId, maidUuid,
                     MaidPersonaSaveResponseMessage.RESULT_NOT_OWNER);
+        }
+        // 拆分在途：本 mod 的模式/四栏保存与整理互斥。页面已锁，这里是绕过客户端门禁的第二道；
+        // 拒绝时不触碰已存人设，客户端保留编辑内容与旧基线（不调 replace/onConfigChanged）
+        if (PersonaSplitService.isSplitting(maidUuid)) {
+            return MaidPersonaSaveResponseMessage.failure(requestId, entityId, maidUuid,
+                    MaidPersonaSaveResponseMessage.RESULT_BUSY);
         }
         MaidPersonaConfig config = msg.toConfig();
         if (!config.draft().withinLimit()) {
