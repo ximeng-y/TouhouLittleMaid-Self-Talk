@@ -11,6 +11,7 @@ import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.network.MaidPersonaSavePayload;
 import com.maidmod.selftalk.network.MaidPersonaSaveResponsePayload;
 import com.maidmod.selftalk.network.MaidPersonaSplitResponsePayload;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.ComponentPath;
 import net.minecraft.client.gui.Font;
@@ -77,8 +78,8 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     private static final int SPLIT_BUTTON_Y = 200;
     /** 四栏内容区顶部（与原版输入框 y 一致） */
     private static final int BOX_TOP = 70;
-    /** 内容区底部留白（原版输入框高度为 height - 100，即底边在 height - 30） */
-    private static final int CONTENT_BOTTOM_MARGIN = 30;
+    /** 内容区底部留白（原版输入框高度为 height - 100，即底边在 height - 30；底部两行提示需再让出 10px） */
+    private static final int CONTENT_BOTTOM_MARGIN = 40;
     /** 每栏标签行高 */
     private static final int LABEL_HEIGHT = 12;
     /** 四栏文本框宽度（与原版输入框一致） */
@@ -174,6 +175,13 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         this.modeButton = this.addRenderableWidget(Button.builder(modeLabel(), b -> toggleMode())
                 .bounds(columnX, MODE_BUTTON_Y, COLUMN_WIDTH, BUTTON_HEIGHT)
                 .build());
+        // 模式是唯一的人设注入策略决策点：说明两种模式的分工，警示段单独用金色（与历史模式 tooltip 同口径）
+        this.modeButton.setTooltip(Tooltip.create(
+                Component.translatable("config.maid_self_talk.screen.persona_draft.mode.tooltip")
+                        .append("\n\n")
+                        .append(Component.translatable(
+                                        "config.maid_self_talk.screen.persona_draft.mode.tooltip.warning")
+                                .withStyle(ChatFormatting.GOLD))));
 
         this.splitButton = this.addRenderableWidget(Button.builder(
                         Component.translatable("config.maid_self_talk.screen.persona_draft.button.split"),
@@ -723,8 +731,12 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
                             this.boxes[i].getX() + 2, this.boxes[i].getY() - 10, 0xFFFFFF);
                 }
             }
+            // 两行常驻提示：第一行说明固定注入、第二行说明动态召回，逐行绘制（drawCenteredString 不处理换行）
             graphics.drawCenteredString(this.font, Component.translatable(
-                    "config.maid_self_talk.screen.persona_draft.notice"), this.width / 2,
+                    "config.maid_self_talk.screen.persona_draft.notice.line1"), this.width / 2,
+                    this.height - 36, 0xFFAA55);
+            graphics.drawCenteredString(this.font, Component.translatable(
+                    "config.maid_self_talk.screen.persona_draft.notice.line2"), this.width / 2,
                     this.height - 24, 0xFFAA55);
         }
 
