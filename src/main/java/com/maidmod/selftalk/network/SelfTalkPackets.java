@@ -56,8 +56,9 @@ public final class SelfTalkPackets {
         // v12：人设保存 payload 扩展为「模式 + 四栏」整份配置并带女仆 UUID，回包同样带 UUID
         // 与服务端确认后的完整配置；
         // v13：新增 AI 拆分人设的请求/结果 payload（C2S SplitRequest + S2C SplitResponse）；
+        // v14：新增预制复用设置三包（C2S Request/Set + S2C Response，服务端权威快照协议）；
         // 同样不做向后兼容：NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
-        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("13");
+        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("14");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,
                 SelfTalkPackets::handleConfigRequest);
         registrar.playToServer(SelfTalkConfigSetPayload.TYPE, SelfTalkConfigSetPayload.STREAM_CODEC,
@@ -111,6 +112,12 @@ public final class SelfTalkPackets {
                 SelfTalkPackets::handlePersonaSplitRequest);
         registrar.playToClient(MaidPersonaSplitResponsePayload.TYPE, MaidPersonaSplitResponsePayload.STREAM_CODEC,
                 SelfTalkPackets::handlePersonaSplitResponse);
+        registrar.playToServer(ReuseConfigRequestPayload.TYPE, ReuseConfigRequestPayload.STREAM_CODEC,
+                SelfTalkPackets::handleReuseConfigRequest);
+        registrar.playToServer(ReuseConfigSetPayload.TYPE, ReuseConfigSetPayload.STREAM_CODEC,
+                SelfTalkPackets::handleReuseConfigSet);
+        registrar.playToClient(ReuseConfigResponsePayload.TYPE, ReuseConfigResponsePayload.STREAM_CODEC,
+                SelfTalkPackets::handleReuseConfigResponse);
     }
 
     /** 服务端：响应玩家的自话设置查询（全局值 + 请求女仆的单只有效值；1.1.2 起读世界存档、离线亦可查） */
@@ -631,5 +638,104 @@ public final class SelfTalkPackets {
     private static void handleEnvironmentContextResponse(EnvironmentContextConfigResponsePayload payload,
                                                          IPayloadContext context) {
         context.enqueueWork(() -> SelfTalkPlayerSettingsClient.onEnvironmentContextResponse(payload));
+    }
+
+    /**
+     * 服务端：响应玩家的预制复用设置查询（已存偏好快照：全局默认 + 单只三态 + 管理员闸门）。
+     * <p>
+     * 与环境上下文共用 {@link #allowConfigPacket} 限流；读路径无副作用，女仆维度
+     * <b>不做</b>归属校验——非本人女仆在存档中本就无条目，自然读到「跟随默认」。
+     */
+    private static void handleReuseConfigRequest(ReuseConfigRequestPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer && payload.sessionId() != null
+                    && allowConfigPacket(serverPlayer.getUUID())) {
+                context.reply(ReuseConfigResponsePayload.snapshot(
+                        serverPlayer.server, serverPlayer.getUUID(),
+                        payload.sessionId(), payload.seq(), payload.maidUuid()));
+            }
+        });
+    }
+
+    /**
+     * 服务端：保存预制复用设置（绝对操作码，纵深防御，不信任客户端）。
+     * <p>
+     * 管理员禁用时<b>不改写任何已存偏好</b>（防「预埋等开闸」），仍回权威快照让界面
+     * 显示原偏好与关闸状态。全局操作（0/1）要求女仆维度为空，单只操作（2/3/4）要求
+     * 女仆 UUID 非空；形状不符的歧义包直接丢弃不回包。
+     * <p>
+     * 归属校验失败、容量已满、非法操作码这三种「形状合法但未写入」的情况<b>照常回权威快照</b>：
+     * 它们都<b>不触碰任何已存偏好</b>，而界面停在「同步中」比收到一份没改过的快照更糟——
+     * 客户端也无从区分丢包与拒绝。新增覆盖条目前校验容量上限；删除条目（恢复继承）不计数。
+     */
+    private static void handleReuseConfigSet(ReuseConfigSetPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (!(player instanceof ServerPlayer serverPlayer) || payload.sessionId() == null
+                    || !allowConfigPacket(serverPlayer.getUUID())) {
+                return;
+            }
+            int opcode = payload.opcode();
+            UUID maidUuid = payload.maidUuid();
+            if (opcode == ReuseConfigSetPayload.OP_GLOBAL_OFF || opcode == ReuseConfigSetPayload.OP_GLOBAL_ON) {
+                // 全局操作不接受女仆维度（防歧义包）
+                if (maidUuid != null) {
+                    return;
+                }
+                if (Config.PLAYER_OPTION_ENABLED.get()) {
+                    PlayerSettingsStore.setPrebuiltReuseEnabled(
+                            serverPlayer.server, serverPlayer.getUUID(), opcode == ReuseConfigSetPayload.OP_GLOBAL_ON);
+                }
+            } else if (opcode == ReuseConfigSetPayload.OP_MAID_INHERIT
+                    || opcode == ReuseConfigSetPayload.OP_MAID_OFF
+                    || opcode == ReuseConfigSetPayload.OP_MAID_ON) {
+                // 单只操作必须带女仆 UUID；缺 UUID 属形状不符，直接丢弃不回包
+                if (maidUuid == null) {
+                    return;
+                }
+                if (isOwnedMaid(serverPlayer, maidUuid)
+                        && canWritePrebuiltOverride(serverPlayer, maidUuid, opcode)
+                        && Config.PLAYER_OPTION_ENABLED.get()) {
+                    Boolean override = switch (opcode) {
+                        case ReuseConfigSetPayload.OP_MAID_ON -> Boolean.TRUE;
+                        case ReuseConfigSetPayload.OP_MAID_OFF -> Boolean.FALSE;
+                        default -> null;
+                    };
+                    PlayerSettingsStore.setPrebuiltReuseMaidOverride(
+                            serverPlayer.server, serverPlayer.getUUID(), maidUuid, override);
+                }
+            }
+            // 非法操作码不保存，只回权威快照防客户端同步悬挂
+            context.reply(ReuseConfigResponsePayload.snapshot(
+                    serverPlayer.server, serverPlayer.getUUID(),
+                    payload.sessionId(), payload.seq(), payload.maidUuid()));
+        });
+    }
+
+    /**
+     * 单只覆盖写入前的容量校验：仅在<b>新增条目</b>（恢复继承不新增；已有条目改值也不新增）时
+     * 检查上线，防恶意客户端伪造任意 UUID 无限撑大世界存档。
+     */
+    private static boolean canWritePrebuiltOverride(ServerPlayer serverPlayer, UUID maidUuid, int opcode) {
+        if (opcode == ReuseConfigSetPayload.OP_MAID_INHERIT) {
+            return true;
+        }
+        if (PlayerSettingsStore.getPrebuiltReuseMaidOverride(
+                serverPlayer.server, serverPlayer.getUUID(), maidUuid) != null) {
+            return true;
+        }
+        if (PlayerSettingsStore.countPrebuiltReuseMaidOverrides(
+                serverPlayer.server, serverPlayer.getUUID()) >= MAX_MAID_OVERRIDES) {
+            MaidSelfTalkMod.LOGGER.warn("Player {} prebuilt reuse maid list full ({}), ignored",
+                    serverPlayer.getUUID(), MAX_MAID_OVERRIDES);
+            return false;
+        }
+        return true;
+    }
+
+    /** 客户端：收到预制复用设置响应（会话/序号校验在客户端浮层内完成） */
+    private static void handleReuseConfigResponse(ReuseConfigResponsePayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> SelfTalkPlayerSettingsClient.onReuseConfigResponse(payload));
     }
 }

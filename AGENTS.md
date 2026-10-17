@@ -10,7 +10,7 @@
 - **双分支双线**：
   - `neoforge-1.21.1` 分支（GitHub 默认分支）：NeoForge 1.21.1（NeoForge 21.1.219 / ModDevGradle 2.0.95 / Java 21；TLM 1.5.3-neoforge+mc1.21.1）
   - `forge-1.20.1` 分支：Forge 1.20.1（Forge 47.2.0 / ForgeGradle 6 + parchment + mixingradle / Java 17；TLM 1.5.3-forge+mc1.20.1，fg.deobf）
-- 产物 jar（1.0.3 起加分支后缀区分）：neoforge 线 `build/libs/tlm-self-talk-1.3.1-neoforge-1.21.1.jar`；forge 线 `build/libs/tlm-self-talk-1.3.1-forge-1.20.1.jar`；部署替换 jar 后需重启服务端（代码改动无法热加载）
+- 产物 jar（1.0.3 起加分支后缀区分）：neoforge 线 `build/libs/tlm-self-talk-1.3.2-neoforge-1.21.1.jar`；forge 线 `build/libs/tlm-self-talk-1.3.2-forge-1.20.1.jar`；部署替换 jar 后需重启服务端（代码改动无法热加载）
 
 ## 构建
 
@@ -28,7 +28,7 @@
   - neoforge 线另有 `SelfTalkAttachments`（Level 附件注册）；forge 线另有 `PlayerSettingsSavedData`（overworld SavedData）、`SelfTalkProvenanceHost`（无附件，经 mixin 挂接口）
 - `client/`：仅客户端 —— `SelfTalkClothConfig`（管理员配置界面，反射注册）、`SelfTalkPlayerSettingsClient`（客户端设置缓存）、`SelfTalkPlayerSettingsScreen`（玩家开关/Prompt 界面）
 - `mixin/`：TLM 钩子（玩家 chat 入口标记、AIChatScreen 加 💬 按钮、LLMCallback、历史摘要、女仆 AI 数据；forge 线另有女仆指纹挂载）
-- `network/`：8 个功能组、20 条注册，协议版本串 `8`：自话 / 互聊 / 睡觉安静 / 自定义 Prompt / Tool 各 request/response/set（15 条）；环境上下文 request/response/set（3 条）；环境上下文自然语言总开关、历史上下文模式各 1 条 C2S Set。版本演进见 `SelfTalkPackets` 注册处注释（不向后兼容，版本串即协商拒连依据）
+- `network/`：双线网络注册，NeoForge 协议版本串 `10`、Forge 协议版本串 `8`；版本演进见各分支 `SelfTalkPackets` 注册处注释（不向后兼容，版本串即协商拒连依据）
 - 代码注释与 git 提交信息使用中文；避免引入非必要依赖
 
 ## 关键约定与陷阱
@@ -43,3 +43,9 @@
 - **限流闸门**：欢迎语全局每秒最多 1 次（`rate_limit.maxTriggerPerSecond`）；自话全局每 5~8 秒（`rate_limit.selfTalkMinIntervalSeconds` / `selfTalkMaxIntervalSeconds`）放行 1 只，**互聊发起者派发共用同一自话闸门**（链式续接不走闸门）；被限流自话**不发请求**、随机退避 8~15 秒重试（玩家聊天框不会出现报错）；欢迎语无退避、窗口期内每 tick 重试，排队若在窗口期内未轮到会错过该次欢迎
 - **环境事件过滤**：死亡事件固定过滤为玩家、有主动物、其他女仆——「有主动物」必须按 `OwnableEntity` 判定（马/驴/骡等坐骑不继承 `TamableAnimal` 但同样有主人）；受伤事件必须用**实际掉血**事件（neo `LivingDamageEvent.Post` / forge `LivingDamageEvent`），更早的 incoming/hurt 事件在格挡成功或减免到 0 时仍会以正数触发
 - cloth-config 界面通过反射注册（`MaidSelfTalkMod.registerClothConfigIfPresent`），未装 cloth-config 时自动跳过、不影响核心功能
+
+## Code Navigation
+
+- 如果本地存在 `.XMagent-docs/README.md`，优先按需读取索引。
+- 索引不存在时，改用公开架构文档、符号搜索和源码检索。
+- 不要因为索引缺失而停止任务。
