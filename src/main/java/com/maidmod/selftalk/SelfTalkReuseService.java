@@ -15,6 +15,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 预制复用的匹配与入库服务（实验性，默认关闭）：身份指纹、命中判定、条目构造。
@@ -161,14 +162,16 @@ public final class SelfTalkReuseService {
     }
 
     /**
-     * 入库：真实生成链在回复验证通过后调用一次。入库时间取服务端本地时间当下值；
-     * ttsLanguage 记录入库时聊天管理器的 TTS 语言（复用侧据此决定是否需要翻译）。
+     * 入库：真实生成链在回复验证通过后调用一次。条目标识 entryId 由本次真实生成入库时
+     * 用随机 UUID 创建（复用命中不创建新条目，复用投放绝不入库）；入库时间取服务端本地
+     * 时间当下值；ttsLanguage 记录入库时聊天管理器的 TTS 语言（复用侧据此决定是否需要翻译）。
      */
     public static void appendEntry(MinecraftServer server, ArchiveData data,
                                    String chatText, String ttsText, String ttsLanguage) {
         String createdAt = LocalDateTime.now().format(CREATED_AT_FORMAT);
         SelfTalkReuseStore.PrebuiltEntry entry = new SelfTalkReuseStore.PrebuiltEntry(
-                createdAt, data.matchEntries(), data.chatLanguage(), chatText, ttsLanguage, ttsText);
+                UUID.randomUUID(), createdAt, data.matchEntries(), data.chatLanguage(),
+                chatText, ttsLanguage, ttsText);
         SelfTalkReuseStore.of(server).append(data.fingerprint(), data.source(), entry,
                 Config.PREBUILT_MAX_ENTRIES_PER_SOURCE.get());
     }
