@@ -83,6 +83,20 @@ public final class InterChatRequest {
         }
     }
 
+    /**
+     * 服务器停止时整体作废残留请求。
+     * <p>
+     * 按快照逐个走 {@link #cancel()}：作废即解除本女仆的登记并释放链与对锁，
+     * 不直接清表——清表会留下仍在飞行的正式回调与链上配对锁。
+     * 解除登记只走 {@link #clearFromRegistry()}（按对象身份比较，且不创建状态条目），
+     * 不为已移除的状态调用 {@code get()}。
+     */
+    public static void dropAll() {
+        for (InterChatRequest request : new java.util.ArrayList<>(CURRENT.values())) {
+            request.cancel();
+        }
+    }
+
     // ===== 归属与阶段 =====
 
     public long chainId() {

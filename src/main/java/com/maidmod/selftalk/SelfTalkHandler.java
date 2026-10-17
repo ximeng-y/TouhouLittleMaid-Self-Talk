@@ -116,6 +116,8 @@ public final class SelfTalkHandler {
             SelfTalkDispatcher.onMaidRemoved(maid.getId());
             InterChatChain.onMaidRemoved(maid.getId());
             HistoryRetrievalCache.drop(maid);
+            // 人设拆分任务绑女仆生命周期：死亡即取消，向仍在线的原连接回「女仆不可用」
+            PersonaSplitService.onMaidRemoved(maid.getUUID());
             return;
         }
 
@@ -153,6 +155,12 @@ public final class SelfTalkHandler {
             MaidSelfTalkMod.LOGGER.warn("{} persona planning session(s) timed out for maid {}, cancelled",
                     expiredPlans, maid.getId());
         }
+        // 拆分在途：本 tick 结束自动聊天处理（在超时维护之后、欢迎与自动触发之前）。
+        // 不清已有顺延队列、不获取欢迎/自话额度、不新建互聊链、不推进触发冷却——
+        // 拆分结束后由正常 tick 恢复欢迎窗口检查与顺延队列处理
+        if (PersonaSplitService.isSplitting(maid.getUUID())) {
+            return;
+        }
         // AI 前置门槛
         MaidAIChatManager chatManager = maid.getAiChatManager();
         if (chatManager == null) {
@@ -180,9 +188,8 @@ public final class SelfTalkHandler {
             return;
         }
 
-        // 在途规划同样算忙：规划是正式请求的前置阶段，此时再触发会让同一次触发重复发起
-        boolean busy = state.selfTalkPending || state.interChatPending || state.playerChatCount > 0
-                || state.isPlanning();
+        // 忙判定与派发闸门共用同一口径（在途自话/互聊/玩家 chat/规划/人设拆分/睡觉安静）
+        boolean busy = SelfTalkDispatcher.isBusy(maid, state);
 
         // 欢迎检查（优先于自话，一次性、需空闲；忙时窗口期内每 tick 自然重试）
         if (!busy && Config.WELCOME_ENABLED.get() && !state.welcomedPlayers.contains(ownerUuid)) {
@@ -215,8 +222,8 @@ public final class SelfTalkHandler {
         // 空闲时先派发顺延队列里的请求（若有），派发后若变忙则本 tick 不再触发新请求
         if (!busy) {
             SelfTalkDispatcher.drainDeferred(maid);
-            if (state.selfTalkPending || state.interChatPending || state.playerChatCount > 0
-                    || state.isPlanning()) {
+            // 出队后复核：派发可能让本女仆进入在途（或队列里派发失败后仍处于拆分忙）
+            if (SelfTalkDispatcher.isBusy(maid, state)) {
                 return;
             }
         }
@@ -352,10 +359,27 @@ public final class SelfTalkHandler {
         }
     }
 
-    /** 服务端关闭：撤销全部在途拆分任务（不回包，连接即将断开）；预制复用库写出脏文件并释放内存缓存 */
+    /**
+     * 服务端关闭：按顺序释放全部静态运行时状态，并复位跨世界的时钟与登录记录。
+     * <p>
+     * 顺序：先取消拆分任务（其回调经生命周期桥作废），再整体释放自话/互聊状态、残留请求与链、
+     * 对锁表与检索执行器——每一步都依赖前一步已摘除登记，倒过来会留下指向已释放条目的回调。
+     * 最后清登录记录与限流/清扫时钟，避免同一 JVM 内下一个世界继承上一世界的窗口与额度。
+     */
     @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
         PersonaSplitService.onServerStopped();
+        SelfTalkState.dropAll();
+        InterChatRequest.dropAll();
+        InterChatChain.dropAll();
+        SelfTalkDispatcher.dropAll();
+        HistoryRetrievalCache.dropAll();
+        PLAYER_LOGIN_TICKS.clear();
+        lastDispatchSecond = -1;
+        dispatchCountThisSecond = 0;
+        nextSelfTalkAllowedTick = 0;
+        lastCleanupTick = 0;
+        // 预制复用库写出脏文件并释放内存缓存
         SelfTalkReuseStore.release(event.getServer());
     }
 
@@ -665,7 +689,7 @@ public final class SelfTalkHandler {
     }
 
     /**
-     * 从候选中随机挑一只可用回答者：过滤在途（pending/规划）/无 AI/无人设/开关关闭/互聊对锁中的女仆。
+     * 从候选中随机挑一只可用回答者：过滤在途（pending/规划/拆分）/无 AI/无人设/开关关闭/互聊对锁中的女仆。
      * 同 tick 双发起者选中同一回答者的竞态已被两点规避：发起者派发走 5~8s 全局节流（一次只放行一个发起者），
      * 且此处按 pending 过滤掉已在途女仆，故无需为回答者单独加「预留」标记。
      */
@@ -674,7 +698,8 @@ public final class SelfTalkHandler {
         long nowTick = level.getServer().getTickCount();
         for (EntityMaid m : candidates) {
             SelfTalkState.State s = SelfTalkState.get(m.getId());
-            if (s.selfTalkPending || s.interChatPending || s.playerChatCount > 0 || s.isPlanning()) {
+            // 与派发闸门同一口径：在途自话/互聊/玩家 chat/规划/人设拆分/睡觉安静
+            if (SelfTalkDispatcher.isBusy(m, s)) {
                 continue;
             }
             // 互聊对锁：该女仆正与他人连续互聊中，不能被发起互聊
@@ -694,10 +719,6 @@ public final class SelfTalkHandler {
             }
             // 无人设（原版模式按 TLM 口径；四栏模式按四栏内容）：不能作为回答者
             if (!MaidPersonaRuntime.hasUsablePersona(m)) {
-                continue;
-            }
-            // 睡眠中的女仆不可被邀请当回答者（玩家开启睡觉时安静时，与本女仆自话 gate 同语义）
-            if (m.isSleeping() && PlayerSettingsStore.isSleepQuietForMaid(level.getServer(), m)) {
                 continue;
             }
             if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), m)) {
@@ -728,6 +749,8 @@ public final class SelfTalkHandler {
             SelfTalkDispatcher.onMaidRemoved(maid.getId());
             InterChatChain.onMaidRemoved(maid.getId());
             HistoryRetrievalCache.drop(maid);
+            // 实际移除（非跨维度传送）：拆分任务随之取消，向仍在线的原连接回「女仆不可用」
+            PersonaSplitService.onMaidRemoved(maid.getUUID());
         }
     }
 
