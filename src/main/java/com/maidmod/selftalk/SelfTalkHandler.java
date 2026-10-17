@@ -359,7 +359,7 @@ public final class SelfTalkHandler {
         SelfTalkReuseStore.release(event.getServer());
     }
 
-    /** overworld 存档：预制复用库写出脏文件（每指纹一文件的增量保存，只写脏的） */
+    /** overworld 存档：预制复用库写出脏条目文件（每条目文件的增量保存，只写脏的） */
     @SubscribeEvent
     public static void onLevelSave(LevelEvent.Save event) {
         if (event.getLevel() instanceof ServerLevel serverLevel
