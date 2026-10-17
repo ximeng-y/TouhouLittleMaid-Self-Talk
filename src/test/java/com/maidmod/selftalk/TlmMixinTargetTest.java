@@ -38,8 +38,9 @@ import java.util.regex.Pattern;
  * 覆盖边界：覆盖承载 lambda 绑定的四个宿主类（TTSCallback、MaidAIChatManager、LLMCallback、
  * AIChatScreen），外加 LLMCallback 内两处历史写入 {@code @Redirect} 的调用点方法名
  * （{@code addAssistantHistory}/{@code addToolHistory}，调用点 owner 为 MaidAIChatManager）
- * 与 SettingEditScreen 的 {@code drawMaid}/{@code saveConfig} 命名绑定。其余 named 绑定宿主
- * （MaidAIChatData、HistorySummaryManager、client 侧）不在覆盖范围，目标缺失时由
+ * 与 SettingEditScreen 的 {@code drawMaid}/{@code saveConfig}/{@code mouseReleased} 命名绑定、
+ * AIChatScreen 常量池里的 SettingEditScreen 构造引用（类引用 + 构造描述符，类级粒度）。
+ * 其余 named 绑定宿主（MaidAIChatData、HistorySummaryManager、client 侧）不在覆盖范围，目标缺失时由
  * {@code maid_self_talk.mixins.json} 的 {@code defaultRequire: 1} 在启动期兜底报错。
  * <p>
  * 运行（已由 {@code gradle check} / CI 自动执行，issue #60 C13）：
@@ -82,13 +83,18 @@ public final class TlmMixinTargetTest {
                 "onFailure",
                 "addAssistantHistory",
                 "addToolHistory");
-        // 统一人设页：✎ 按钮 onPress lambda 内的 SettingEditScreen 构造重定向，
-        // 以及原版页上的布娃娃位置调整与保存附带提交钩子
+        // 统一人设页：✎ 按钮 onPress lambda 内的 SettingEditScreen 构造重定向（NEW 目标：
+        // 类引用 + 构造描述符；常量池是类级粒度，无法定位到单个方法，与 lambda 名存在检查配合使用），
+        // 以及原版页上的布娃娃位置调整、隐藏输入框释放派发跳过与保存附带提交钩子
         checkClass(tlmJar, "client/gui/entity/maid/ai/AIChatScreen.class",
-                "lambda$addLeftButtons$1");
+                "lambda$addLeftButtons$1",
+                "com/github/tartaricacid/touhoulittlemaid/client/gui/entity/maid/ai/SettingEditScreen",
+                "(Lnet/minecraft/client/gui/screens/Screen;"
+                        + "Lcom/github/tartaricacid/touhoulittlemaid/entity/passive/EntityMaid;)V");
         checkClass(tlmJar, "client/gui/entity/maid/ai/SettingEditScreen.class",
                 "drawMaid",
-                "saveConfig");
+                "saveConfig",
+                "mouseReleased");
         System.out.println("TlmMixinTargetTest: all " + checks + " checks passed");
     }
 
