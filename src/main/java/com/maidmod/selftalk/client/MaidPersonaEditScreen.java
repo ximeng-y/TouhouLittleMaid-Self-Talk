@@ -7,6 +7,7 @@ import com.maidmod.selftalk.MaidPersonaConfig;
 import com.maidmod.selftalk.MaidPersonaDraft;
 import com.maidmod.selftalk.MaidPersonaHost;
 import com.maidmod.selftalk.MaidPersonaMode;
+import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.network.MaidPersonaSaveMessage;
 import com.maidmod.selftalk.network.MaidPersonaSaveResponseMessage;
 import com.maidmod.selftalk.network.MaidPersonaSplitResponseMessage;
@@ -38,7 +39,8 @@ import java.util.UUID;
  * 页面上同时保留原版的整段人设输入框与保存 / 保存并退出 / 返回按钮：
  * <ul>
  *   <li>整段人设模式（默认）：显示原版输入框，行为与原版一致；</li>
- *   <li>结构化人设模式：隐藏原版输入框，同一区域改为身份 / 性格 / 背景 / 爱好四行
+ *   <li>结构化人设模式：隐藏原版输入框（挪出屏幕，使其跟随输入框位置绘制的标签 /
+ *       保存提示一并消失），同一区域改为身份 / 性格 / 背景 / 爱好四行
  *       「栏目标签 + 可滚动文本框」，四栏同时可见。</li>
  * </ul>
  * 右侧按钮列调整为：布娃娃预览在顶部，原版保存按钮位置不变，其下依次为
@@ -81,6 +83,13 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     private static final int LABEL_HEIGHT = 12;
     /** 四栏文本框宽度（与原版输入框一致） */
     private static final int BOX_WIDTH = 256;
+    /** 结构化模式下原版输入框的藏匿 y：原版 render 按其位置直接绘制标签与保存提示，挪出屏幕后一并隐藏 */
+    private static final int VANILLA_BOX_HIDDEN_Y = -10000;
+    /**
+     * 布娃娃预览 y 相对原版输入框 y 的偏移：原版 drawMaid 渲染框为 90×100（posY-45..posY+55），
+     * 负值把预览顶到按钮列顶部空位；模型实际占框中间，最终观感需实机微调
+     */
+    private static final int MAID_PREVIEW_Y_OFFSET = -36;
 
     private final EntityMaid maid;
 
@@ -90,6 +99,10 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     /** 原版「导出设定」按钮：init 后重定位到按钮列下方 */
     @Nullable
     private FlatColorButton exportButton;
+    /** 原版输入框在原版布局中的位置与宽度（init 定位成功后取实际值，失败保持常量默认值） */
+    private int vanillaBoxX;
+    private int vanillaBoxY = BOX_TOP;
+    private int vanillaBoxWidth = BOX_WIDTH;
 
     /** 页面模式（与四栏内容一起构成待提交配置） */
     private MaidPersonaMode mode;
@@ -146,12 +159,16 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     protected void init() {
         // 先让原版建立称呼框、整段人设框、导出 / 保存 / 保存并退出 / 返回按钮
         super.init();
+        // 原版布局默认值：原版输入框定位失败时四栏按此退化布局排布
+        int posX = this.width / 2 - 195;
+        this.vanillaBoxX = posX;
+        this.vanillaBoxY = BOX_TOP;
+        this.vanillaBoxWidth = BOX_WIDTH;
         locateVanillaWidgets();
 
-        int posX = this.width / 2 - 195;
-        int columnX = posX + COLUMN_OFFSET;
+        int columnX = this.vanillaBoxX + COLUMN_OFFSET;
         int contentHeight = Math.max(4 * (LABEL_HEIGHT + 20),
-                this.height - CONTENT_BOTTOM_MARGIN - BOX_TOP);
+                this.height - CONTENT_BOTTOM_MARGIN - this.vanillaBoxY);
         int groupHeight = contentHeight / MaidPersonaDraft.CATEGORY_COUNT;
 
         this.modeButton = this.addRenderableWidget(Button.builder(modeLabel(), b -> toggleMode())
@@ -173,10 +190,10 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
 
         for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
             int index = i;
-            int boxY = BOX_TOP + i * groupHeight + LABEL_HEIGHT;
+            int boxY = this.vanillaBoxY + i * groupHeight + LABEL_HEIGHT;
             int boxHeight = Math.max(20, groupHeight - LABEL_HEIGHT - 2);
-            GuardedPersonaEditBox box = new GuardedPersonaEditBox(this.font, posX, boxY,
-                    BOX_WIDTH, boxHeight,
+            GuardedPersonaEditBox box = new GuardedPersonaEditBox(this.font, this.vanillaBoxX, boxY,
+                    this.vanillaBoxWidth, boxHeight,
                     Component.translatable("config.maid_self_talk.screen.persona_draft.placeholder"));
             box.setValueListener(value -> {
                 if (!this.loadingBox) {
@@ -190,7 +207,7 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         applyModeVisibility();
     }
 
-    /** 从原版 init 建立的控件中找回整段人设框与导出按钮 */
+    /** 从原版 init 建立的控件中找回整段人设框与导出按钮，并记录输入框的原版布局位置 */
     private void locateVanillaWidgets() {
         this.customSetting = null;
         this.exportButton = null;
@@ -204,6 +221,16 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
                     && exportText.equals(button.getMessage().getString())) {
                 this.exportButton = button;
             }
+        }
+        if (this.customSetting != null) {
+            this.vanillaBoxX = this.customSetting.getX();
+            this.vanillaBoxY = this.customSetting.getY();
+            this.vanillaBoxWidth = this.customSetting.getWidth();
+        } else {
+            MaidSelfTalkMod.LOGGER.warn("未能在原版人设页定位整段人设输入框，结构化模式按原版默认布局退化显示");
+        }
+        if (this.exportButton == null) {
+            MaidSelfTalkMod.LOGGER.warn("未能在原版人设页定位导出设定按钮，该按钮保持原版位置");
         }
     }
 
@@ -234,6 +261,9 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         boolean structured = this.mode.isStructured();
         if (this.customSetting != null) {
             toggleChild(this.customSetting, !structured);
+            // 原版 render/mouseReleased 按字段直接引用输入框：「自定义设定」标签与保存提示跟随其位置
+            // 绘制、释放事件无条件派发给它，结构化模式下把输入框挪出屏幕隐藏这两类影响
+            this.customSetting.setY(structured ? VANILLA_BOX_HIDDEN_Y : this.vanillaBoxY);
         }
         for (GuardedPersonaEditBox box : this.boxes) {
             if (box != null) {
@@ -272,6 +302,24 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     /** 整段人设原文（AI 拆分的唯一资料来源）：原版输入框当前内容，结构化模式下同样可读 */
     private String splitSourceText() {
         return this.customSetting == null ? "" : this.customSetting.getValue();
+    }
+
+    /** 结构化模式判定（mixin 据此跳过对隐藏原版输入框的释放派发） */
+    public boolean isStructuredMode() {
+        return this.mode.isStructured();
+    }
+
+    /**
+     * 布娃娃预览位置（mixin 改写 drawMaid 参数用）：原版参数从输入框位置推导，
+     * 而输入框在结构化模式下已被挪出屏幕，这里改用定位到的原版布局坐标。
+     * 未定位到输入框时返回 null（mixin 不改参数，保持原版位置）。
+     */
+    @Nullable
+    public int[] maidPreviewPos() {
+        if (this.customSetting == null) {
+            return null;
+        }
+        return new int[]{this.vanillaBoxX + this.vanillaBoxWidth + 73, this.vanillaBoxY + MAID_PREVIEW_Y_OFFSET};
     }
 
     /**
@@ -676,7 +724,7 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
 
         super.render(graphics, mouseX, mouseY, partialTick);
 
-        int columnX = this.width / 2 - 195 + COLUMN_OFFSET;
+        int columnX = this.vanillaBoxX + COLUMN_OFFSET;
         if (this.mode.isStructured()) {
             // 四栏标签：画在各自文本框上方
             for (int i = 0; i < this.boxes.length; i++) {
