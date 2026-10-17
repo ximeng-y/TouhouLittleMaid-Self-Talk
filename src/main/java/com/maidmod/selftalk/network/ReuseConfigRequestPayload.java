@@ -29,7 +29,12 @@ public record ReuseConfigRequestPayload(UUID sessionId, long seq, UUID maidUuid)
 
     /** UUID 手写编解码（1.21.1 的 ByteBufCodecs 无 UUID 常量，readUUID/writeUUID 在 FriendlyByteBuf 上） */
     static final StreamCodec<FriendlyByteBuf, UUID> NULLABLE_UUID_STREAM_CODEC = StreamCodec.of(
-            (buf, uuid) -> buf.writeBoolean(uuid != null),
+            (buf, uuid) -> {
+                buf.writeBoolean(uuid != null);
+                if (uuid != null) {
+                    buf.writeUUID(uuid);
+                }
+            },
             buf -> buf.readBoolean() ? buf.readUUID() : null);
 
     public static final StreamCodec<FriendlyByteBuf, ReuseConfigRequestPayload> STREAM_CODEC =
