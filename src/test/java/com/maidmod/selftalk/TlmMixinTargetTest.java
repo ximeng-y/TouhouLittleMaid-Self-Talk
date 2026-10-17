@@ -35,10 +35,11 @@ import java.util.regex.Pattern;
  * 自身方法名不变）。若升级 TLM，必须同步复核三个 mixin 的 {@code method} 字符串并更新
  * 本类期望值；neoforge 线的对应自检差异仅在 {@code lambda$onPlaySoundLocal} 的序号。
  * <p>
- * 覆盖边界：只覆盖承载全部 lambda 绑定的三个宿主类，外加 LLMCallback 内两处历史写入
- * {@code @Redirect} 的调用点方法名（{@code addAssistantHistory}/{@code addToolHistory}，
- * 调用点 owner 为 MaidAIChatManager）。其余 named 绑定宿主（MaidAIChatData、
- * HistorySummaryManager、EntityMaid、client 侧）不在覆盖范围，目标缺失时由
+ * 覆盖边界：覆盖承载 lambda 绑定的四个宿主类（TTSCallback、MaidAIChatManager、LLMCallback、
+ * AIChatScreen），外加 LLMCallback 内两处历史写入 {@code @Redirect} 的调用点方法名
+ * （{@code addAssistantHistory}/{@code addToolHistory}，调用点 owner 为 MaidAIChatManager）
+ * 与 SettingEditScreen 的 {@code drawMaid}/{@code saveConfig} 命名绑定。其余 named 绑定宿主
+ * （MaidAIChatData、HistorySummaryManager、EntityMaid、client 侧）不在覆盖范围，目标缺失时由
  * {@code maid_self_talk.mixins.json} 的 {@code defaultRequire: 1} 在启动期兜底报错。
  * <p>
  * 运行（已由 {@code gradle check} / CI 自动执行，issue #60 C13）：
@@ -81,6 +82,13 @@ public final class TlmMixinTargetTest {
                 "onFailure",
                 "addAssistantHistory",
                 "addToolHistory");
+        // 统一人设页：✎ 按钮 onPress lambda 内的 SettingEditScreen 构造重定向，
+        // 以及原版页上的布娃娃位置调整与保存附带提交钩子
+        checkClass(tlmJar, "client/gui/entity/maid/ai/AIChatScreen.class",
+                "lambda$addLeftButtons$1");
+        checkClass(tlmJar, "client/gui/entity/maid/ai/SettingEditScreen.class",
+                "drawMaid",
+                "saveConfig");
         System.out.println("TlmMixinTargetTest: all " + checks + " checks passed");
     }
 
