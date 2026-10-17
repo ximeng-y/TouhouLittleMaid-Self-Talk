@@ -23,6 +23,7 @@ import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
 import net.minecraftforge.event.entity.living.LivingDamageEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -351,10 +352,20 @@ public final class SelfTalkHandler {
         }
     }
 
-    /** 服务端关闭：撤销全部在途拆分任务（不回包，连接即将断开） */
+    /** 服务端关闭：撤销全部在途拆分任务（不回包，连接即将断开）；预制复用库写出脏文件并释放内存缓存 */
     @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
         PersonaSplitService.onServerStopped();
+        SelfTalkReuseStore.release(event.getServer());
+    }
+
+    /** overworld 存档：预制复用库写出脏文件（每指纹一文件的增量保存，只写脏的） */
+    @SubscribeEvent
+    public static void onLevelSave(LevelEvent.Save event) {
+        if (event.getLevel() instanceof ServerLevel serverLevel
+                && serverLevel.getServer().overworld() == serverLevel) {
+            SelfTalkReuseStore.of(serverLevel.getServer()).saveDirty();
+        }
     }
 
     // 1.1.2 起玩家设置在 overworld SavedData，天然跨玩家死亡重生/维度传送保留，无需任何 clone 钩子。

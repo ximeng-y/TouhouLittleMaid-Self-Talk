@@ -10,6 +10,7 @@ import com.maidmod.selftalk.KeywordPlanCallback;
 import com.maidmod.selftalk.MaidSelfTalkService;
 import com.maidmod.selftalk.SegmentTags;
 import com.maidmod.selftalk.SelfTalkCallback;
+import com.maidmod.selftalk.SelfTalkTtsTranslationCallback;
 import com.maidmod.selftalk.persona.PersonaSplitCallback;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -71,8 +72,9 @@ public abstract class LLMCallbackMixin {
 
     private static void onChatEnd(LLMCallback callback) {
         if (callback instanceof SelfTalkCallback || callback instanceof InterChatCallback
-                || callback instanceof KeywordPlanCallback || callback instanceof PersonaSplitCallback) {
-            // 自话/互聊/静默规划/AI 拆分回调自行管理各自状态与遗忘，不参与玩家 chat 计数
+                || callback instanceof KeywordPlanCallback || callback instanceof PersonaSplitCallback
+                || callback instanceof SelfTalkTtsTranslationCallback) {
+            // 自话/互聊/静默规划/AI 拆分/TTS 翻译回调自行管理各自状态，不参与玩家 chat 计数
             return;
         }
         EntityMaid maid = callback.getMaid();

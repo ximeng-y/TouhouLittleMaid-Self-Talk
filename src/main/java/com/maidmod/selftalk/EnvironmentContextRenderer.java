@@ -1,8 +1,10 @@
 package com.maidmod.selftalk;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -678,6 +680,16 @@ final class EnvironmentContextRenderer {
     // ===== 感知事件 =====
 
     /**
+     * 事件渲染的双重结果：感知段整段正文 + 逐事件 key 的合句文本。
+     * <p>
+     * {@code byKey} 供预制复用做「key 严格相等」匹配：同一 key 的多个分组句子
+     * 按出现顺序用单个空格合并成一条（与整段正文的合并符一致）；
+     * 相对时间用调用方传入的定格 {@code nowTick} 计算，同一触发内两份结果恒同源。
+     */
+    record EventRenderResult(String text, Map<String, String> byKey) {
+    }
+
+    /**
      * 事件归并后的自然语言短段（按记录顺序，不输出编号或字段名）。
      * <p>
      * 分组规则见 {@link SelfTalkEventBuffer#group}：只归并相邻同源的受伤记录，
@@ -686,19 +698,28 @@ final class EnvironmentContextRenderer {
      * <p>
      * 归并后只说「多次」，绝不输出精确受击次数：冷却期内的受击本就没有记录，条数会被误读为真实次数。
      */
-    static String renderEvents(List<SelfTalkEventBuffer.Event> events, long nowTick, ContextLanguage lang) {
+    static EventRenderResult renderEventsMapped(List<SelfTalkEventBuffer.Event> events, long nowTick,
+                                                ContextLanguage lang) {
         List<SelfTalkEventBuffer.Group> groups = SelfTalkEventBuffer.group(events);
         if (groups.isEmpty()) {
-            return "";
+            return new EventRenderResult("", Map.of());
         }
         List<String> sentences = new ArrayList<>(groups.size());
+        Map<String, String> byKey = new LinkedHashMap<>();
         for (SelfTalkEventBuffer.Group group : groups) {
             String relative = relativeTime(nowTick - group.last().tick(), lang);
-            sentences.add(group.repeated()
+            String sentence = group.repeated()
                     ? repeatedSentence(group.first(), relative, lang)
-                    : singleSentence(group.first(), relative, lang));
+                    : singleSentence(group.first(), relative, lang);
+            sentences.add(sentence);
+            byKey.merge(EnvironmentContextOption.keyOfEventKind(group.first().kind()), sentence, (a, b) -> a + " " + b);
         }
-        return String.join(" ", sentences);
+        return new EventRenderResult(String.join(" ", sentences), Map.copyOf(byKey));
+    }
+
+    /** {@link #renderEventsMapped} 的单结果视图：旧调用方只要整段正文 */
+    static String renderEvents(List<SelfTalkEventBuffer.Event> events, long nowTick, ContextLanguage lang) {
+        return renderEventsMapped(events, nowTick, lang).text();
     }
 
     /** 单条记录：相对时间 + 事实 */
