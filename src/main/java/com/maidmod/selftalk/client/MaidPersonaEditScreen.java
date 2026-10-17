@@ -1,10 +1,13 @@
 package com.maidmod.selftalk.client;
 
+import com.github.tartaricacid.touhoulittlemaid.client.gui.entity.maid.ai.SettingEditScreen;
+import com.github.tartaricacid.touhoulittlemaid.client.gui.widget.button.FlatColorButton;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.MaidPersonaConfig;
 import com.maidmod.selftalk.MaidPersonaDraft;
 import com.maidmod.selftalk.MaidPersonaHost;
 import com.maidmod.selftalk.MaidPersonaMode;
+import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.network.MaidPersonaSaveMessage;
 import com.maidmod.selftalk.network.MaidPersonaSaveResponseMessage;
 import com.maidmod.selftalk.network.MaidPersonaSplitResponseMessage;
@@ -13,8 +16,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.ComponentPath;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.MultiLineEditBox;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.navigation.FocusNavigationEvent;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -27,64 +33,88 @@ import javax.annotation.Nullable;
 import java.util.UUID;
 
 /**
- * 四栏人设编辑页：从原版「✎ 人设编辑」页（SettingEditScreen）进入，返回时回到那个页面。
+ * 统一人设编辑页：直接继承 TLM 原版「✎ 人设编辑」页（SettingEditScreen），
+ * 由 AIChatScreen 的 ✎ 入口通过 mixin 重定向构造为本类。
  * <p>
- * 顶部一个模式开关（原版人设 / 四栏人设），下方固定四类（身份 / 性格 / 背景 / 爱好），
- * 左侧分类按钮 + 右侧一个多行输入框；打开时从客户端宿主读取已同步配置，复制成页面配置与
- * 「已保存基线」两份——基线用于判断是否有未保存改动，页面配置是唯一编辑源。
+ * 页面上同时保留原版的整段人设输入框与保存 / 保存并退出 / 返回按钮：
+ * <ul>
+ *   <li>整段人设模式（默认）：显示原版输入框，行为与原版一致；</li>
+ *   <li>结构化人设模式：隐藏原版输入框（挪出屏幕，使其跟随输入框位置绘制的标签 /
+ *       保存提示一并消失），同一区域改为身份 / 性格 / 背景 / 爱好四行
+ *       「栏目标签 + 可滚动文本框」，四栏同时可见。</li>
+ * </ul>
+ * 右侧按钮列调整为：布娃娃预览在顶部，原版保存按钮位置不变，其下依次为
+ * 模式切换按钮、「导出设定」（从原版顶部移来）、AI 拆分按钮。
  * <p>
- * <b>模式与四栏是同一份待提交内容</b>：切模式与改文字都会使页面变 dirty，保存时冻结成一个完整的
- * {@link MaidPersonaConfig} 快照整份提交。原版整段人设（{@code customSetting}）既不是本页的数据源，
- * 也不是本页的写入目标——两套内容独立保存，切模式不复制、不覆盖、不删除另一套；原版模式下同样允许
- * 编辑并保存四栏内容（存着备用，切回四栏即生效）。
+ * 模式与四栏内容独立于原版整段人设存储：切模式、改文字都不触碰原版输入框，
+ * 两套内容互不复制、覆盖或删除。点击模式按钮立即把「模式 + 四栏快照」整份提交保存；
+ * 原版保存按钮在页面有未保存改动时也会附带提交同一份快照。
  * <p>
  * 保存是「请求 - 结果确认」两段式：提交时生成新 requestId 并冻结本次快照，服务端整份替换后按该
  * requestId 回结果，回包里带服务端确认的完整配置。等待期间禁止继续编辑与重复提交；只有当前打开、
  * id 匹配的页面处理响应，关闭后的迟到响应不会落到任何界面上。成功以<b>服务端确认值</b>写回客户端宿主
  * 与基线并清 dirty；失败保留页面内容与 dirty，且不得被当成已保存。
  * <p>
- * <b>AI 拆分</b>：进入本页时从原版输入框冻结一份文本快照（含未保存修改），「AI 拆分」按钮据此
- * 发起一次静默整理请求。成功且发起页面一直未离开、仍是当前页面时整份填入四栏并选中四栏模式
- * （保持基线不变，仍需手动保存）；其他情况暂存为候选，重开该女仆页面时弹确认载入。
- * 整理期间禁止编辑、切模式、保存与重复发起（允许查看分类与离开页面）；关闭界面不取消任务，
+ * <b>AI 拆分</b>：点击时读取原版输入框当前文本（含未保存修改），发起一次静默整理请求。
+ * 成功且页面一直未离开、仍是当前页面时整份填入四栏并切到结构化模式显示（保持基线不变，
+ * 仍需手动保存）；其他情况暂存为候选，重开该女仆页面时弹确认载入。
+ * 整理期间禁止编辑四栏、切模式、保存与重复发起（允许查看与离开页面）；关闭界面不取消任务，
  * 完成后服务端向发起玩家发私信。候选仅保留在本次连接内，保存成功或显式丢弃才消费。
  */
 @OnlyIn(Dist.CLIENT)
-public class MaidPersonaEditScreen extends Screen {
+public class MaidPersonaEditScreen extends SettingEditScreen {
 
-    /** 左侧分类按钮列宽（模式开关同宽，与分类列左对齐） */
-    private static final int CATEGORY_WIDTH = 110;
-    /** 左列与输入框之间的间隔 */
-    private static final int COLUMN_GAP = 12;
-    /** 输入框最大宽度（窄屏时收窄） */
-    private static final int BOX_MAX_WIDTH = 300;
-    /** 底部按钮尺寸 */
-    private static final int BOTTOM_BUTTON_WIDTH = 90;
-    private static final int BOTTOM_BUTTON_HEIGHT = 20;
-    /** 底部三个按钮之间的间隔 */
-    private static final int BOTTOM_BUTTON_GAP = 6;
-    /** 内容区顶部（模式开关 + 说明行之下） */
-    private static final int CONTENT_TOP = 60;
+    /** 右侧按钮列相对原版 posX 的偏移（原版导出 / 保存按钮同列） */
+    private static final int COLUMN_OFFSET = 265;
+    /** 右侧按钮列宽（与原版按钮一致） */
+    private static final int COLUMN_WIDTH = 128;
+    private static final int BUTTON_HEIGHT = 20;
+    /** 模式切换按钮 y（原版返回按钮之下） */
+    private static final int MODE_BUTTON_Y = 150;
+    /** 「导出设定」移到的位置（模式按钮之下） */
+    private static final int EXPORT_BUTTON_Y = 175;
+    /** AI 拆分按钮 y（两个按钮之下） */
+    private static final int SPLIT_BUTTON_Y = 200;
+    /** 四栏内容区顶部（与原版输入框 y 一致） */
+    private static final int BOX_TOP = 70;
+    /** 内容区底部留白（原版输入框高度为 height - 100，即底边在 height - 30） */
+    private static final int CONTENT_BOTTOM_MARGIN = 30;
+    /** 每栏标签行高 */
+    private static final int LABEL_HEIGHT = 12;
+    /** 四栏文本框宽度（与原版输入框一致） */
+    private static final int BOX_WIDTH = 256;
+    /** 结构化模式下原版输入框的藏匿 y：原版 render 按其位置直接绘制标签与保存提示，挪出屏幕后一并隐藏 */
+    private static final int VANILLA_BOX_HIDDEN_Y = -10000;
+    /**
+     * 布娃娃预览 y 相对原版输入框 y 的偏移：原版 drawMaid 渲染框为 90×100（posY-45..posY+55），
+     * 负值把预览顶到按钮列顶部空位；模型实际占框中间，最终观感需实机微调
+     */
+    private static final int MAID_PREVIEW_Y_OFFSET = -36;
 
     private final EntityMaid maid;
-    /** 返回目标：进入本页的原版人设编辑页实例（不新建原版页面） */
-    private final @Nullable Screen parent;
 
-    /** 页面模式（编辑源的一部分；与四栏内容一起构成待提交配置） */
+    /** 原版整段人设输入框：结构化模式下从界面移除，但仍持有引用（保存 / 导出 / AI 拆分用） */
+    @Nullable
+    private MultiLineEditBox customSetting;
+    /** 原版「导出设定」按钮：init 后重定位到按钮列下方 */
+    @Nullable
+    private FlatColorButton exportButton;
+    /** 原版输入框在原版布局中的位置与宽度（init 定位成功后取实际值，失败保持常量默认值） */
+    private int vanillaBoxX;
+    private int vanillaBoxY = BOX_TOP;
+    private int vanillaBoxWidth = BOX_WIDTH;
+
+    /** 页面模式（与四栏内容一起构成待提交配置） */
     private MaidPersonaMode mode;
-    /** 四栏页面内容（编辑源；与输入框内容实时同步） */
+    /** 四栏页面内容（编辑源；与各输入框内容实时同步） */
     private final String[] draft = new String[MaidPersonaDraft.CATEGORY_COUNT];
     /** 已保存基线：最近一次「服务端确认成功」的完整配置，用于判定 dirty */
     private MaidPersonaConfig baseline;
     /** 是否显示「已保存」状态：仅当页面内容相对基线无改动时成立（render 里随 dirty 收敛） */
     private boolean savedShown;
-    /** 当前分类（0..3，对应 MaidPersonaDraft 的四个栏位） */
-    private int category;
 
     /** 本次提交的 requestId；非 null 表示正在等待结果（禁止编辑与重复提交） */
     private UUID pendingRequestId;
-    /** 「保存并返回」：只在收到成功结果后才回父页面 */
-    private boolean returnAfterSave;
 
     /** 程序化 setValue 期间挂起监听，防把载入的栏内容误当输入 */
     private boolean loadingBox;
@@ -92,8 +122,6 @@ public class MaidPersonaEditScreen extends Screen {
     /** 本女仆仍有跨页面待确认保存：该旧基线在确认前不得进入可编辑/可提交状态 */
     private boolean awaitingConfirmation;
 
-    /** 进入本页时冻结的原版输入框文本快照（含未保存修改）：AI 拆分的唯一资料来源 */
-    private final String splitSourceText;
     /** 本页实例唯一标识：整理任务与页面的关联（重开页面是新实例、新 id） */
     private final UUID pageId = UUID.randomUUID();
     /** 是否已真正离开本页（确认浮层不算离开；resize 不算） */
@@ -109,16 +137,12 @@ public class MaidPersonaEditScreen extends Screen {
     private int statusColor = 0xAAAAAA;
 
     private Button modeButton;
-    private GuardedPersonaEditBox box;
-    private Button saveButton;
-    private Button saveAndBackButton;
     private Button splitButton;
+    private final GuardedPersonaEditBox[] boxes = new GuardedPersonaEditBox[MaidPersonaDraft.CATEGORY_COUNT];
 
-    public MaidPersonaEditScreen(@Nullable Screen parent, EntityMaid maid, String sourceText) {
-        super(Component.translatable("config.maid_self_talk.screen.persona_draft.title"));
-        this.parent = parent;
+    public MaidPersonaEditScreen(@Nullable Screen parent, EntityMaid maid) {
+        super(parent, maid);
         this.maid = maid;
-        this.splitSourceText = sourceText == null ? "" : sourceText;
         // 打开时读客户端已同步配置：宿主不可用（未挂载/未同步）时按默认配置处理，不阻断页面
         MaidPersonaConfig current = MaidPersonaHost.configOf(maid);
         this.mode = current.mode();
@@ -133,68 +157,86 @@ public class MaidPersonaEditScreen extends Screen {
 
     @Override
     protected void init() {
-        this.clearWidgets();
+        // 先让原版建立称呼框、整段人设框、导出 / 保存 / 保存并退出 / 返回按钮
+        super.init();
+        // 原版布局默认值：原版输入框定位失败时四栏按此退化布局排布
+        int posX = this.width / 2 - 195;
+        this.vanillaBoxX = posX;
+        this.vanillaBoxY = BOX_TOP;
+        this.vanillaBoxWidth = BOX_WIDTH;
+        locateVanillaWidgets();
 
-        // 左分类列 + 间隔 + 输入框作为整体相对屏幕中线对称摆放（窄屏收窄输入框）
-        int boxWidth = Math.min(BOX_MAX_WIDTH, Math.max(120, this.width - CATEGORY_WIDTH - COLUMN_GAP - 40));
-        int leftX = this.width / 2 - (CATEGORY_WIDTH + COLUMN_GAP + boxWidth) / 2;
-        int boxX = leftX + CATEGORY_WIDTH + COLUMN_GAP;
-        int top = CONTENT_TOP;
-        int bottomY = this.height - 28;
-        int boxHeight = Math.max(40, bottomY - 24 - top);
+        int columnX = this.vanillaBoxX + COLUMN_OFFSET;
+        int contentHeight = Math.max(4 * (LABEL_HEIGHT + 20),
+                this.height - CONTENT_BOTTOM_MARGIN - this.vanillaBoxY);
+        int groupHeight = contentHeight / MaidPersonaDraft.CATEGORY_COUNT;
 
         this.modeButton = this.addRenderableWidget(Button.builder(modeLabel(), b -> toggleMode())
-                .bounds(leftX, 22, CATEGORY_WIDTH, 20)
+                .bounds(columnX, MODE_BUTTON_Y, COLUMN_WIDTH, BUTTON_HEIGHT)
                 .build());
 
-        for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
-            int index = i;
-            this.addRenderableWidget(Button.builder(categoryLabel(i), b -> switchCategory(index))
-                    .bounds(leftX, top + i * 24, CATEGORY_WIDTH, 20)
-                    .build());
-        }
-
-        // AI 拆分入口：位于四栏分类列之下；原文空白时禁用（等待/门禁期间在 render 里统一禁用）
         this.splitButton = this.addRenderableWidget(Button.builder(
                         Component.translatable("config.maid_self_talk.screen.persona_draft.button.split"),
                         b -> startSplit())
-                .bounds(leftX, top + MaidPersonaDraft.CATEGORY_COUNT * 24 + 8, CATEGORY_WIDTH, 20)
+                .bounds(columnX, SPLIT_BUTTON_Y, COLUMN_WIDTH, BUTTON_HEIGHT)
                 .build());
+        this.splitButton.setTooltip(Tooltip.create(
+                Component.translatable("config.maid_self_talk.screen.persona_draft.button.split.tooltip")));
 
-        this.box = new GuardedPersonaEditBox(this.font, boxX, top, boxWidth, boxHeight,
-                Component.translatable("config.maid_self_talk.screen.persona_draft.placeholder"));
-        this.box.setValueListener(value -> {
-            if (!this.loadingBox) {
-                this.draft[this.category] = value;
+        if (this.exportButton != null) {
+            this.exportButton.setX(columnX);
+            this.exportButton.setY(EXPORT_BUTTON_Y);
+        }
+
+        for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
+            int index = i;
+            int boxY = this.vanillaBoxY + i * groupHeight + LABEL_HEIGHT;
+            int boxHeight = Math.max(20, groupHeight - LABEL_HEIGHT - 2);
+            GuardedPersonaEditBox box = new GuardedPersonaEditBox(this.font, this.vanillaBoxX, boxY,
+                    this.vanillaBoxWidth, boxHeight,
+                    Component.translatable("config.maid_self_talk.screen.persona_draft.placeholder"));
+            box.setValueListener(value -> {
+                if (!this.loadingBox) {
+                    this.draft[index] = value;
+                }
+            });
+            box.setValue(this.draft[index]);
+            this.boxes[i] = box;
+        }
+
+        applyModeVisibility();
+    }
+
+    /** 从原版 init 建立的控件中找回整段人设框与导出按钮，并记录输入框的原版布局位置 */
+    private void locateVanillaWidgets() {
+        this.customSetting = null;
+        this.exportButton = null;
+        String exportText = Component.translatable(
+                "gui.touhou_little_maid.button.maid_ai_chat_config.edit_custom_setting.export").getString();
+        for (GuiEventListener child : this.children()) {
+            if (this.customSetting == null && child instanceof MultiLineEditBox box) {
+                this.customSetting = box;
             }
-        });
-        this.box.setValue(this.draft[this.category]);
-        this.addRenderableWidget(this.box);
-
-        int buttonsWidth = 3 * BOTTOM_BUTTON_WIDTH + 2 * BOTTOM_BUTTON_GAP;
-        int buttonsX = this.width / 2 - buttonsWidth / 2;
-        this.saveButton = this.addRenderableWidget(Button.builder(
-                        Component.translatable("config.maid_self_talk.screen.persona_draft.button.save"),
-                        b -> submit(false))
-                .bounds(buttonsX, bottomY, BOTTOM_BUTTON_WIDTH, BOTTOM_BUTTON_HEIGHT)
-                .build());
-        this.saveAndBackButton = this.addRenderableWidget(Button.builder(
-                        Component.translatable("config.maid_self_talk.screen.persona_draft.button.save_and_back"),
-                        b -> submit(true))
-                .bounds(buttonsX + BOTTOM_BUTTON_WIDTH + BOTTOM_BUTTON_GAP, bottomY,
-                        BOTTOM_BUTTON_WIDTH, BOTTOM_BUTTON_HEIGHT)
-                .build());
-        this.addRenderableWidget(Button.builder(
-                        Component.translatable("config.maid_self_talk.screen.persona_draft.button.back"),
-                        b -> this.onClose())
-                .bounds(buttonsX + 2 * (BOTTOM_BUTTON_WIDTH + BOTTOM_BUTTON_GAP), bottomY,
-                        BOTTOM_BUTTON_WIDTH, BOTTOM_BUTTON_HEIGHT)
-                .build());
+            if (this.exportButton == null && child instanceof FlatColorButton button
+                    && exportText.equals(button.getMessage().getString())) {
+                this.exportButton = button;
+            }
+        }
+        if (this.customSetting != null) {
+            this.vanillaBoxX = this.customSetting.getX();
+            this.vanillaBoxY = this.customSetting.getY();
+            this.vanillaBoxWidth = this.customSetting.getWidth();
+        } else {
+            MaidSelfTalkMod.LOGGER.warn("未能在原版人设页定位整段人设输入框，结构化模式按原版默认布局退化显示");
+        }
+        if (this.exportButton == null) {
+            MaidSelfTalkMod.LOGGER.warn("未能在原版人设页定位导出设定按钮，该按钮保持原版位置");
+        }
     }
 
     /** 模式开关标签：显示当前模式（点击切到另一个） */
     private Component modeLabel() {
-        return Component.translatable("config.maid_self_talk.screen.persona_draft.mode.button", modeName(this.mode));
+        return modeName(this.mode);
     }
 
     private static Component modeName(MaidPersonaMode mode) {
@@ -214,40 +256,91 @@ public class MaidPersonaEditScreen extends Screen {
         };
     }
 
+    /** 按当前模式切换原版输入框与四栏文本框的显示（同一区域互斥） */
+    private void applyModeVisibility() {
+        boolean structured = this.mode.isStructured();
+        if (this.customSetting != null) {
+            toggleChild(this.customSetting, !structured);
+            // 原版 render/mouseReleased 按字段直接引用输入框：「自定义设定」标签与保存提示跟随其位置
+            // 绘制、释放事件无条件派发给它，结构化模式下把输入框挪出屏幕隐藏这两类影响
+            this.customSetting.setY(structured ? VANILLA_BOX_HIDDEN_Y : this.vanillaBoxY);
+        }
+        for (GuardedPersonaEditBox box : this.boxes) {
+            if (box != null) {
+                toggleChild(box, structured);
+            }
+        }
+        if (structured) {
+            this.setFocused(null);
+        }
+    }
+
+    /** 把控件加入 / 移出界面（对象保留，内容与状态不丢） */
+    private void toggleChild(AbstractWidget widget, boolean shown) {
+        boolean present = this.children().contains(widget);
+        if (shown && !present) {
+            this.addRenderableWidget(widget);
+        } else if (!shown && present) {
+            this.removeWidget(widget);
+            if (this.getFocused() == widget) {
+                this.setFocused(null);
+            }
+        }
+    }
+
+    /** 把四个输入框刷新为页面内容 */
+    private void refreshBoxes() {
+        for (int i = 0; i < this.boxes.length; i++) {
+            if (this.boxes[i] != null) {
+                this.loadingBox = true;
+                this.boxes[i].setValue(this.draft[i]);
+                this.loadingBox = false;
+            }
+        }
+    }
+
+    /** 整段人设原文（AI 拆分的唯一资料来源）：原版输入框当前内容，结构化模式下同样可读 */
+    private String splitSourceText() {
+        return this.customSetting == null ? "" : this.customSetting.getValue();
+    }
+
+    /** 结构化模式判定（mixin 据此跳过对隐藏原版输入框的释放派发） */
+    public boolean isStructuredMode() {
+        return this.mode.isStructured();
+    }
+
     /**
-     * 切换模式：只改页面模式，不触碰四栏文本、也不触碰原版整段人设。
-     * 模式是待提交内容的一部分，因此切换后页面进入 dirty（保存时才真正落盘）。
+     * 布娃娃预览位置（mixin 改写 drawMaid 参数用）：原版参数从输入框位置推导，
+     * 而输入框在结构化模式下已被挪出屏幕，这里改用定位到的原版布局坐标。
+     * 未定位到输入框时返回 null（mixin 不改参数，保持原版位置）。
+     */
+    @Nullable
+    public int[] maidPreviewPos() {
+        if (this.customSetting == null) {
+            return null;
+        }
+        return new int[]{this.vanillaBoxX + this.vanillaBoxWidth + 73, this.vanillaBoxY + MAID_PREVIEW_Y_OFFSET};
+    }
+
+    /**
+     * 切换模式：只改页面显示与待提交配置，不触碰两套内容本身。
+     * 「只要切换就保存」——切换后立即整份提交（模式 + 四栏快照）；
+     * 提交失败时显示保持切换后的模式，基线不更新，下次点原版保存会再次提交。
      */
     private void toggleMode() {
-        if (this.pendingRequestId != null || this.awaitingConfirmation) {
+        if (this.pendingRequestId != null || this.awaitingConfirmation
+                || MaidPersonaSplitClient.isRunningFor(this.maid.getUUID())) {
             return;
         }
         this.mode = this.mode.isStructured() ? MaidPersonaMode.ORIGINAL : MaidPersonaMode.STRUCTURED;
+        applyModeVisibility();
         if (this.modeButton != null) {
             this.modeButton.setMessage(modeLabel());
         }
+        submitPersona();
     }
 
-    /**
-     * 切换分类：先落盘当前输入框内容，再载入目标栏。
-     * 载入期间挂起监听，避免 setValue 触发的回调把目标栏内容写进刚切走的栏位。
-     */
-    private void switchCategory(int target) {
-        if (target == this.category || this.pendingRequestId != null || this.awaitingConfirmation) {
-            return;
-        }
-        if (this.box != null) {
-            this.draft[this.category] = this.box.getValue();
-        }
-        this.category = target;
-        if (this.box != null) {
-            this.loadingBox = true;
-            this.box.setValue(this.draft[target]);
-            this.loadingBox = false;
-        }
-    }
-
-    /** 当前四栏值（输入框内容即当前栏真值，无需先落盘） */
+    /** 当前四栏值（各输入框内容经监听实时同步，无需先落盘） */
     private MaidPersonaDraft currentDraft() {
         return new MaidPersonaDraft(this.draft[0], this.draft[1], this.draft[2], this.draft[3]);
     }
@@ -267,7 +360,8 @@ public class MaidPersonaEditScreen extends Screen {
         if (this.pendingRequestId != null || this.awaitingConfirmation) {
             return;
         }
-        if (this.splitSourceText.isBlank()) {
+        String source = splitSourceText();
+        if (source.isBlank()) {
             return;
         }
         UUID maidUuid = this.maid.getUUID();
@@ -283,7 +377,7 @@ public class MaidPersonaEditScreen extends Screen {
             this.minecraft.setScreen(new ConfirmScreen(confirm -> {
                 this.minecraft.setScreen(this);
                 if (confirm) {
-                    registerAndSendSplit();
+                    registerAndSendSplit(source);
                 }
             },
                     Component.translatable(
@@ -292,13 +386,12 @@ public class MaidPersonaEditScreen extends Screen {
                             "config.maid_self_talk.screen.persona_draft.split.confirm.replace.message")));
             return;
         }
-        registerAndSendSplit();
+        registerAndSendSplit(source);
     }
 
     /** 登记并发送拆分请求（请求不携带页面状态；结果按 requestId + 女仆 UUID 回到整理缓存） */
-    private void registerAndSendSplit() {
-        MaidPersonaSplitClient.startRequest(UUID.randomUUID(), this.maid, this.pageId,
-                this.splitSourceText);
+    private void registerAndSendSplit(String source) {
+        MaidPersonaSplitClient.startRequest(UUID.randomUUID(), this.maid, this.pageId, source);
         setStatus(Component.translatable(
                 "config.maid_self_talk.screen.persona_draft.split.status.running"), 0xFFAA55);
     }
@@ -306,7 +399,7 @@ public class MaidPersonaEditScreen extends Screen {
     /**
      * 整理任务终态通知（整理缓存只通知当前打开的该女仆页面）。
      * <p>
-     * 成功且本页发起、从未离开（仍为当前页面）时整份填入四栏并选中四栏模式，
+     * 成功且本页发起、从未离开（仍为当前页面）时整份填入四栏并切到结构化模式显示，
      * 撤销「已保存」显示，保持基线不变——玩家检查、修改后手动保存。
      * 其他情况不动作：READY 候选由 {@link #maybeShowSplitLoadConfirm} 的重开确认接管；
      * 失败只在本页提示，页面内容原样保留。
@@ -326,7 +419,8 @@ public class MaidPersonaEditScreen extends Screen {
     }
 
     /**
-     * 载入整理候选：整份填入四栏并选中四栏模式，标记来源 requestId（保存时登记关联）。
+     * 载入整理候选：整份填入四栏并切到结构化模式显示，标记来源 requestId（保存时登记关联）。
+     * 这里只切显示、不立即保存——AI 结果仍需玩家确认后手动保存。
      * 候选本身保留在缓存里，直到保存成功或被显式丢弃。
      */
     private void loadSplitCandidate(MaidPersonaSplitClient.Entry entry) {
@@ -342,11 +436,8 @@ public class MaidPersonaEditScreen extends Screen {
         if (this.modeButton != null) {
             this.modeButton.setMessage(modeLabel());
         }
-        if (this.box != null) {
-            this.loadingBox = true;
-            this.box.setValue(this.draft[this.category]);
-            this.loadingBox = false;
-        }
+        applyModeVisibility();
+        refreshBoxes();
     }
 
     /**
@@ -440,6 +531,14 @@ public class MaidPersonaEditScreen extends Screen {
     }
 
     /**
+     * 原版保存按钮（保存 / 保存并退出）的附带保存：内容有改动时提交同一份快照。
+     * 由 SettingEditScreenMixin 注入原版 {@code saveConfig()} 末尾调用。
+     */
+    public void onVanillaSave() {
+        submitPersona();
+    }
+
+    /**
      * 客户端宿主被保存回包确认更新时调用：若当前打开的是同一女仆的人设页、
      * 且没有未保存改动，把确认值并入页面内容、模式与基线。
      * <p>
@@ -458,13 +557,10 @@ public class MaidPersonaEditScreen extends Screen {
         this.baseline = confirmed;
         this.awaitingConfirmation = false;
         this.savedShown = false;
+        applyModeVisibility();
+        refreshBoxes();
         if (this.modeButton != null) {
             this.modeButton.setMessage(modeLabel());
-        }
-        if (this.box != null) {
-            this.loadingBox = true;
-            this.box.setValue(this.draft[this.category]);
-            this.loadingBox = false;
         }
     }
 
@@ -472,7 +568,7 @@ public class MaidPersonaEditScreen extends Screen {
      * 本次女仆的旧请求已结束（成功或失败）。
      * <p>
      * 成功回包已在 {@link #onHostConfirmed} 并入确认值；这里只负责结束跨页门禁。
-     * 失败不改内容/基线、解除只读并显示对应错误（原页按 requestId 匹配时走
+     * 失败不改内容/基线、解除只读并显示对应错误（本页按 requestId 匹配时走
      * {@link #applySaveResponse}；新页无匹配 id 但同女仆的也要解除门禁）。
      */
     void onPendingSaveFinished(MaidPersonaSaveResponseMessage msg) {
@@ -487,25 +583,23 @@ public class MaidPersonaEditScreen extends Screen {
 
     /**
      * 提交保存：冻结本次完整配置快照（模式 + 四栏）并发出请求，随后进入等待态。
-     * 超限时不发包（界面已禁用按钮，这里是纵深防御），未变更也允许提交（幂等写入）。
+     * 未变更时跳过（模式切换必然产生改动）；超限时不发包并提示。
      */
-    private void submit(boolean returnAfterSuccess) {
+    private void submitPersona() {
         if (this.pendingRequestId != null || this.awaitingConfirmation
                 || MaidPersonaSplitClient.isRunningFor(this.maid.getUUID())) {
             return;
         }
-        if (this.box != null) {
-            // 输入框里的当前内容可能尚未经过切栏落盘，提交前先固化
-            this.draft[this.category] = this.box.getValue();
-        }
         MaidPersonaConfig snapshot = currentConfig();
+        if (snapshot.equals(this.baseline)) {
+            return;
+        }
         if (!snapshot.draft().withinLimit()) {
             setStatus(Component.translatable(
                     "config.maid_self_talk.screen.persona_draft.error.too_long"), 0xFF5555);
             return;
         }
         this.pendingRequestId = UUID.randomUUID();
-        this.returnAfterSave = returnAfterSuccess;
         // 进入新请求：撤销旧的「已保存」成功标志（通用状态在此之后优先渲染）
         this.savedShown = false;
         setStatus(Component.translatable(
@@ -517,24 +611,23 @@ public class MaidPersonaEditScreen extends Screen {
             MaidPersonaSplitClient.linkSave(this.pendingRequestId, this.maid.getUUID(),
                     this.loadedSplitRequestId);
         }
-        SelfTalkPackets.CHANNEL.sendToServer(new MaidPersonaSaveMessage(this.pendingRequestId, this.maid.getId(),
-                this.maid.getUUID(), snapshot.mode().tag(), snapshot.draft().identity(),
-                snapshot.draft().personality(), snapshot.draft().background(), snapshot.draft().hobbies()));
+        SelfTalkPackets.CHANNEL.sendToServer(new MaidPersonaSaveMessage(this.pendingRequestId,
+                this.maid.getId(), this.maid.getUUID(), snapshot.mode().tag(),
+                snapshot.draft().identity(), snapshot.draft().personality(),
+                snapshot.draft().background(), snapshot.draft().hobbies()));
     }
 
     /**
      * 处理服务端结果：只认正在等待的那一个 requestId。
      * 成功时以<b>服务端确认值</b>作为页面内容与基线并显示「已保存」——客户端宿主的更新已由
      * {@link SelfTalkPlayerSettingsClient#onPersonaSaveResponse} 独立完成，此处不重复写；
-     * 失败保留页面内容与 dirty，绝不把失败当成已保存。「保存并返回」只在成功响应到达后才回父页面。
+     * 失败保留页面内容与 dirty，绝不把失败当成已保存。
      */
     public void applySaveResponse(MaidPersonaSaveResponseMessage msg) {
         if (this.pendingRequestId == null || !this.pendingRequestId.equals(msg.getRequestId())) {
             return;
         }
         this.pendingRequestId = null;
-        boolean returnAfterSuccess = this.returnAfterSave;
-        this.returnAfterSave = false;
         if (msg.isSuccess()) {
             MaidPersonaConfig saved = msg.getConfirmed();
             this.mode = saved.mode();
@@ -546,16 +639,10 @@ public class MaidPersonaEditScreen extends Screen {
             // 成功状态只由 savedShown 渲染：清掉通用状态文本，
             // 避免 dirty 后通用分支仍把旧的绿色「已保存」画出来
             this.statusText = Component.empty();
-            if (this.box != null) {
-                this.loadingBox = true;
-                this.box.setValue(this.draft[this.category]);
-                this.loadingBox = false;
-            }
+            applyModeVisibility();
+            refreshBoxes();
             if (this.modeButton != null) {
                 this.modeButton.setMessage(modeLabel());
-            }
-            if (returnAfterSuccess) {
-                this.onClose();
             }
             return;
         }
@@ -588,20 +675,12 @@ public class MaidPersonaEditScreen extends Screen {
     @Override
     public void tick() {
         super.tick();
-        if (this.box != null) {
-            this.box.tick();
+        for (GuardedPersonaEditBox box : this.boxes) {
+            if (box != null) {
+                box.tick();
+            }
         }
         maybeShowSplitLoadConfirm();
-    }
-
-    @Override
-    public void resize(Minecraft minecraft, int width, int height) {
-        // 输入框内容先落入页面内容，重建控件后按栏位回填；
-        // 页面内容、模式、当前分类、基线、dirty 与等待中的请求都是字段，天然跨 resize 保留
-        if (this.box != null) {
-            this.draft[this.category] = this.box.getValue();
-        }
-        super.resize(minecraft, width, height);
     }
 
     @Override
@@ -620,7 +699,7 @@ public class MaidPersonaEditScreen extends Screen {
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         boolean pending = this.pendingRequestId != null;
         // 整理任务在途（含重开页面的同女仆任务）与跨页面待确认门禁一样锁编辑与提交；
-        // 离开页面不取消任务，整理中允许查看分类与离开
+        // 离开页面不取消任务，整理中允许查看与离开
         boolean splitRunning = MaidPersonaSplitClient.isRunningFor(this.maid.getUUID());
         boolean locked = pending || this.awaitingConfirmation || splitRunning;
         int total = currentDraft().totalLength();
@@ -629,70 +708,57 @@ public class MaidPersonaEditScreen extends Screen {
         if (isDirty()) {
             this.savedShown = false;
         }
-        // 等待结果期间禁止继续编辑与重复提交；返回始终可用（离开页面不等于撤销已发出的请求）
         if (this.modeButton != null) {
             this.modeButton.active = !locked;
         }
-        if (this.box != null) {
-            this.box.setEditable(!locked);
-        }
-        if (this.saveButton != null) {
-            this.saveButton.active = !locked && withinLimit;
-        }
-        if (this.saveAndBackButton != null) {
-            this.saveAndBackButton.active = !locked && withinLimit;
-        }
         // 拆分入口：原文空白、门禁/等待期间、已有 READY 候选未消费时禁用
         if (this.splitButton != null) {
-            this.splitButton.active = !locked && !this.splitSourceText.isBlank()
+            this.splitButton.active = !locked && !splitSourceText().isBlank()
                     && !MaidPersonaSplitClient.hasReadyCandidate(this.maid.getUUID());
+        }
+        for (GuardedPersonaEditBox box : this.boxes) {
+            if (box != null) {
+                box.setEditable(!locked);
+            }
         }
 
         super.render(graphics, mouseX, mouseY, partialTick);
 
-        graphics.drawCenteredString(this.font, this.getTitle(), this.width / 2, 12, 0xFFFFFF);
-        graphics.drawCenteredString(this.font, Component.translatable(
-                "config.maid_self_talk.screen.persona_draft.notice"), this.width / 2, 46, 0xFFAA55);
+        int columnX = this.vanillaBoxX + COLUMN_OFFSET;
+        if (this.mode.isStructured()) {
+            // 四栏标签：画在各自文本框上方
+            for (int i = 0; i < this.boxes.length; i++) {
+                if (this.boxes[i] != null) {
+                    graphics.drawString(this.font, categoryLabel(i),
+                            this.boxes[i].getX() + 2, this.boxes[i].getY() - 10, 0xFFFFFF);
+                }
+            }
+            graphics.drawCenteredString(this.font, Component.translatable(
+                    "config.maid_self_talk.screen.persona_draft.notice"), this.width / 2,
+                    this.height - 24, 0xFFAA55);
+        }
 
-        // 四栏合计字符数：右上角，超限转红（此时底部状态行同时给出说明）
+        // 四栏合计字符数：按钮列底部，超限转红（此时状态行同时给出说明）
         String counter = total + " / " + MaidPersonaDraft.MAX_TOTAL_LENGTH;
-        graphics.drawString(this.font, counter, this.width - 20 - this.font.width(counter), 12,
+        graphics.drawString(this.font, counter, columnX, SPLIT_BUTTON_Y + 28,
                 withinLimit ? 0xAAAAAA : 0xFF5555);
 
         if (!withinLimit) {
             graphics.drawCenteredString(this.font, Component.translatable(
                     "config.maid_self_talk.screen.persona_draft.error.too_long"),
-                    this.width / 2, this.height - 44, 0xFF5555);
+                    this.width / 2, this.height - 12, 0xFF5555);
         } else if (this.savedShown) {
             graphics.drawCenteredString(this.font, Component.translatable(
                     "config.maid_self_talk.screen.persona_draft.status.saved"),
-                    this.width / 2, this.height - 44, 0x55FF55);
+                    this.width / 2, this.height - 12, 0x55FF55);
         } else if (splitRunning) {
             // 整理中（含重开页面的同女仆任务）：显示等待提示，允许离开页面
             graphics.drawCenteredString(this.font, Component.translatable(
                     "config.maid_self_talk.screen.persona_draft.split.status.running"),
-                    this.width / 2, this.height - 44, 0xFFAA55);
+                    this.width / 2, this.height - 12, 0xFFAA55);
         } else if (!this.statusText.getString().isEmpty()) {
-            graphics.drawCenteredString(this.font, this.statusText, this.width / 2, this.height - 44,
+            graphics.drawCenteredString(this.font, this.statusText, this.width / 2, this.height - 12,
                     this.statusColor);
-        }
-    }
-
-    @Override
-    public boolean isPauseScreen() {
-        return false;
-    }
-
-    /** 返回：不发起新的保存，未提交的编辑（含模式切换）直接丢弃（服务端未收到请求，存档无变化） */
-    @Override
-    public void onClose() {
-        if (this.minecraft == null) {
-            return;
-        }
-        if (this.parent != null) {
-            this.minecraft.setScreen(this.parent);
-        } else {
-            super.onClose();
         }
     }
 

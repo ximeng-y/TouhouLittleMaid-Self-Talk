@@ -1,8 +1,10 @@
 package com.maidmod.selftalk.mixin;
 
 import com.github.tartaricacid.touhoulittlemaid.client.gui.entity.maid.ai.AIChatScreen;
+import com.github.tartaricacid.touhoulittlemaid.client.gui.entity.maid.ai.SettingEditScreen;
 import com.github.tartaricacid.touhoulittlemaid.client.gui.widget.button.FlatColorButton;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.client.MaidPersonaEditScreen;
 import com.maidmod.selftalk.client.SelfTalkSettingsBridge;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -11,6 +13,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
@@ -52,5 +55,20 @@ public abstract class AIChatScreenMixin extends Screen {
                 Component.literal("💬"), b -> SelfTalkSettingsBridge.openSettings(this.maid, this))
                 .setTooltips("config.maid_self_talk.screen.self_talk_button.tip");
         this.addRenderableWidget(button);
+    }
+
+    /**
+     * 原版 ✎ 按钮打开的 SettingEditScreen 统一替换为本模组的人设编辑页
+     * （在原版页基础上增加模式切换、四栏编辑与 AI 拆分，复用同一页面实例）。
+     * <p>
+     * 构造调用位于设置按钮 onPress 的 lambda 体（{@code lambda$addLeftButtons$1}）内，
+     * 不在 addLeftButtons 本体中，故直接指向该 lambda 方法（TLM 1.5.3 固定依赖，
+     * 双线字节码已核对同名）。
+     */
+    @Redirect(method = "lambda$addLeftButtons$1", remap = false,
+            at = @At(value = "NEW", remap = false,
+                    target = "Lcom/github/tartaricacid/touhoulittlemaid/client/gui/entity/maid/ai/SettingEditScreen;"))
+    private SettingEditScreen maid_self_talk$openUnifiedPersonaEditor(Screen parent, EntityMaid maid) {
+        return new MaidPersonaEditScreen(parent, maid);
     }
 }
