@@ -36,6 +36,7 @@ public record MaidPersonaSaveResponsePayload(UUID requestId, int entityId, UUID 
 
     public static final String RESULT_OK = "ok";
     public static final String RESULT_RATE_LIMITED = "rate_limited";
+    public static final String RESULT_BUSY = "busy";
     public static final String RESULT_NOT_LOADED = "not_loaded";
     public static final String RESULT_NOT_OWNER = "not_owner";
     public static final String RESULT_TOO_LONG = "too_long";

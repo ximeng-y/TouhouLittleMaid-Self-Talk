@@ -596,6 +596,12 @@ public final class SelfTalkPackets {
             return MaidPersonaSaveResponsePayload.failure(requestId, entityId, maidUuid,
                     MaidPersonaSaveResponsePayload.RESULT_NOT_OWNER);
         }
+        // 拆分在途：本 mod 的模式/四栏保存与整理互斥。页面已锁，这里是绕过客户端门禁的第二道；
+        // 拒绝时不触碰已存人设，客户端保留编辑内容与旧基线（不调 replace/onConfigChanged）
+        if (PersonaSplitService.isSplitting(maidUuid)) {
+            return MaidPersonaSaveResponsePayload.failure(requestId, entityId, maidUuid,
+                    MaidPersonaSaveResponsePayload.RESULT_BUSY);
+        }
         MaidPersonaConfig config = payload.toConfig();
         if (!config.draft().withinLimit()) {
             // 模式与内容一次成形：长度只按四栏合计判定（模式标签是固定短值）

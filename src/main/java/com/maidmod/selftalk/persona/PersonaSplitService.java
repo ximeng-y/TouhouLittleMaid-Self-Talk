@@ -11,6 +11,7 @@ import com.maidmod.selftalk.network.MaidPersonaSplitResponsePayload;
 import com.maidmod.selftalk.network.SelfTalkPackets;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -32,8 +33,13 @@ import java.util.UUID;
  * 请求不经过自话/互聊闸门，不占用其 pending、对锁、历史规划或取消登记：
  * {@link PersonaSplitCallback} 是完全独立的静默回调，不写任何聊天状态。
  * <p>
+ * 但整理在途本身是「该女仆忙」的一种：{@link #isSplitting(UUID)} 供派发闸门与人设保存互斥共用，
+ * 只拦新派发，不打断整理开始前已在途的聊天或规划。
+ * <p>
  * 超时（{@value #TIMEOUT_TICKS} tick）通过全局服务器 tick 清扫实现——刻意不依赖女仆 tick，
- * 否则区块卸载后任务永远无法收尾。登出取消该玩家的任务，服务器停止取消全部任务。
+ * 否则区块卸载后任务永远无法收尾。女仆死亡／卸载同样取消任务（回「不可用」失败），
+ * 全局扫描另按 UUID 复查存活，作为未收到离开事件时的兜底。
+ * 登出取消该玩家的任务，服务器停止取消全部任务，两者都不发通知。
  */
 public final class PersonaSplitService {
 
@@ -74,6 +80,24 @@ public final class PersonaSplitService {
     }
 
     /**
+     * 该女仆是否有在途整理任务（服务端主线程）：派发闸门与人设保存互斥共用同一个查询。
+     * <p>
+     * 只遍历现有任务表并匹配未终态任务——不额外维护第二张状态表或计数器，
+     * 任务的登记与摘除本身就是唯一事实来源。
+     */
+    public static boolean isSplitting(UUID maidUuid) {
+        if (maidUuid == null || TASKS.isEmpty()) {
+            return false;
+        }
+        for (Task task : TASKS.values()) {
+            if (!task.finished && maidUuid.equals(task.maidUuid)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * 处理拆分请求（服务端主线程）。校验失败一律回固定结果码（与保存链同构），
      * 不回包即丢弃的情况只有 requestId 缺失一种。
      */
@@ -102,6 +126,13 @@ public final class PersonaSplitService {
         if (!maid.isOwnedBy(player)) {
             reply(player, MaidPersonaSplitResponsePayload.failure(requestId, maidUuid,
                     MaidPersonaSplitResponsePayload.RESULT_NOT_OWNER));
+            return;
+        }
+        // 同一女仆只允许一个整理任务：实体身份与归属校验通过后再判，
+        // 与「每名玩家最多一个任务」并存（同一玩家的不同连接/另一玩家都不能重复整理同一只女仆）
+        if (isSplitting(maidUuid)) {
+            reply(player, MaidPersonaSplitResponsePayload.failure(requestId, maidUuid,
+                    MaidPersonaSplitResponsePayload.RESULT_BUSY));
             return;
         }
         String source = sourceText == null ? "" : sourceText;
@@ -155,11 +186,49 @@ public final class PersonaSplitService {
 
     /** 任务终态（服务端主线程）：解除登记、按需回包并私信，只处理一次 */
     private static void finish(Task task, PersonaSplitCallback.Outcome outcome) {
-        if (task.finished) {
+        if (!detach(task)) {
             return;
         }
+        deliver(task, outcome);
+    }
+
+    /**
+     * 取消任务（超时／女仆死亡或卸载共用）：先摘除登记，再静默作废上游请求，最后按失败交付。
+     * <p>
+     * 摘除在前是刻意的：任务一旦进入终态就不该再改变忙状态，也不该被迟到的上游回调二次收尾。
+     */
+    private static void cancel(Task task, String resultCode) {
+        if (!detach(task)) {
+            return;
+        }
+        if (task.callback != null) {
+            task.callback.completeSilently();
+        }
+        deliver(task, PersonaSplitCallback.Outcome.failure(resultCode));
+    }
+
+    /**
+     * 一次性摘除任务登记：按玩家 UUID 与 Task 对象身份条件移除。
+     * <p>
+     * 已经终态、或已被同一玩家的新任务顶替的旧任务返回 false——不得回包、不得清除新任务的登记，
+     * 也不得改变新任务的忙状态。
+     */
+    private static boolean detach(Task task) {
+        if (task.finished) {
+            return false;
+        }
         task.finished = true;
-        TASKS.remove(task.player.getUUID());
+        TASKS.remove(task.player.getUUID(), task);
+        return true;
+    }
+
+    /** 交付结果（任务已摘除）：候选超限与女仆失效都在这里收敛，再按连接身份回包并私信 */
+    private static void deliver(Task task, PersonaSplitCallback.Outcome outcome) {
+        // 交付前再确认女仆仍存活：死亡/卸载的清扫可能还没跑到，任务不能抢先交付成功
+        if (outcome.ok() && !isMaidLoaded(task)) {
+            outcome = PersonaSplitCallback.Outcome.failure(
+                    MaidPersonaSplitResponsePayload.RESULT_NOT_LOADED);
+        }
         // 候选合计超过传输上限：明确失败，不返回截断结果
         if (outcome.ok() && outcome.draft().totalLength() > MAX_CANDIDATE_TOTAL) {
             outcome = PersonaSplitCallback.Outcome.failure(
@@ -182,40 +251,85 @@ public final class PersonaSplitService {
                 : Component.translatable("chat.maid_self_talk.split.failed"));
     }
 
-    /** 全局服务器 tick 清扫：超过时限的任务取消在途请求并返回超时（不依赖女仆 tick） */
+    /**
+     * 女仆是否仍存活于服务器任一维度。
+     * <p>
+     * 按 UUID 在全部维度查找，因此跨维度正常加载（实体已在另一维度）照常算可用；
+     * 缺失、已死亡或已进入移除流程都算不可用。
+     */
+    private static boolean isMaidLoaded(Task task) {
+        MinecraftServer server = task.player.server;
+        if (server == null) {
+            return false;
+        }
+        for (ServerLevel level : server.getAllLevels()) {
+            if (level.getEntity(task.maidUuid) instanceof EntityMaid maid
+                    && maid.isAlive() && !maid.isRemoved()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 全局服务器 tick 清扫：先按 UUID 复查女仆存活（未收到离开事件、女仆 tick 已停止时的兜底），
+     * 再按 6000 tick 时限收尾超时任务。
+     */
     public static void onServerTick(MinecraftServer server) {
         if (TASKS.isEmpty()) {
             return;
         }
         long nowTick = server.getTickCount();
+        // 快照遍历：收尾会改任务表，边遍历边改会破坏 HashMap 的迭代
         for (Task task : List.copyOf(TASKS.values())) {
+            if (!isMaidLoaded(task)) {
+                cancel(task, MaidPersonaSplitResponsePayload.RESULT_NOT_LOADED);
+                continue;
+            }
             if (nowTick - task.startTick <= TIMEOUT_TICKS) {
                 continue;
             }
-            if (task.callback != null) {
-                task.callback.completeSilently();
+            cancel(task, MaidPersonaSplitResponsePayload.RESULT_TIMEOUT);
+        }
+    }
+
+    /**
+     * 女仆死亡／卸载：取消其整理任务，向仍在线的原连接回「女仆不可用」失败。
+     * <p>
+     * 由女仆 tick 的死亡分支与离开维度分支调用；正常跨维度传送不算卸载，不经过这里。
+     */
+    public static void onMaidRemoved(UUID maidUuid) {
+        if (maidUuid == null || TASKS.isEmpty()) {
+            return;
+        }
+        for (Task task : List.copyOf(TASKS.values())) {
+            if (maidUuid.equals(task.maidUuid)) {
+                cancel(task, MaidPersonaSplitResponsePayload.RESULT_NOT_LOADED);
             }
-            finish(task, PersonaSplitCallback.Outcome.failure(
-                    MaidPersonaSplitResponsePayload.RESULT_TIMEOUT));
         }
     }
 
     /** 玩家登出：取消该连接发起的任务（玩家已离开，不发任何通知） */
     public static void onPlayerLogout(UUID playerUuid) {
-        Task task = TASKS.remove(playerUuid);
-        if (task != null && task.callback != null) {
+        Task task = TASKS.get(playerUuid);
+        if (task == null || !detach(task)) {
+            return;
+        }
+        if (task.callback != null) {
             task.callback.completeSilently();
         }
     }
 
-    /** 服务器停止：取消全部在途任务 */
+    /** 服务器停止：取消全部在途任务（静默，不发通知）；快照遍历，收尾即摘除登记 */
     public static void onServerStopped() {
-        for (Task task : TASKS.values()) {
+        for (Task task : List.copyOf(TASKS.values())) {
+            if (!detach(task)) {
+                continue;
+            }
             if (task.callback != null) {
                 task.callback.completeSilently();
             }
         }
-        TASKS.clear();
     }
 
     /** 把响应线程的结果投递回服务端主线程；停机竞态下调度失败按放弃处理（任务已由清扫收尾） */
