@@ -11,6 +11,7 @@ import com.maidmod.selftalk.MaidPersonaHost;
 import com.maidmod.selftalk.MaidPersonaRuntime;
 import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.PlayerSettingsStore;
+import com.maidmod.selftalk.PrebuiltReuseParameters;
 import com.maidmod.selftalk.SelfTalkAttachments;
 import com.maidmod.selftalk.client.MaidPersonaSplitClient;
 import com.maidmod.selftalk.client.SelfTalkPlayerSettingsClient;
@@ -57,8 +58,10 @@ public final class SelfTalkPackets {
         // 与服务端确认后的完整配置；
         // v13：新增 AI 拆分人设的请求/结果 payload（C2S SplitRequest + S2C SplitResponse）；
         // v14：新增预制复用设置三包（C2S Request/Set + S2C Response，服务端权威快照协议）；
+        // v15：预制复用 Set 增加整数 value 字段与 5~10 号参数操作码，Response 增加管理员身份、
+        // 服务器默认参数、个人参数权限、跟随状态与已存个人值字段（issue #108）；
         // 同样不做向后兼容：NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
-        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("14");
+        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("15");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,
                 SelfTalkPackets::handleConfigRequest);
         registrar.playToServer(SelfTalkConfigSetPayload.TYPE, SelfTalkConfigSetPayload.STREAM_CODEC,
@@ -658,8 +661,7 @@ public final class SelfTalkPackets {
             if (player instanceof ServerPlayer serverPlayer && payload.sessionId() != null
                     && allowConfigPacket(serverPlayer.getUUID())) {
                 context.reply(ReuseConfigResponsePayload.snapshot(
-                        serverPlayer.server, serverPlayer.getUUID(),
-                        payload.sessionId(), payload.seq(), payload.maidUuid()));
+                        serverPlayer, payload.sessionId(), payload.seq(), payload.maidUuid()));
             }
         });
     }
@@ -711,11 +713,69 @@ public final class SelfTalkPackets {
                     PlayerSettingsStore.setPrebuiltReuseMaidOverride(
                             serverPlayer.server, serverPlayer.getUUID(), maidUuid, override);
                 }
+            } else {
+                // issue #108：参数操作均为单字段绝对目标值；形状先校验，再动任何字段
+                int value = payload.value();
+                if (maidUuid != null) {
+                    return;
+                }
+                if (opcode == ReuseConfigSetPayload.OP_FOLLOW_SERVER) {
+                    if (value != 0 && value != 1) {
+                        return;
+                    }
+                    // 原总闸关闭时玩家设置一律不可写；未开放个人参数时跟随状态无意义
+                    if (!Config.PLAYER_OPTION_ENABLED.get()
+                            || !PlayerSettingsStore.arePrebuiltReusePlayerParametersAllowed(serverPlayer.server)) {
+                        return;
+                    }
+                    PlayerSettingsStore.setPrebuiltReuseFollowingServer(
+                            serverPlayer.server, serverPlayer.getUUID(), value == 1);
+                } else if (opcode == ReuseConfigSetPayload.OP_PLAYER_MIN_ELIGIBLE
+                        || opcode == ReuseConfigSetPayload.OP_PLAYER_HIT_CHANCE) {
+                    boolean validValue = opcode == ReuseConfigSetPayload.OP_PLAYER_MIN_ELIGIBLE
+                            ? PrebuiltReuseParameters.isValidMinEligibleEntries(value)
+                            : PrebuiltReuseParameters.isValidHitChancePercent(value);
+                    if (!validValue) {
+                        return;
+                    }
+                    if (!Config.PLAYER_OPTION_ENABLED.get()
+                            || !PlayerSettingsStore.arePrebuiltReusePlayerParametersAllowed(serverPlayer.server)
+                            || PlayerSettingsStore.isPrebuiltReuseFollowingServer(
+                                    serverPlayer.server, serverPlayer.getUUID())) {
+                        // 数值写入本身不得隐式取消跟随
+                        return;
+                    }
+                    if (opcode == ReuseConfigSetPayload.OP_PLAYER_MIN_ELIGIBLE) {
+                        PlayerSettingsStore.setPrebuiltReusePlayerMinEligible(
+                                serverPlayer.server, serverPlayer.getUUID(), value);
+                    } else {
+                        PlayerSettingsStore.setPrebuiltReusePlayerHitChance(
+                                serverPlayer.server, serverPlayer.getUUID(), value);
+                    }
+                } else if (opcode == ReuseConfigSetPayload.OP_SERVER_MIN_ELIGIBLE
+                        || opcode == ReuseConfigSetPayload.OP_SERVER_HIT_CHANCE
+                        || opcode == ReuseConfigSetPayload.OP_PLAYER_PARAMETERS_ALLOWED) {
+                    // 管理员身份每次重新判定：不信任客户端快照或界面状态
+                    if (!PlayerSettingsStore.isPrebuiltReuseAdmin(serverPlayer)) {
+                        return;
+                    }
+                    if (opcode == ReuseConfigSetPayload.OP_SERVER_MIN_ELIGIBLE) {
+                        if (PrebuiltReuseParameters.isValidMinEligibleEntries(value)) {
+                            PlayerSettingsStore.setPrebuiltReuseServerMinEligible(serverPlayer.server, value);
+                        }
+                    } else if (opcode == ReuseConfigSetPayload.OP_SERVER_HIT_CHANCE) {
+                        if (PrebuiltReuseParameters.isValidHitChancePercent(value)) {
+                            PlayerSettingsStore.setPrebuiltReuseServerHitChance(serverPlayer.server, value);
+                        }
+                    } else if (value == 0 || value == 1) {
+                        PlayerSettingsStore.setPrebuiltReusePlayerParametersAllowed(
+                                serverPlayer.server, value == 1);
+                    }
+                }
             }
-            // 非法操作码不保存，只回权威快照防客户端同步悬挂
+            // 非法操作码 / 被拒绝的请求同样回权威快照，防客户端同步悬挂
             context.reply(ReuseConfigResponsePayload.snapshot(
-                    serverPlayer.server, serverPlayer.getUUID(),
-                    payload.sessionId(), payload.seq(), payload.maidUuid()));
+                    serverPlayer, payload.sessionId(), payload.seq(), payload.maidUuid()));
         });
     }
 

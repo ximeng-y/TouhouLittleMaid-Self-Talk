@@ -124,8 +124,11 @@ public final class SelfTalkReuseService {
             return null;
         }
         int minContexts = Config.PREBUILT_MIN_MATCHING_CONTEXTS.get();
-        int minEligible = Config.PREBUILT_MIN_ELIGIBLE_ENTRIES.get();
-        int hitChance = Config.PREBUILT_HIT_CHANCE_PERCENT.get();
+        // issue #108：最低条数与概率改由主人个人参数解析（世界设置 + 受控覆盖）；
+        // 每次匹配现读一组，不缓存到客户端或静态全局变量，改动只影响后续匹配
+        PrebuiltReuseParameters parameters = PlayerSettingsStore.getPrebuiltReuseParametersForMaid(server, maid);
+        int minEligible = parameters.minEligibleEntries();
+        int hitChance = parameters.hitChancePercent();
         List<SelfTalkReuseStore.PrebuiltEntry> candidates = new ArrayList<>();
         for (SelfTalkReuseStore.PrebuiltEntry entry : SelfTalkReuseStore.of(server).entries(fingerprint, source)) {
             // 上屏文本与 TTS 文本都必须非空白：TLM 上游对两段都做空白校验，
