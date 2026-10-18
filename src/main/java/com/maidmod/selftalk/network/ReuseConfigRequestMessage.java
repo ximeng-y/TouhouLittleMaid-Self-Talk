@@ -75,8 +75,7 @@ public class ReuseConfigRequestMessage {
                 return;
             }
             SelfTalkPackets.CHANNEL.send(PacketDistributor.PLAYER.with(() -> serverPlayer),
-                    ReuseConfigResponseMessage.snapshot(serverPlayer.server, serverPlayer.getUUID(),
-                            msg.sessionId, msg.seq, msg.maidUuid));
+                    ReuseConfigResponseMessage.snapshot(serverPlayer, msg.sessionId, msg.seq, msg.maidUuid));
         });
         ctx.get().setPacketHandled(true);
     }

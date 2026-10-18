@@ -32,8 +32,10 @@ public final class SelfTalkPackets {
     // 与服务端确认后的完整配置；
     // v13：新增 AI 拆分人设的请求/结果消息（序号 22、23）；
     // v14：新增预制复用设置三包（C2S Request/Set + S2C Response，服务端权威快照协议）；
+    // v15：预制复用 Set 增加整数 value 字段与 5~10 号参数操作码，Response 增加管理员身份、
+    // 服务器默认参数、个人参数权限、跟随状态与已存个人值字段（issue #108）；
     // 不做向后兼容（既定决策），升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
-    private static final String PROTOCOL_VERSION = "14";
+    private static final String PROTOCOL_VERSION = "15";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MaidSelfTalkMod.MODID, "main"),
