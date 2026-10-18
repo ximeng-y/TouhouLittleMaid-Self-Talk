@@ -28,6 +28,7 @@ public final class LanguagePredicateTest {
         sanitizedTagsKeptVerbatim();
         caseVariantsSelectSameLanguage();
         instructionAgreesWithTemplateLanguage();
+        regionalChineseKeepLocaleInstruction();
         illegalAndMissingKeepExistingFallback();
         System.out.println("LanguagePredicateTest passed: " + checks + " checks");
     }
@@ -83,7 +84,25 @@ public final class LanguagePredicateTest {
                 "日语输出指令应要求日语，而不是中英固定指令");
     }
 
-    /** 4. 非法/缺失标签的既有回退不变：仍落到 zh_cn，不新增默认语言 */
+    /** 4. 中文地区标签保留地区语义：背景二分类走中文，但固定指令只覆盖 zh/zh_cn */
+    private static void regionalChineseKeepLocaleInstruction() {
+        String zhInstruction = SelfTalkContexts.languageInstruction("zh_cn");
+        for (String tag : List.of("zh_tw", "ZH_TW", "Zh_Tw", "zh_hk", "ZH_HK")) {
+            check(ContextLanguage.of(tag).isZh(), "中文地区标签背景应走中文模板：" + tag);
+            String actual = SelfTalkContexts.languageInstruction(tag);
+            check(!actual.equals(zhInstruction), "中文地区标签不得被并入简体中文固定指令：" + tag);
+            // 必须仍然要求中文，而不是掉到通用兜底
+            check(actual.contains("Chinese"), "中文地区标签的输出指令应保留中文语言名：" + tag);
+        }
+        check(SelfTalkContexts.languageInstruction("ZH_TW").equals(SelfTalkContexts.languageInstruction("zh_tw")),
+                "中文地区标签的大小写变体应得到同一指令");
+        check(SelfTalkContexts.languageInstruction("zh_tw").contains("Taiwan"),
+                "zh_tw 应保留地区语义（Chinese (Taiwan)）");
+        check(SelfTalkContexts.languageInstruction("zh_hk").contains("Hong Kong"),
+                "zh_hk 应保留地区语义（Chinese (Hong Kong SAR China)）");
+    }
+
+    /** 5. 非法/缺失标签的既有回退不变：仍落到 zh_cn，不新增默认语言 */
     private static void illegalAndMissingKeepExistingFallback() {
         // null 单独处理：sanitizeLanguage 的契约只覆盖「非法字符串」，null 由调用方各自兜底
         // （TLM 侧空白语言先替换为 en_us / 配置默认值再传入），这里不把 null 当成非法标签
