@@ -5,25 +5,24 @@ import com.maidmod.selftalk.client.MaidPersonaEditScreen;
 import net.minecraft.client.gui.components.MultiLineEditBox;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyArgs;
 import org.spongepowered.asm.mixin.injection.Redirect;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.invoke.arg.Args;
 
 /**
- * TLM 原版「✎ 人设编辑」页（SettingEditScreen）的三处钩子：
+ * TLM 原版「✎ 人设编辑」页（SettingEditScreen）的两处钩子：
  * <ul>
  *   <li>把右侧布娃娃预览从原「导出设定」下方的位置移到按钮列顶部空位；</li>
- *   <li>结构化模式下跳过原版 {@code mouseReleased} 对隐藏输入框的无条件派发；</li>
- *   <li>在原版保存（{@code saveConfig}，保存与保存并退出共用）末尾附带提交本 mod 的人设配置。</li>
+ *   <li>结构化模式下跳过原版 {@code mouseReleased} 对隐藏输入框的无条件派发。</li>
  * </ul>
+ * 原版保存按钮已由 {@link MaidPersonaEditScreen} 在 init 阶段整体接管（显式保存入口），
+ * 不再需要 {@code saveConfig()} 尾部的附带提交钩子；本模组子类之外的原版保存行为不受影响。
  * 页面本身由 AIChatScreenMixin 重定向构造为 {@link MaidPersonaEditScreen}（本模组的统一人设页），
  * 本类只服务该页面的原版行为调整；非本模组子类的原版页面不受影响。
  * <p>
  * remap 说明：{@code render} 与 {@code mouseReleased} 是原版方法覆写、{@code @At} 里指向的
  * {@link MultiLineEditBox#mouseReleased} 是原版类方法，生产环境需经 refmap 重映射（remap 取默认
- * true）；{@code drawMaid} / {@code saveConfig} 是 TLM 自有成员，生产环境保持 mojmap 名，取
+ * true）；{@code drawMaid} 是 TLM 自有成员，生产环境保持 mojmap 名，取
  * {@code remap = false}。
  * <p>
  * 仅客户端加载：通过 mixins json 的 "client" 段声明，服务端不加载本类。
@@ -62,16 +61,5 @@ public abstract class SettingEditScreenMixin {
             return false;
         }
         return box.mouseReleased(x, y, button);
-    }
-
-    /**
-     * 原版保存按钮附带保存：只在当前页面是本模组统一人设页时转交，
-     * 页面内容无改动或正在等待上一请求时由页面自行跳过。
-     */
-    @Inject(method = "saveConfig", remap = false, at = @At("TAIL"))
-    private void maid_self_talk$savePersonaAlongside(CallbackInfo ci) {
-        if ((Object) this instanceof MaidPersonaEditScreen screen) {
-            screen.onVanillaSave();
-        }
     }
 }
