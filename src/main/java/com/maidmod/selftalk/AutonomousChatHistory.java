@@ -10,10 +10,12 @@ import net.minecraft.nbt.Tag;
 
 import java.util.ArrayDeque;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -89,6 +91,10 @@ public final class AutonomousChatHistory {
      * <p>
      * 分配、入队与旁路登记在同一把锁内：若分成两步，玩家回调线程与服务端线程交错时
      * 会出现「顺序号与队内实际次序相反」，混合展示就会错序。
+     * <p>
+     * 入队本身可能就是一次容量淘汰（{@code CappedQueue.add} 满时先 {@code pollLast} 再插入），
+     * 被淘汰的旧消息从此不会再出现在任何请求或展示里，却仍被旁路表强持有；因此在同一把锁内、
+     * 入队完成后立刻按当前队列身份集合修剪，死引用最多只存活到下一次入队。
      */
     public void trackTlmEnqueue(CappedQueue<LLMMessage> queue, LLMMessage message) {
         if (message == null) {
@@ -98,6 +104,7 @@ public final class AutonomousChatHistory {
             orderByMessage.put(message, nextSeq++);
             if (queue != null) {
                 queue.add(message);
+                pruneOrderMetadataLocked(queue.getDeque());
             }
         }
     }
@@ -112,26 +119,31 @@ public final class AutonomousChatHistory {
     /**
      * 清掉已不在 TLM 队列中的死条目（容量淘汰、压缩、清空都不会回调本类）。
      * 只清理旁路关联，不动顺序号分配器——顺序号必须保持单调，回收会造成展示错序。
+     * <p>
+     * 先按队列构造一次身份集合再批量移除：逐条消息扫描整个队列是 O(旁路表 × 队列长度)，
+     * 在历史接近容量上限、旁路表又积累了大量死条目时开销随两者相乘增长。
      */
     public void pruneOrderMetadata(Deque<LLMMessage> liveHistory) {
         if (liveHistory == null) {
             return;
         }
         synchronized (lock) {
-            if (orderByMessage.isEmpty()) {
-                return;
-            }
-            orderByMessage.keySet().removeIf(message -> !containsIdentity(liveHistory, message));
+            pruneOrderMetadataLocked(liveHistory);
         }
     }
 
-    private static boolean containsIdentity(Deque<LLMMessage> deque, LLMMessage target) {
-        for (LLMMessage message : deque) {
-            if (message == target) {
-                return true;
+    /** 调用方必须已持有 {@link #lock} */
+    private void pruneOrderMetadataLocked(Deque<LLMMessage> liveHistory) {
+        if (orderByMessage.isEmpty()) {
+            return;
+        }
+        Set<LLMMessage> live = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (LLMMessage message : liveHistory) {
+            if (message != null) {
+                live.add(message);
             }
         }
-        return false;
+        orderByMessage.keySet().removeIf(message -> !live.contains(message));
     }
 
     // ===== 独立记录追加 =====
