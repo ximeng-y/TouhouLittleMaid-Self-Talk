@@ -45,7 +45,7 @@ import java.util.UUID;
  *       「栏目标签 + 可滚动文本框」，四栏同时可见。</li>
  * </ul>
  * 右侧按钮列调整为：布娃娃预览在顶部，原版保存按钮位置不变，其下依次为
- * 模式切换按钮、「导出设定」（从原版顶部移来）、AI 拆分按钮。
+ * 「导出设定」（从原版顶部移来）、模式切换按钮、AI 拆分按钮。
  * <p>
  * 模式与四栏内容独立于原版整段人设存储：切模式、改文字都不触碰原版输入框，
  * 两套内容互不复制、覆盖或删除。点击模式按钮立即把「模式 + 四栏快照」整份提交保存；
@@ -70,10 +70,10 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     /** 右侧按钮列宽（与原版按钮一致） */
     private static final int COLUMN_WIDTH = 128;
     private static final int BUTTON_HEIGHT = 20;
-    /** 模式切换按钮 y（原版返回按钮之下） */
-    private static final int MODE_BUTTON_Y = 150;
-    /** 「导出设定」移到的位置（模式按钮之下） */
-    private static final int EXPORT_BUTTON_Y = 175;
+    /** 「导出设定」移到的位置（原版返回按钮之下） */
+    private static final int EXPORT_BUTTON_Y = 150;
+    /** 模式切换按钮 y（导出设定之下） */
+    private static final int MODE_BUTTON_Y = 175;
     /** AI 拆分按钮 y（两个按钮之下） */
     private static final int SPLIT_BUTTON_Y = 200;
     /** 四栏内容区顶部（与原版输入框 y 一致） */
@@ -111,8 +111,6 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     private final String[] draft = new String[MaidPersonaDraft.CATEGORY_COUNT];
     /** 已保存基线：最近一次「服务端确认成功」的完整配置，用于判定 dirty */
     private MaidPersonaConfig baseline;
-    /** 是否显示「已保存」状态：仅当页面内容相对基线无改动时成立（render 里随 dirty 收敛） */
-    private boolean savedShown;
 
     /** 本次提交的 requestId；非 null 表示正在等待结果（禁止编辑与重复提交） */
     private UUID pendingRequestId;
@@ -440,7 +438,6 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
             this.draft[i] = entry.candidate().get(i);
         }
         this.loadedSplitRequestId = entry.requestId();
-        this.savedShown = false;
         if (this.modeButton != null) {
             this.modeButton.setMessage(modeLabel());
         }
@@ -564,7 +561,6 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         }
         this.baseline = confirmed;
         this.awaitingConfirmation = false;
-        this.savedShown = false;
         applyModeVisibility();
         refreshBoxes();
         if (this.modeButton != null) {
@@ -608,8 +604,6 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
             return;
         }
         this.pendingRequestId = UUID.randomUUID();
-        // 进入新请求：撤销旧的「已保存」成功标志（通用状态在此之后优先渲染）
-        this.savedShown = false;
         setStatus(Component.translatable(
                 "config.maid_self_talk.screen.persona_draft.status.saving"), 0xFFAA55);
         // 客户端级登记：页面提前关闭时，回包仍能独立定位女仆并更新客户端宿主（见 SelfTalkPlayerSettingsClient）
@@ -626,7 +620,7 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
 
     /**
      * 处理服务端结果：只认正在等待的那一个 requestId。
-     * 成功时以<b>服务端确认值</b>作为页面内容与基线并显示「已保存」——客户端宿主的更新已由
+     * 成功时以<b>服务端确认值</b>作为页面内容与基线（不另显示「已保存」成功提示）——客户端宿主的更新已由
      * {@link SelfTalkPlayerSettingsClient#onPersonaSaveResponse} 独立完成，此处不重复写；
      * 失败保留页面内容与 dirty，绝不把失败当成已保存。
      */
@@ -642,9 +636,7 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
                 this.draft[i] = saved.draft().get(i);
             }
             this.baseline = saved;
-            this.savedShown = true;
-            // 成功状态只由 savedShown 渲染：清掉通用状态文本，
-            // 避免 dirty 后通用分支仍把旧的绿色「已保存」画出来
+            // 成功不显示状态行：清掉通用状态文本，避免旧提示残留
             this.statusText = Component.empty();
             applyModeVisibility();
             refreshBoxes();
@@ -653,8 +645,6 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
             }
             return;
         }
-        // 失败：撤销旧的「已保存」成功标志，让通用错误提示不被遮住
-        this.savedShown = false;
         setStatus(errorMessage(payload.resultCode()), 0xFF5555);
     }
 
@@ -703,10 +693,6 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         boolean locked = pending || this.awaitingConfirmation || splitRunning;
         int total = currentDraft().totalLength();
         boolean withinLimit = total <= MaidPersonaDraft.MAX_TOTAL_LENGTH;
-        // dirty 由页面内容相对基线比较得出；内容一有改动（含切模式），「已保存」状态立即撤销
-        if (isDirty()) {
-            this.savedShown = false;
-        }
         if (this.modeButton != null) {
             this.modeButton.active = !locked;
         }
@@ -750,10 +736,6 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
             graphics.drawCenteredString(this.font, Component.translatable(
                     "config.maid_self_talk.screen.persona_draft.error.too_long"),
                     this.width / 2, this.height - 12, 0xFF5555);
-        } else if (this.savedShown) {
-            graphics.drawCenteredString(this.font, Component.translatable(
-                    "config.maid_self_talk.screen.persona_draft.status.saved"),
-                    this.width / 2, this.height - 12, 0x55FF55);
         } else if (splitRunning) {
             // 整理中（含重开页面的同女仆任务）：显示等待提示，允许离开页面
             graphics.drawCenteredString(this.font, Component.translatable(

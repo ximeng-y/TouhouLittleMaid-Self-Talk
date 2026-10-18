@@ -265,7 +265,12 @@
   "config.maid_self_talk.screen.persona_draft.split.error.network": "The organizing request failed to send. Please try again.",
   "config.maid_self_talk.screen.persona_draft.split.error.timeout": "The organizing request timed out and was cancelled.",
   "config.maid_self_talk.screen.persona_draft.split.error.format": "The AI returned an unexpected format. Please try again.",
-  "chat.maid_self_talk.split.done": "AI organizing finished for %s. Reopen the four-section persona screen to load the result.",
+  "chat.maid_self_talk.split.done": "AI organizing finished for %s. Reopen that maid's persona screen to choose whether to load the new structured persona.",
   "chat.maid_self_talk.prebuilt_custom_warnings": "Prebuilt reuse: %s custom entries have warnings, see custom/_diagnostics.md for details",
-  "chat.maid_self_talk.split.failed": "AI organizing failed."
+  "chat.maid_self_talk.split.failed": "AI persona organizing failed for an unknown reason. Please try again later.",
+  "chat.maid_self_talk.split.failed.network": "AI persona organizing failed: the AI service request did not succeed. Check the service configuration or try again later.",
+  "chat.maid_self_talk.split.failed.timeout": "AI persona organizing timed out. Please try again later.",
+  "chat.maid_self_talk.split.failed.format": "The AI returned persona content in an unexpected format. Please organize again; if it keeps failing, try a different model.",
+  "chat.maid_self_talk.split.failed.not_loaded": "AI persona organizing was cancelled: the maid is unloaded or has died. Please try again once the maid is available.",
+  "chat.maid_self_talk.split.failed.too_long": "AI persona organizing failed: the content exceeds the length limit. Shorten it and try again."
 }

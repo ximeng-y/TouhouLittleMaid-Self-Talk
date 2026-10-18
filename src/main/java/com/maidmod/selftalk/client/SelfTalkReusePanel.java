@@ -50,7 +50,6 @@ public final class SelfTalkReusePanel {
     private static final int BORDER_COLOR = 0xFF808080;
     private static final int TITLE_COLOR = 0xFFFFFFFF;
     private static final int SUBTITLE_COLOR = 0xFFB0B0B0;
-    private static final int FOOTER_COLOR = 0xFFB0B0B0;
     private static final int SYNC_COLOR = 0xFFFFAA55;
     private static final int ERROR_COLOR = 0xFFFF5555;
     /** 实验警告色取值与 ChatFormatting#GOLD 对齐；tooltip 行色由 withStyle(GOLD) 决定 */
@@ -889,21 +888,18 @@ public final class SelfTalkReusePanel {
     }
 
     private void renderFooter(GuiGraphics graphics) {
-        graphics.drawString(font, Component.translatable(
-                        "config.maid_self_talk.screen.player_settings.context.footer"),
-                panelX + MARGIN, listBottom + 6, FOOTER_COLOR, false);
         if (!hasSnapshot) {
             graphics.drawString(font, Component.translatable(
                             "config.maid_self_talk.screen.player_settings.context.loading"),
-                    panelX + MARGIN, listBottom + 17, SYNC_COLOR, false);
+                    panelX + MARGIN, listBottom + 6, SYNC_COLOR, false);
         } else if (syncing()) {
             graphics.drawString(font, Component.translatable(
                             "config.maid_self_talk.screen.player_settings.context.syncing"),
-                    panelX + MARGIN, listBottom + 17, SYNC_COLOR, false);
+                    panelX + MARGIN, listBottom + 6, SYNC_COLOR, false);
         } else if (!adminEnabled) {
             graphics.drawString(font, Component.translatable(
                             "config.maid_self_talk.screen.player_settings.context.disabled.admin"),
-                    panelX + MARGIN, listBottom + 17, SYNC_COLOR, false);
+                    panelX + MARGIN, listBottom + 6, SYNC_COLOR, false);
         }
     }
 
