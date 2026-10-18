@@ -477,7 +477,7 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         String key = switch (resultCode) {
             case MaidPersonaSplitResponseMessage.RESULT_BUSY -> "split.error.busy";
             case MaidPersonaSplitResponseMessage.RESULT_RATE_LIMITED -> "error.rate_limited";
-            case MaidPersonaSplitResponseMessage.RESULT_NOT_LOADED -> "error.not_loaded";
+            case MaidPersonaSplitResponseMessage.RESULT_NOT_LOADED -> "split.error.not_loaded";
             case MaidPersonaSplitResponseMessage.RESULT_NOT_OWNER -> "error.not_owner";
             case MaidPersonaSplitResponseMessage.RESULT_EMPTY_SOURCE -> "split.error.empty_source";
             case MaidPersonaSplitResponseMessage.RESULT_TOO_LONG -> "split.error.too_long";
@@ -662,6 +662,7 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     private static Component errorMessage(String resultCode) {
         String key = switch (resultCode == null ? "" : resultCode) {
             case MaidPersonaSaveResponseMessage.RESULT_RATE_LIMITED -> "error.rate_limited";
+            case MaidPersonaSaveResponseMessage.RESULT_BUSY -> "error.busy";
             case MaidPersonaSaveResponseMessage.RESULT_NOT_LOADED -> "error.not_loaded";
             case MaidPersonaSaveResponseMessage.RESULT_NOT_OWNER -> "error.not_owner";
             case MaidPersonaSaveResponseMessage.RESULT_TOO_LONG -> "error.too_long";

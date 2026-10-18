@@ -211,11 +211,15 @@ public final class InterChatChain {
         }
     }
 
-    /** 服务器停止时整体释放（进程内存而已，显式清掉便于整合包反复重载） */
+    /**
+     * 服务器停止时整体释放（进程内存而已，显式清掉便于整合包反复重载）。
+     * <p>
+     * <b>不重置链编号</b>：同一 JVM 内下一世界与上一世界的迟到旧回调可能同时存在，
+     * 编号复用会让旧请求按编号命中新世界的链。
+     */
     public static void dropAll() {
         CHAINS.clear();
         ACTIVE_BY_MAID.clear();
-        nextChainId = 1;
     }
 
     /** 当前活动链数（自检与诊断用） */
