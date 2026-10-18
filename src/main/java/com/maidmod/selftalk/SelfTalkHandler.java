@@ -780,6 +780,9 @@ public final class SelfTalkHandler {
             SelfTalkDispatcher.onMaidRemoved(maidId);
             InterChatChain.onMaidRemoved(maidId);
         }
+        // 检索缓存按对象身份独立清扫：状态表里可能早已没有该女仆的条目（从未触发过自话的
+        // 女仆也可能建过检索索引），缓存却仍强持有已卸载实体。无论本轮是否清到状态条目都执行
+        HistoryRetrievalCache.dropUnloaded(server);
     }
 
     /** 实体 ID 是否仍加载于任意服务端维度 */
