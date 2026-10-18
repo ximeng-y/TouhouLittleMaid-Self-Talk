@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Collections;
@@ -67,6 +68,8 @@ public final class SelfTalkReuseStore {
     private static final String FINGERPRINT_DIR_PREFIX = "v1-";
     /** 指纹段必须是本 mod 自己产出的 64 位小写十六进制，杜绝任意字符串拼进路径 */
     private static final Pattern FINGERPRINT_PATTERN = Pattern.compile("[0-9a-f]{64}");
+    /** 追加入库的 UUID 冲突重试上限：首次候选 + 最多两次重新随机，总共最多尝试 3 个 UUID */
+    private static final int APPEND_UUID_MAX_ATTEMPTS = 3;
 
     /** 实例表按服务端弱引用持有，服务器停止时由 {@link #release} 显式写出并移除 */
     private static final Map<MinecraftServer, SelfTalkReuseStore> INSTANCES =
@@ -152,6 +155,10 @@ public final class SelfTalkReuseStore {
     /**
      * 向匹配指纹 + 来源的子目录追加一条，并把条目数修剪到容量内（每指纹每来源独立计数）。
      * <p>
+     * 追加前先在本来源目录内确认 {@code entryId} 可用：首个候选是传入条目本身的 UUID，
+     * 冲突时最多重新随机两次（共三次尝试），三次尝试耗尽则无变更返回——不淘汰、不追加、
+     * 不改任何标记，只记一条警告（见 {@link #resolveAvailableEntry}）。
+     * <p>
      * 超出容量按入库时间最早优先淘汰；时间相同按 {@code entryId} 稳定决胜，淘汰顺序确定。
      * 淘汰只从内存移除并登记待删清单，实际删除文件推迟到下一次落盘（见 {@link #saveDirty}），
      * 不触碰旧版扁平 JSON。指纹/来源非法或目录被锁为只读时丢弃本次追加
@@ -160,6 +167,12 @@ public final class SelfTalkReuseStore {
     public void append(String fingerprint, String source, PrebuiltEntry entry, int maxEntries) {
         SourceEntries entries = ensureLoaded(fingerprint, source);
         if (entries == null) {
+            return;
+        }
+        // 先确定 UUID 在本来源目录内可用，再淘汰追加；三次尝试耗尽则无变更返回，
+        // 不淘汰、不追加、不触碰脏标记与待删除集合（容量淘汰只发生在已有可用候选之后）
+        PrebuiltEntry available = resolveAvailableEntry(entries, entry);
+        if (available == null) {
             return;
         }
         // 先删最旧腾出空位再追加；maxEntries 由调用方按配置现读
@@ -181,8 +194,58 @@ public final class SelfTalkReuseStore {
             // 被淘汰条目若还带着未写盘的脏标记，一并撤销——它已不在库中，不再有对应文件
             entries.dirtyIds.remove(oldest);
         }
-        entries.entries.put(entry.entryId, entry);
-        entries.dirtyIds.add(entry.entryId);
+        entries.entries.put(available.entryId, available);
+        entries.dirtyIds.add(available.entryId);
+    }
+
+    /**
+     * 有界 UUID 冲突选择：返回 {@code entryId} 在本来源目录内确认可用的条目；
+     * 三次尝试耗尽返回 null（调用方据此放弃本次入库）。
+     * 可用判定：不占内存条目表、不在待删除清单，且磁盘目标文件名确认不存在——
+     * 损坏或校验失败未入缓存的文件同样占着文件名，绝不覆盖；UUID 只出现在待删除清单时
+     * 也视为不可用（对应文件此轮稍后还要删除）。只检查目标这一个路径，不扫描其他目录、
+     * 不读取文件内容；相同 UUID 位于其他指纹或来源目录不构成本目录冲突，不做全局去重。
+     * <p>
+     * 本方法只做检查与候选构造，不改库存、脏标记、待删除集合，也不创建目录或文件。
+     */
+    private static PrebuiltEntry resolveAvailableEntry(SourceEntries entries, PrebuiltEntry entry) {
+        PrebuiltEntry candidate = entry;
+        for (int attempt = 1; attempt <= APPEND_UUID_MAX_ATTEMPTS; attempt++) {
+            boolean free;
+            try {
+                free = isEntryIdFree(entries, candidate.entryId);
+            } catch (IOException | RuntimeException e) {
+                // 可用性检查自身失败（安全策略、I/O 错误等）：告警并放弃本次入库，不向调用链抛出
+                MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse append dropped: entry id availability "
+                        + "check failed in {} ({})", entries.dir, e.toString());
+                return null;
+            }
+            if (free) {
+                // 首个候选即可用时直接使用原条目，不做任何重新随机
+                return candidate;
+            }
+            if (attempt < APPEND_UUID_MAX_ATTEMPTS) {
+                candidate = withEntryId(entry, UUID.randomUUID());
+            }
+        }
+        MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse append dropped after {} UUID attempts in {} "
+                + "(all occupied), entry not stored", APPEND_UUID_MAX_ATTEMPTS, entries.dir);
+        return null;
+    }
+
+    /** 候选 UUID 是否在本来源目录内可用：内存条目与待删清单都不占，且磁盘目标文件确认不存在 */
+    private static boolean isEntryIdFree(SourceEntries entries, UUID id) throws IOException {
+        if (entries.entries.containsKey(id) || entries.removedIds.contains(id)) {
+            return false;
+        }
+        // notExists 确认「不存在」才可用；文件存在或无法确认存在性（返回 false）一律视为占用
+        return Files.notExists(entries.dir.resolve("entry-" + id + ".md"), LinkOption.NOFOLLOW_LINKS);
+    }
+
+    /** 构造 UUID 重试候选：除 entryId 外，时间、环境、聊天与 TTS 文本语言、来源全部沿用原条目 */
+    private static PrebuiltEntry withEntryId(PrebuiltEntry entry, UUID newId) {
+        return new PrebuiltEntry(newId, entry.createdAt, entry.env, entry.chatLanguage,
+                entry.chatText, entry.ttsLanguage, entry.ttsText, entry.origin);
     }
 
     /** 淘汰排序：入库时间字符串（格式天然可字典序比较）最早优先，同秒按 entryId 稳定决胜 */
