@@ -230,9 +230,13 @@ public final class SelfTalkDispatcher {
                     InterChatChain.release(chain);
                     return false;
                 }
-                // 自身若已与他链配对(配对者不是当前 peer):放弃本请求,保留新链锁不动
+                // 自身若已与他链配对(配对者不是当前 peer):放弃本请求,保留新链锁不动。
+                // 但<b>本请求所属的旧链</b>必须按它携带的 chainId 释放——否则旧链的
+                // CHAINS/ACTIVE_BY_MAID 与成员登记会一直残留到超时；
+                // 释放按 chainId 校验，绝不触碰当前新链的活动映射与配对锁
                 Integer ownPartner = currentPairPartner(maid, nowTick);
                 if (ownPartner != null && !ownPartner.equals(req.peer().getId())) {
+                    InterChatChain.releaseById(req.chainId());
                     return false;
                 }
                 boolean ok;
@@ -343,6 +347,31 @@ public final class SelfTalkDispatcher {
     /** 女仆死亡/卸载时清理其互聊锁（连同配对者对称释放） */
     public static void onMaidRemoved(int maidId) {
         clearPairFor(maidId);
+    }
+
+    // ===== 自检可见（仅自检使用，不构成公共 API） =====
+
+    /** 自检：直接布置一对锁定，模拟已存在的新链配对锁 */
+    static void seedPairLockForSelfCheck(int aId, int bId, long untilTick, long chainId) {
+        INTER_CHAT_LOCK_UNTIL.put(aId, untilTick);
+        INTER_CHAT_LOCK_UNTIL.put(bId, untilTick);
+        INTER_CHAT_PAIR_PARTNER.put(aId, bId);
+        INTER_CHAT_PAIR_PARTNER.put(bId, aId);
+        INTER_CHAT_PAIR_CHAIN.put(aId, chainId);
+        INTER_CHAT_PAIR_CHAIN.put(bId, chainId);
+    }
+
+    /** 自检：该女仆当前对锁归属的链 ID（无则 -1） */
+    static long heldChainForSelfCheck(int maidId) {
+        Long chainId = INTER_CHAT_PAIR_CHAIN.get(maidId);
+        return chainId == null ? -1 : chainId;
+    }
+
+    /** 自检：清空对锁三张表 */
+    static void clearLocksForSelfCheck() {
+        INTER_CHAT_LOCK_UNTIL.clear();
+        INTER_CHAT_PAIR_PARTNER.clear();
+        INTER_CHAT_PAIR_CHAIN.clear();
     }
 
     /**

@@ -289,7 +289,8 @@ public final class Config {
                 .defineInRange("minEligibleEntries", 8, 1, 100000);
         PREBUILT_MAX_ENTRIES_PER_SOURCE = builder.comment("""
                 每个指纹目录下每个来源子目录的库存条数上限 k：欢迎语与自话两组各自计算。
-                追加时超出上限按存储日期移除最旧条目文件；调小后在下一次新增时裁剪。正整数。""")
+                追加时超出上限按存储日期移除最旧条目文件；调小后重启扫描或下一次新增时
+                按同一排序裁剪（只裁剪合法新格式条目，旧格式与损坏文件保留原样）。正整数。""")
                 .defineInRange("maxEntriesPerSource", 300, 1, 100000);
         builder.pop();
 
