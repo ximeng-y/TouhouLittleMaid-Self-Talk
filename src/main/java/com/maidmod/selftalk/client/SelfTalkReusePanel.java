@@ -798,7 +798,7 @@ public final class SelfTalkReusePanel {
         renderFieldRow(graphics, FIELD_HIT_CHANCE, "reuse.player_hit_chance", true);
         graphics.drawString(font, Component.translatable(
                         "config.maid_self_talk.screen.player_settings.reuse.personal_hint"),
-                panelX + MARGIN, screenY(personalFooterY), FOOTER_COLOR, false);
+                panelX + MARGIN, screenY(personalFooterY), SUBTITLE_COLOR, false);
         if (serverAdmin) {
             drawSectionTitle(graphics, "reuse.server_section", screenY(serverTitleY));
             renderFieldRow(graphics, FIELD_SERVER_MIN_ELIGIBLE, "reuse.server_min_eligible", false);
@@ -1249,6 +1249,8 @@ public final class SelfTalkReusePanel {
             int contentY = fieldContentY(focusedIndex);
             scrollIntoView(contentY, 18);
             rebuildControls();
+            // 重建会新造开关按钮对象：恢复文案与可用性，否则 Tab 后按钮空白且恢复默认可用
+            refreshButtons();
             setFieldFocus(focusedIndex);
         } else {
             scrollIntoView(focusContentY(focusedIndex), 20);

@@ -149,7 +149,7 @@
   "config.maid_self_talk.screen.player_settings.reuse.error.hit_chance": "Enter an integer from 0 to 100",
   "config.maid_self_talk.screen.player_settings.reuse.disabled.not_allowed": "Personal parameters are disabled by the server; following server defaults.",
   "config.maid_self_talk.screen.player_settings.reuse.disabled.not_admin": "Only server operators can change this.",
-  "config.maid_self_talk.screen.player_settings.reuse.disabled.follow": "Uncheck "Follow server defaults" to edit this.",
+  "config.maid_self_talk.screen.player_settings.reuse.disabled.follow": "Uncheck \"Follow server defaults\" to edit this.",
   "config.maid_self_talk.screen.player_settings.context.title": "Context Settings",
   "config.maid_self_talk.screen.player_settings.context.scope": "Applies to all maids you own",
   "config.maid_self_talk.screen.player_settings.context.description": "Customize which kinds of environment information your maids receive. If you do not need customization, the defaults work as-is.",
