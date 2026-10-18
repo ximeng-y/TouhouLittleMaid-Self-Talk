@@ -65,10 +65,6 @@ public final class SelfTalkHandler {
     /** 自话闸门：下次允许自话放行的服务器 tick（仅服务端主线程访问；互聊发起者共用此闸门） */
     private static long nextSelfTalkAllowedTick = 0;
 
-    /** 被限流自话/互聊发起者的随机退避区间（tick）：8~15 秒，仅内部重试、不发请求 */
-    private static final int BACKOFF_MIN_TICKS = 8 * 20;
-    private static final int BACKOFF_MAX_TICKS = 15 * 20;
-
     /** 互聊候选均不可用（pending/无 AI）时的短退避（tick）：避免每 tick 重复 AABB 实体扫描 */
     private static final int RESPONDER_RETRY_TICKS = 2 * 20;
 
@@ -208,7 +204,7 @@ public final class SelfTalkHandler {
             // 窗口期内每 tick 自然重试，窗口过期放弃），与自话语义一致
             if (loginTick != null && maid.getOwner() != null
                     && serverTick - loginTick <= Config.WELCOME_WINDOW_TICKS.get()) {
-                if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
+                if (!PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
                     return;
                 }
                 // 欢迎语闸门未放行则不标记、不发请求，窗口期内每 tick 自然重试
@@ -240,7 +236,7 @@ public final class SelfTalkHandler {
         // 互聊触发：独立于自话的冷却，但发起者派发与自话共用全局闸门（5~8s）
         if (Config.INTER_CHAT_ENABLED.get() && serverTick >= state.nextInterChatTriggerTick) {
             // 玩家独立设置：管理员允许玩家配置时，检查该女仆主人及其单只名单（1.1.2 起离线亦可读）
-            if (!(Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), maid))) {
+            if (PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), maid)) {
                 // 互聊对锁：本女仆正与他人连续互聊中，不能发起新互聊，短退避后重试
                 if (SelfTalkDispatcher.isMaidInterChatLocked(maid, serverTick)) {
                     state.nextInterChatTriggerTick = serverTick + RESPONDER_RETRY_TICKS;
@@ -254,8 +250,7 @@ public final class SelfTalkHandler {
                         if (responder != null) {
                             if (!tryAcquireSelfTalkSlot(serverTick)) {
                                 // 共享闸门未放行：随机退避 8~15 秒再试，不发请求
-                                state.nextInterChatTriggerTick = serverTick + BACKOFF_MIN_TICKS
-                                        + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
+                                state.nextInterChatTriggerTick = serverTick + Config.randomIntervalTicks(8, 15);
                             } else {
                                 // 空闲立即派发、忙则顺延（dispatcher 内部处理），随后设置互聊冷却
                                 SelfTalkDispatcher.requestInterChatInitiator(maid, responder,
@@ -292,7 +287,7 @@ public final class SelfTalkHandler {
                 return;
             }
             // 玩家独立设置：管理员允许玩家配置时，检查该女仆主人及其单只名单（1.1.2 起离线亦可读）
-            if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
+            if (!PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
                 return;
             }
             if (!hasPlayerNearby(maid, Config.STATE1_PLAYER_RANGE.get())) {
@@ -300,8 +295,7 @@ public final class SelfTalkHandler {
             }
             if (!tryAcquireSelfTalkSlot(serverTick)) {
                 // 自话闸门未放行：随机退避 8~15 秒再试，不发请求
-                state.nextTriggerTick = serverTick + BACKOFF_MIN_TICKS
-                        + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
+                state.nextTriggerTick = serverTick + Config.randomIntervalTicks(8, 15);
                 return;
             }
             // 空闲立即派发、忙则顺延、冲突/满则吞（dispatcher 内部处理）；无论何种结果都施加冷却，
@@ -315,7 +309,7 @@ public final class SelfTalkHandler {
                 return;
             }
             // 1.1.2 起玩家设置随世界存档（overworld），主人离线（态 2）同样检查玩家设置并生效
-            if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
+            if (!PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
                 return;
             }
             if (!hasPlayerNearby(maid, Config.STATE2_PLAYER_RANGE.get())) {
@@ -323,8 +317,7 @@ public final class SelfTalkHandler {
             }
             if (!tryAcquireSelfTalkSlot(serverTick)) {
                 // 自话闸门未放行：随机退避 8~15 秒再试，不发请求
-                state.nextTriggerTick = serverTick + BACKOFF_MIN_TICKS
-                        + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
+                state.nextTriggerTick = serverTick + Config.randomIntervalTicks(8, 15);
                 return;
             }
             SelfTalkDispatcher.requestSelfTalk(maid,
@@ -738,7 +731,7 @@ public final class SelfTalkHandler {
             if (!MaidPersonaRuntime.hasUsablePersona(m)) {
                 continue;
             }
-            if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), m)) {
+            if (!PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), m)) {
                 continue;
             }
             available.add(m);

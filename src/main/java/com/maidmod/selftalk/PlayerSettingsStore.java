@@ -59,8 +59,17 @@ public final class PlayerSettingsStore {
         data(server).setSelfTalkMaidDisabled(playerUuid, maidUuid, disabled);
     }
 
-    /** 女仆自话有效值：全局开关 && 单只名单不含该女仆（无主女仆按启用处理） */
+    /**
+     * 女仆自话有效值（触发侧统一判定口）。
+     * <p>
+     * 有效 = 管理员未开启玩家定制（按功能默认即启用处理）；
+     * 开启时 = 玩家全局开关 && 单只名单不含该女仆。无主女仆按启用处理。
+     * 管理员关闭玩家定制时<b>不删除</b>玩家已存偏好，恢复后继续生效。
+     */
     public static boolean isSelfTalkEnabledForMaid(MinecraftServer server, EntityMaid maid) {
+        if (!Config.PLAYER_OPTION_ENABLED.get()) {
+            return true;
+        }
         UUID ownerUuid = maid.getOwnerUUID();
         if (ownerUuid == null) {
             return true;
@@ -90,8 +99,17 @@ public final class PlayerSettingsStore {
         data(server).setInterChatMaidDisabled(playerUuid, maidUuid, disabled);
     }
 
-    /** 女仆互聊有效值：全局开关 && 单只名单不含该女仆（无主女仆按启用处理） */
+    /**
+     * 女仆互聊有效值（触发侧统一判定口）。
+     * <p>
+     * 有效 = 管理员未开启玩家定制（按功能默认即启用处理）；
+     * 开启时 = 玩家全局开关 && 单只名单不含该女仆。无主女仆按启用处理。
+     * 管理员关闭玩家定制时<b>不删除</b>玩家已存偏好，恢复后继续生效。
+     */
     public static boolean isInterChatEnabledForMaid(MinecraftServer server, EntityMaid maid) {
+        if (!Config.PLAYER_OPTION_ENABLED.get()) {
+            return true;
+        }
         UUID ownerUuid = maid.getOwnerUUID();
         if (ownerUuid == null) {
             return true;
