@@ -2,7 +2,7 @@ package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
-import org.apache.commons.lang3.StringUtils;
+import com.maidmod.selftalk.history.HistoryFingerprint;
 
 import java.util.Collection;
 import java.util.Deque;
@@ -34,11 +34,13 @@ public final class SelfTalkProvenance {
     /**
      * 消息指纹：唯一标识一条历史消息的三元组拼接串（带长度前缀防歧义）。
      * 无碰撞（三元组相等 ⇔ 字符串相等），排除哈希碰撞误判的可能。
+     * <p>
+     * 算法实现统一委托 {@link HistoryFingerprint#of}（与历史摘要/NeoForge 线共用），
+     * 避免同一算法多处实现后悄悄漂移。
      */
     static String fingerprint(LLMMessage message) {
-        String content = message.message() == null ? StringUtils.EMPTY : message.message();
-        return message.role().name() + '|' + content.length() + '|'
-                + content + '|' + message.gameTime();
+        return HistoryFingerprint.of(message.role().name(),
+                message.message() == null ? "" : message.message(), message.gameTime());
     }
 
     /**
