@@ -1,13 +1,7 @@
 package com.maidmod.selftalk;
 
-import com.google.gson.JsonElement;
-import com.google.gson.JsonNull;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonPrimitive;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.storage.LevelResource;
-import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -27,28 +21,31 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * 预制复用条目的世界级 JSON 库：每个身份指纹一个目录，目录下按来源分 {@code welcome/}
- * 与 {@code self-talk/} 两个子目录，每个条目单独存一个 JSON 文件。
+ * 预制复用机器条目的世界级 YAML 库：每个身份指纹一个目录，目录下按来源分 {@code welcome/}
+ * 与 {@code self-talk/} 两个子目录，每个条目单独存一个 Markdown 文件（编解码见
+ * {@link PrebuiltEntryCodec}）。人类可编辑条目（{@code custom/}）不经过本类，见
+ * {@link PrebuiltCustomEntries}。
  * <p>
- * 存储位置 {@code <世界根>/data/maid_self_talk/prebuilt/v1-<fingerprint>/<source>/entry-<UUID>.json}——
- * {@code v1-} 是身份指纹规则版本前缀；来源由所在子目录表达、条目内不重复记；
- * {@code entryId} 是存储条目自身的 UUID（与文件名一致），不是女仆 UUID。
- * 不随女仆 NBT、不随玩家设置走，同服同世界共享；换世界即换库，不做跨世界同步，
- * 也不下发客户端。旧版扁平文件 {@code prebuilt/<fingerprint>.json}（schemaVersion 1）
- * 与新版完全不兼容：不读取、不迁移、也不删除，原样留在磁盘上。
+ * 存储位置 {@code <世界根>/data/maid_self_talk/prebuilt/generated/<source>/v1-<fingerprint>/entry-<UUID>.md}——
+ * {@code generated/} 一层区分「mod 自动生成」与「人手写」；{@code v1-} 是身份指纹规则版本前缀；
+ * 来源由所在子目录表达、条目内不重复记；{@code entryId} 是存储条目自身的 UUID（与文件名一致），
+ * 不是女仆 UUID。不随女仆 NBT、不随玩家设置走，同服同世界共享；换世界即换库，不做跨世界同步，
+ * 也不下发客户端。旧版平铺路径 {@code prebuilt/v1-<fingerprint>/…}（JSON v2）与更旧的扁平文件
+ * {@code prebuilt/<fingerprint>.json}（schemaVersion 1）完全不兼容：不读取、不迁移、也不删除，
+ * 原样留在磁盘上。
  * <p>
  * 磁盘生命周期（刻意最小化）：
  * <ul>
  *   <li>内存按服务端实例隔离（{@link #of}），首次访问某指纹某来源才扫描对应子目录
- *       （惰性加载，只看该目录顶层的 {@code *.json}，不递归）；子目录不存在按空库处理，
+ *       （惰性加载，只看该目录顶层的 {@code *.md}，不递归）；子目录不存在按空库处理，
  *       不主动创建，首次成功写入时再建目录；</li>
  *   <li>写入只置脏，主线程不落盘——脏条目统一在 overworld 存档事件
  *       （{@code LevelEvent.Save}）与服务器停止（{@code ServerStoppedEvent} → {@link #release}）时写出；</li>
  *   <li>每个条目文件单独走「同目录临时文件 + 原子替换」写出；失败保留原文件与脏标记，
  *       下轮存档重试；容量淘汰的条目文件先等本轮全部新增/更新写成功后再删除，
  *       避免新增写失败时把已有条目也丢了；</li>
- *   <li>单个 JSON 损坏、schema 不识别、字段类型错误或文件名与 {@code entryId} 不一致：
- *       跳过该文件、保留原文件并记一次诊断日志，同目录其余合法条目照常参与匹配；</li>
+ *   <li>单个 Markdown 损坏、schema 不识别、字段错误或文件名与 {@code entryId} 不一致：
+ *       跳过该文件、保留原文件并记诊断日志，同目录其余合法条目照常参与匹配；</li>
  *   <li>整个来源子目录无法枚举时，该来源本次运行锁为只读（坏档闩锁），
  *       绝不把「读不出来的已有库存」当空库覆盖。</li>
  * </ul>
@@ -62,8 +59,10 @@ public final class SelfTalkReuseStore {
     /** 自话来源名（同时是其子目录名） */
     public static final String SOURCE_SELF_TALK = "self-talk";
 
-    /** 单条 JSON 的 schema 版本：2 = 指纹目录 + 来源子目录 + 每条目一文件（旧版扁平双数组为 1，不兼容） */
-    private static final int SCHEMA_VERSION = 2;
+    /** 机器条目总目录（与人类可编辑的 {@code custom/} 成对命名，见 {@link PrebuiltCustomEntries}） */
+    static final String GENERATED_DIR = "generated";
+    /** 人类可编辑条目总目录（扫描见 {@link PrebuiltCustomEntries}，本类不触碰） */
+    static final String CUSTOM_DIR_NAME = "custom";
     /** 身份指纹规则版本前缀：v1 = 「女仆名称 + 当前生效人设全文」的 SHA-256 规则 */
     private static final String FINGERPRINT_DIR_PREFIX = "v1-";
     /** 指纹段必须是本 mod 自己产出的 64 位小写十六进制，杜绝任意字符串拼进路径 */
@@ -195,12 +194,14 @@ public final class SelfTalkReuseStore {
     /**
      * 覆写<b>仍在本库中</b>的指定条目的 TTS 段（按存储条目 {@code entryId} 直接定位）。
      * <p>
-     * 条目已被容量修剪淘汰、不在缓存中时返回 false、什么都不写——绝不借覆写复活旧条目，
-     * 也不重新扫描磁盘。只改这一条的 ttsText/ttsLanguage，不动 createdAt 与环境表。
+     * 人类条目（{@link Origin#CUSTOM}）只读：直接返回 false，文件保持不变（调用侧也不应对
+     * 人类条目发起覆写）。机器条目已被容量修剪淘汰、不在缓存中时同样返回 false、什么都不写——
+     * 绝不借覆写复活旧条目，也不重新扫描磁盘。只改这一条的 ttsText/ttsLanguage，
+     * 不动 createdAt 与环境表。
      */
     public boolean updateTts(String fingerprint, String source, PrebuiltEntry target,
                              String ttsText, String ttsLanguage) {
-        if (target == null || target.entryId == null) {
+        if (target == null || target.entryId == null || target.origin != Origin.MACHINE) {
             return false;
         }
         SourceEntries entries = ensureLoaded(fingerprint, source);
@@ -212,7 +213,7 @@ public final class SelfTalkReuseStore {
             return false;
         }
         PrebuiltEntry updated = new PrebuiltEntry(existing.entryId, existing.createdAt, existing.env,
-                existing.chatLanguage, existing.chatText, ttsLanguage, ttsText);
+                existing.chatLanguage, existing.chatText, ttsLanguage, ttsText, existing.origin);
         entries.entries.put(existing.entryId, updated);
         entries.dirtyIds.add(existing.entryId);
         return true;
@@ -238,9 +239,18 @@ public final class SelfTalkReuseStore {
     }
 
     /**
-     * 库内单条预制回复：存储条目 UUID（与文件名一致）、入库时间、逐 key 环境取值
-     * （与最终注入内容同源）、上屏文本及其语言、TTS 文本及其语言（TTS 未生成时两者为 null）。
-     * 来源与指纹都不进条目——由所在目录表达。
+     * 条目来源标记：机器生成（指纹目录，参与容量淘汰、可回写 TTS）或人类手写
+     * （{@code custom/}，只读、不淘汰、不回写）。只用于匹配语义分流，不写入文件。
+     */
+    public enum Origin {
+        MACHINE, CUSTOM
+    }
+
+    /**
+     * 库内单条预制回复：条目来源、存储条目 UUID（机器条目与文件名一致；人类条目由相对路径
+     * 派生、只在内存里用）、入库时间、逐 key 环境取值（与最终注入内容同源）、上屏文本及其语言、
+     * TTS 文本及其语言（TTS 未生成时两者为 null，读取侧会回退为 chatText）。
+     * 来源与指纹都不进条目文件——由所在目录表达。
      */
     public static final class PrebuiltEntry {
         public final UUID entryId;
@@ -250,9 +260,10 @@ public final class SelfTalkReuseStore {
         public final String chatText;
         public final String ttsLanguage;
         public final String ttsText;
+        public final Origin origin;
 
         public PrebuiltEntry(UUID entryId, String createdAt, Map<String, String> env, String chatLanguage,
-                             String chatText, String ttsLanguage, String ttsText) {
+                             String chatText, String ttsLanguage, String ttsText, Origin origin) {
             this.entryId = entryId;
             this.createdAt = createdAt;
             this.env = env;
@@ -260,6 +271,7 @@ public final class SelfTalkReuseStore {
             this.chatText = chatText;
             this.ttsLanguage = ttsLanguage;
             this.ttsText = ttsText;
+            this.origin = origin;
         }
     }
 
@@ -290,8 +302,8 @@ public final class SelfTalkReuseStore {
 
     /** 扫描单个来源子目录：损坏/不识别/文件名不符的文件跳过并告警，其余解析入缓存 */
     private SourceEntries scan(String fingerprint, String source) {
-        SourceEntries result = new SourceEntries(
-                dir.resolve(FINGERPRINT_DIR_PREFIX + fingerprint).resolve(source));
+        SourceEntries result = new SourceEntries(dir.resolve(GENERATED_DIR)
+                .resolve(source).resolve(FINGERPRINT_DIR_PREFIX + fingerprint));
         if (!Files.isDirectory(result.dir)) {
             // 没有目录就是空库：不创建目录（首次成功写入时才建），也不算坏档
             return result;
@@ -299,7 +311,7 @@ public final class SelfTalkReuseStore {
         List<Path> files;
         try (Stream<Path> stream = Files.list(result.dir)) {
             files = stream
-                    .filter(p -> p.getFileName().toString().endsWith(".json"))
+                    .filter(p -> p.getFileName().toString().endsWith(".md"))
                     .filter(Files::isRegularFile)
                     .sorted()
                     .toList();
@@ -317,101 +329,30 @@ public final class SelfTalkReuseStore {
 
     /** 解析单个条目文件入缓存；任何不符只跳过该文件，不改动原文件 */
     private static void parseEntryFile(Path file, SourceEntries result) {
-        JsonObject object;
+        PrebuiltEntryCodec.ReadResult read;
         try {
-            object = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject();
-        } catch (Exception e) {
+            read = PrebuiltEntryCodec.readMachine(Files.readString(file, StandardCharsets.UTF_8),
+                    file.getFileName().toString());
+        } catch (IOException | RuntimeException e) {
             MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse entry file {} unreadable ({}), skipped",
                     file, e.toString());
             return;
         }
-        PrebuiltEntry entry = fromJson(file, object);
-        if (entry != null) {
-            result.entries.put(entry.entryId, entry);
+        for (PrebuiltEntryCodec.Issue issue : read.issues()) {
+            MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse entry file {}: {}", file, issue.message());
         }
-    }
-
-    /**
-     * 单条 JSON → 条目。要求：schemaVersion 为 2、entryId 非空且为合法 UUID、
-     * 文件名与 entryId 一致（entry-&lt;entryId&gt;.json）、createdAt/chatLanguage/chatText 非空。
-     * 任一不满足返回 null（调用方跳过该文件，保留原文件）。
-     */
-    private static PrebuiltEntry fromJson(Path file, JsonObject object) {
-        try {
-            JsonElement schema = object.get("schemaVersion");
-            if (schema == null || !schema.isJsonPrimitive() || schema.getAsInt() != SCHEMA_VERSION) {
-                MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse entry file {} has unsupported schema, skipped", file);
-                return null;
-            }
-            JsonElement idElement = object.get("entryId");
-            String entryIdRaw = idElement == null ? null : idElement.getAsString();
-            if (StringUtils.isBlank(entryIdRaw)) {
-                MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse entry file {} has no entryId, skipped", file);
-                return null;
-            }
-            UUID entryId = UUID.fromString(entryIdRaw);
-            if (!("entry-" + entryId + ".json").equals(file.getFileName().toString())) {
-                MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse entry file {} name does not match entryId {}, skipped",
-                        file, entryId);
-                return null;
-            }
-            String createdAt = object.get("createdAt").getAsString();
-            String chatLanguage = object.get("chatLanguage").getAsString();
-            String chatText = object.get("chatText").getAsString();
-            if (StringUtils.isBlank(createdAt) || StringUtils.isBlank(chatLanguage) || StringUtils.isBlank(chatText)) {
-                MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse entry file {} misses required fields, skipped", file);
-                return null;
-            }
-            Map<String, String> env = new LinkedHashMap<>();
-            if (object.has("env")) {
-                JsonElement envElement = object.get("env");
-                if (!envElement.isJsonObject()) {
-                    MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse entry file {} has malformed env, skipped", file);
-                    return null;
-                }
-                for (Map.Entry<String, JsonElement> e : envElement.getAsJsonObject().entrySet()) {
-                    if (e.getValue().isJsonPrimitive()) {
-                        env.put(e.getKey(), e.getValue().getAsString());
-                    }
-                }
-            }
-            String ttsLanguage = object.has("ttsLanguage") && !object.get("ttsLanguage").isJsonNull()
-                    ? object.get("ttsLanguage").getAsString() : null;
-            String ttsText = object.has("ttsText") && !object.get("ttsText").isJsonNull()
-                    ? object.get("ttsText").getAsString() : null;
-            return new PrebuiltEntry(entryId, createdAt, env, chatLanguage, chatText, ttsLanguage, ttsText);
-        } catch (Exception e) {
-            MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse entry file {} invalid ({}), skipped",
-                    file, e.toString());
-            return null;
+        if (read.entry() != null) {
+            result.entries.put(read.entry().entryId, read.entry());
         }
-    }
-
-    /** 单条条目 → 单文件 JSON；schemaVersion/entryId 在文件级，来源与指纹由父目录表达 */
-    private static JsonObject toJson(PrebuiltEntry entry) {
-        JsonObject object = new JsonObject();
-        object.addProperty("schemaVersion", SCHEMA_VERSION);
-        object.addProperty("entryId", entry.entryId.toString());
-        object.addProperty("createdAt", entry.createdAt);
-        JsonObject env = new JsonObject();
-        entry.env.forEach(env::addProperty);
-        object.add("env", env);
-        object.addProperty("chatLanguage", entry.chatLanguage);
-        object.addProperty("chatText", entry.chatText);
-        object.add("ttsLanguage", entry.ttsLanguage == null
-                ? JsonNull.INSTANCE : new JsonPrimitive(entry.ttsLanguage));
-        object.add("ttsText", entry.ttsText == null
-                ? JsonNull.INSTANCE : new JsonPrimitive(entry.ttsText));
-        return object;
     }
 
     /** 单条目文件写入：临时文件 + 原子替换；失败返回 false，保留原文件与脏标记下轮重试 */
     private static boolean writeEntryFile(Path dir, PrebuiltEntry entry) {
-        Path file = dir.resolve("entry-" + entry.entryId + ".json");
+        Path file = dir.resolve("entry-" + entry.entryId + ".md");
         try {
             Files.createDirectories(dir);
             Path tmp = dir.resolve(file.getFileName() + ".tmp");
-            Files.writeString(tmp, toJson(entry).toString(), StandardCharsets.UTF_8);
+            Files.writeString(tmp, PrebuiltEntryCodec.writeMachine(entry), StandardCharsets.UTF_8);
             try {
                 Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             } catch (IOException atomicUnsupported) {
@@ -427,7 +368,7 @@ public final class SelfTalkReuseStore {
 
     /** 淘汰条目文件删除：文件不存在视为已删除；失败返回 false，下轮存档重试 */
     private static boolean deleteEntryFile(Path dir, UUID entryId) {
-        Path file = dir.resolve("entry-" + entryId + ".json");
+        Path file = dir.resolve("entry-" + entryId + ".md");
         try {
             Files.deleteIfExists(file);
             return true;

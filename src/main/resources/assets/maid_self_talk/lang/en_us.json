@@ -246,5 +246,6 @@
   "config.maid_self_talk.screen.persona_draft.split.error.timeout": "The organizing request timed out and was cancelled.",
   "config.maid_self_talk.screen.persona_draft.split.error.format": "The AI returned an unexpected format. Please try again.",
   "chat.maid_self_talk.split.done": "AI organizing finished for %s. Reopen the four-section persona screen to load the result.",
+  "chat.maid_self_talk.prebuilt_custom_warnings": "Prebuilt reuse: %s custom entries have warnings, see custom/_diagnostics.md for details"
   "chat.maid_self_talk.split.failed": "AI organizing failed."
 }
