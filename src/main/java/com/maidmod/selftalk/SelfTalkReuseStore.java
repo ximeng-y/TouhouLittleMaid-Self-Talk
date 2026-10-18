@@ -332,7 +332,16 @@ public final class SelfTalkReuseStore {
         PrebuiltEntryCodec.ReadResult read;
         try {
             read = PrebuiltEntryCodec.readMachine(Files.readString(file, StandardCharsets.UTF_8),
-                    file.getFileName().toString());
+                    file.getFileName().toString(),
+                    // 惰性提供文件修改时间：编解码器仅在 createdAt 缺失或空白时才读取文件属性，
+                    // 读取失败经 UncheckedIOException 由补日期逻辑形成失败告警，不会赋予虚构日期
+                    () -> {
+                        try {
+                            return Files.getLastModifiedTime(file).toInstant();
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(e);
+                        }
+                    });
         } catch (IOException | RuntimeException e) {
             MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse entry file {} unreadable ({}), skipped",
                     file, e.toString());

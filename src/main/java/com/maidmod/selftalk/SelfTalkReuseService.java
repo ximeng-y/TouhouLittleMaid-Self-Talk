@@ -10,8 +10,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -26,10 +25,6 @@ import java.util.UUID;
  * 全部方法仅服务端主线程调用。
  */
 public final class SelfTalkReuseService {
-
-    /** 入库时间格式（服务端本地时间；yy 非 YYYY、mm 为分钟，写错即时间序全乱） */
-    private static final DateTimeFormatter CREATED_AT_FORMAT =
-            DateTimeFormatter.ofPattern("yy-MM-dd-HH:mm:ss");
 
     private SelfTalkReuseService() {
     }
@@ -209,7 +204,7 @@ public final class SelfTalkReuseService {
      */
     public static void appendEntry(MinecraftServer server, ArchiveData data,
                                    String chatText, String ttsText, String ttsLanguage) {
-        String createdAt = LocalDateTime.now().format(CREATED_AT_FORMAT);
+        String createdAt = PrebuiltEntryCodec.formatCreatedAt(Instant.now());
         SelfTalkReuseStore.PrebuiltEntry entry = new SelfTalkReuseStore.PrebuiltEntry(
                 UUID.randomUUID(), createdAt, data.matchEntries(), data.chatLanguage(),
                 chatText, ttsLanguage, ttsText, SelfTalkReuseStore.Origin.MACHINE);
