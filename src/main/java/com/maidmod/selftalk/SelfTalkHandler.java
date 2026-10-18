@@ -126,9 +126,18 @@ public final class SelfTalkHandler {
         if (state.selfTalkPending && state.selfTalkPendingSinceTick >= 0
                 && serverTick - state.selfTalkPendingSinceTick > PENDING_TIMEOUT_TICKS) {
             MaidSelfTalkMod.LOGGER.warn("Self-talk pending timed out for maid {}, force reset", maid.getId());
-            state.selfTalkPending = false;
-            state.selfTalkPendingSinceTick = -1;
-            state.currentSelfTalkCallback = null;
+            // 先捕获超时瞬间的回调并本地作废（令牌 + 上游 + 本请求气泡）：
+            // 迟到的成功/失败因令牌失效而沉默，不会在上屏、广播或档案里留下超时前的旧内容
+            SelfTalkCallback expired = state.currentSelfTalkCallback;
+            if (expired != null) {
+                expired.invalidateLocal();
+            }
+            // 只有状态仍指向同一个回调时才复位 pending：超时之后已发起的新请求不得被误清
+            if (state.currentSelfTalkCallback == expired) {
+                state.selfTalkPending = false;
+                state.selfTalkPendingSinceTick = -1;
+                state.currentSelfTalkCallback = null;
+            }
         }
         if (state.interChatPending && state.interChatPendingSinceTick >= 0
                 && serverTick - state.interChatPendingSinceTick > PENDING_TIMEOUT_TICKS) {

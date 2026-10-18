@@ -96,6 +96,24 @@ public class SelfTalkCallback extends LLMCallback {
     }
 
     /**
+     * 本地作废本请求（超时兜底等，服务端主线程调用；幂等）。
+     * <p>
+     * 执行顺序固定为：先作废本请求自己的令牌（此后迟到成功／失败／已排队上屏任务在最终判定时一律沉默），
+     * 再尽力取消上游（可选的生命周期桥，缺失或异常都不得阻断本地清理），
+     * 最后按本轮捕获的气泡 id 精准删除本请求的等待气泡。
+     * <p>
+     * 不推进整只女仆的清空世代、不重建状态条目、不动其它请求的气泡：
+     * 超时之后发起的新请求照常工作（pending 字段由调用方在同一次核对里复位）。
+     */
+    void invalidateLocal() {
+        if (token != null) {
+            token.invalidate();
+        }
+        AgentTweaksLifecycleBridge.cancel(this);
+        discardWaitingBubble();
+    }
+
+    /**
      * 工具轮次：不再捕获历史队头——本轮回合与工具过程都不写入 TLM 历史，
      * 由 {@code InterChatToolLifecycleMixin} 的重定向在写入点跳过。
      */

@@ -47,9 +47,13 @@ public final class InterChatChain {
     private volatile boolean interrupted;
 
     private InterChatChain(long chainId, EntityMaid first, EntityMaid second) {
+        this(chainId, first.getId(), second.getId());
+    }
+
+    private InterChatChain(long chainId, int firstMaidId, int secondMaidId) {
         this.chainId = chainId;
-        this.firstMaidId = first.getId();
-        this.secondMaidId = second.getId();
+        this.firstMaidId = firstMaidId;
+        this.secondMaidId = secondMaidId;
     }
 
     /** 每位参与女仆的链内状态 */
@@ -225,6 +229,29 @@ public final class InterChatChain {
     /** 当前活动链数（自检与诊断用） */
     static int size() {
         return CHAINS.size();
+    }
+
+    // ===== 自检可见（仅自检使用，不构成公共 API） =====
+
+    /** 自检：以实体 ID 直接建链，不依赖 EntityMaid 实例 */
+    static InterChatChain createForSelfCheck(int firstMaidId, int secondMaidId) {
+        long id = nextChainId++;
+        InterChatChain chain = new InterChatChain(id, firstMaidId, secondMaidId);
+        CHAINS.put(id, chain);
+        ACTIVE_BY_MAID.put(firstMaidId, id);
+        ACTIVE_BY_MAID.put(secondMaidId, id);
+        return chain;
+    }
+
+    /** 自检：清空注册表（不重置编号，与 dropAll 同语义） */
+    static void clearRegistryForSelfCheck() {
+        dropAll();
+    }
+
+    /** 自检：该女仆当前活动链 ID（无则 -1） */
+    static long activeIdForSelfCheck(int maidId) {
+        Long id = ACTIVE_BY_MAID.get(maidId);
+        return id == null ? -1 : id;
     }
 
     // ===== 链内状态 =====
