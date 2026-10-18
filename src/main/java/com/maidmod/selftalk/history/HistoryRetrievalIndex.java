@@ -59,7 +59,8 @@ public final class HistoryRetrievalIndex {
      * 用一组对话块构建索引。
      * <p>
      * 文档长度按<b>词项总数</b>计（不是字符串长度）：中文单字与双字词项都会被计入，
-     * 与 tf 的口径一致，长度归一化才有意义。
+     * 与 tf 的口径一致，长度归一化才有意义。词项按<b>出现次数</b>统计（{@code tokenizeSequence}），
+     * 去重后的列表会让 tf 恒为 1、文档长度恒等于不同词项数，破坏 BM25 的频率饱和与长度归一化。
      */
     public static HistoryRetrievalIndex build(List<DialogueBlock> blocks) {
         if (blocks == null || blocks.isEmpty()) {
@@ -70,7 +71,7 @@ public final class HistoryRetrievalIndex {
         Map<String, Integer> df = new HashMap<>();
         long totalLength = 0;
         for (int i = 0; i < copy.size(); i++) {
-            List<String> tokens = HistoryTokenizer.tokenize(copy.get(i).text());
+            List<String> tokens = HistoryTokenizer.tokenizeSequence(copy.get(i).text());
             Map<String, Integer> tf = new HashMap<>();
             for (String token : tokens) {
                 tf.merge(token, 1, Integer::sum);

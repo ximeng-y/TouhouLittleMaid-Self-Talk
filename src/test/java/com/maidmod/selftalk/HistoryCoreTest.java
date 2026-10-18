@@ -35,6 +35,7 @@ public final class HistoryCoreTest {
         testFilterAndBlocks();
         testTokenizer();
         testBm25();
+        testPersonaBm25();
         testKeywordJson();
         System.out.printf("%n=== %d passed, %d failed ===%n", passed, failed);
         if (failed > 0) {
@@ -157,6 +158,23 @@ public final class HistoryCoreTest {
                 HistoryTokenizer.matchesAnyKeyword(List.of("kill"), HistoryTokenizer.normalize("kill the ghast")));
         check("中文短语用包含匹配",
                 HistoryTokenizer.matchesAnyKeyword(List.of("下界"), HistoryTokenizer.normalize("我在下界挖矿")));
+
+        // 中英混排边界：ASCII 词段遇到汉字必须断开
+        check("ASCII 词段遇汉字断开", HistoryTokenizer.tokenizeSequence("hp上限").contains("hp"));
+        check("ASCII 词段不吞汉字", HistoryTokenizer.tokenizeSequence("hp上限").size() > 1);
+        check("hp 命中 hp上限",
+                HistoryTokenizer.matchesAnyKeyword(List.of("hp"), HistoryTokenizer.normalize("我的hp上限是20")));
+        check("HP 大小写归一后命中 HP值",
+                HistoryTokenizer.matchesAnyKeyword(List.of("hp"), HistoryTokenizer.normalize("查看 HP值")));
+        check("hp 不命中 alphabet",
+                !HistoryTokenizer.matchesAnyKeyword(List.of("hp"), HistoryTokenizer.normalize("alphabet")));
+        check("汉字后接 ASCII 同样断开", HistoryTokenizer.tokenizeSequence("上限hp").contains("hp"));
+
+        // 重复词项序列与查询去重的分工
+        List<String> repeated = HistoryTokenizer.tokenizeSequence("hp hp hp");
+        check("tokenizeSequence 保留重复词项", repeated.size() == 3);
+        check("tokenizeSequence 词项内容正确", repeated.stream().allMatch("hp"::equals));
+        check("查询分词对重复词去重", HistoryTokenizer.tokenize("hp hp hp").size() == 1);
     }
 
     // ===== BM25 =====
@@ -211,6 +229,36 @@ public final class HistoryCoreTest {
         }
         check("关键词上限存在", HistoryRetrievalIndex.MAX_KEYWORDS == 6);
         check("召回块上限存在", HistoryRetrievalIndex.MAX_RETRIEVED_BLOCKS == 3);
+
+        // 词频口径：重复词文档按真实 tf 与真实长度计分。
+        // 旧实现用去重词项：四块全部退化成 tf=1/length=1，完全同分，最早的那块被「较新优先」
+        // 挤出前三；修复后重复词块的 tf=3 使其得分高于其余块，进入召回。
+        List<DialogueBlock> tfCorpus = List.of(
+                block(0, "hp hp hp"),
+                block(1, "hp"),
+                block(2, "hp"),
+                block(3, "hp"));
+        List<DialogueBlock> tfHits = HistoryRetrievalIndex.build(tfCorpus).search(List.of("hp"));
+        check("重复词块按真实 tf 进入召回", tfHits.size() == 3
+                && tfHits.stream().anyMatch(b -> b.text().contains("hp hp hp")));
+        check("查询词去重不改变 tf 统计",
+                HistoryRetrievalIndex.build(tfCorpus).search(List.of("hp", "hp", "hp")).size() == 3);
+    }
+
+    // ===== 人设索引 =====
+
+    private static void testPersonaBm25() {
+        // 片段顺序：三条单次 hp + 最后一条重复三次。旧实现四块同分，按「靠前优先」最后一条被挤出；
+        // 修复后重复词片段 tf=3、得分最高，必进前三
+        List<com.maidmod.selftalk.persona.PersonaFragment> hits =
+                com.maidmod.selftalk.persona.PersonaRetrievalIndex.build(
+                                "hp\nhp\nhp\nhp hp hp", null)
+                        .search(List.of("hp"));
+        check("人设索引重复词片段按真实 tf 召回", hits.size() == 3
+                && hits.stream().anyMatch(f -> f.text().contains("hp hp hp")));
+        check("人设索引空内容返回空",
+                com.maidmod.selftalk.persona.PersonaRetrievalIndex.build(null, null)
+                        .search(List.of("hp")).isEmpty());
     }
 
     // ===== 关键词 JSON 与纠正 =====
@@ -289,5 +337,10 @@ public final class HistoryCoreTest {
             failed++;
             System.out.println("FAIL: " + name);
         }
+    }
+
+    /** 单消息对话块（检索库只依赖块文本与起始下标） */
+    private static DialogueBlock block(int startIndex, String text) {
+        return new DialogueBlock(startIndex, List.of(new HistoryMessage("USER", text, startIndex, false)));
     }
 }

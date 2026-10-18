@@ -91,7 +91,7 @@ public final class PersonaRetrievalIndex {
         Map<String, Integer> df = new HashMap<>();
         long totalLength = 0;
         for (int i = 0; i < copy.size(); i++) {
-            List<String> tokens = HistoryTokenizer.tokenize(copy.get(i).text());
+            List<String> tokens = HistoryTokenizer.tokenizeSequence(copy.get(i).text());
             Map<String, Integer> tf = new HashMap<>();
             for (String token : tokens) {
                 tf.merge(token, 1, Integer::sum);

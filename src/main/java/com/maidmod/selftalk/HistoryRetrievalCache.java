@@ -6,6 +6,8 @@ import com.maidmod.selftalk.history.DialogueBlock;
 import com.maidmod.selftalk.history.HistoryMessage;
 import com.maidmod.selftalk.history.HistoryRetrievalIndex;
 import com.maidmod.selftalk.history.PlayerDialogueLibrary;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 
 import java.util.HashMap;
 import java.util.List;
@@ -212,6 +214,39 @@ public final class HistoryRetrievalCache {
         if (maidUuid != null) {
             CACHE.remove(maidUuid);
         }
+    }
+
+    /**
+     * 清扫已不在任何服务端维度加载的实体缓存（服务端主线程调用，周期性清扫入口）。
+     * <p>
+     * 死亡与卸载路径只能清理「当时真正触发了事件」的女仆：区块卸载、维度切换后原实体被丢弃、
+     * 实体 ID 被新实体复用等情况下，缓存条目会一直留在静态表里强持有旧实体。
+     * 这里按<b>对象身份</b>判定——只有某个维度里 {@code level.getEntity(id)} 返回的仍是
+     * 同一条 Entry 记录的实体对象，缓存才算仍有效；实体 ID 相同但对象不同（ID 复用）
+     * 说明旧实体已经不在任何维度加载，旧缓存必须整体移除，而不是被新实体继承。
+     * <p>
+     * 跨维度传送的短暂窗口内，实体在新维度已加载（对象相同），不会被误删；
+     * 若传送瞬间尚未重新加入任何维度则会被移除，下次检索按需重建，不影响正确性。
+     */
+    public static void dropUnloaded(MinecraftServer server) {
+        if (server == null || CACHE.isEmpty()) {
+            return;
+        }
+        CACHE.values().removeIf(entry -> !isEntryLoaded(server, entry));
+    }
+
+    /** 该缓存条目的实体是否仍是某个服务端维度里加载着的同一对象 */
+    private static boolean isEntryLoaded(MinecraftServer server, Entry entry) {
+        EntityMaid maid = entry.maid;
+        if (maid == null) {
+            return false;
+        }
+        for (ServerLevel level : server.getAllLevels()) {
+            if (level.getEntity(maid.getId()) == maid) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

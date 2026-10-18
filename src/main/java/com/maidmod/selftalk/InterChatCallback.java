@@ -226,11 +226,22 @@ public class InterChatCallback extends LLMCallback {
                 return;
             }
             if (AIConfig.TTS_ENABLED.get() && chatManager.getTTSSite() != null && chatManager.getTTSSite().enabled()) {
-                // 令牌随 TTS 发起一并登记：TLM 在这段同步区间内新建的 TTSCallback（远程 TTS）或
-                // 投递的主线程发声任务（系统 TTS）据此在<b>交付当下</b>判清空作废，
-                // 「回复已返回并开始合成 → 清空 → 合成结果到达」不会播出清空前的旧内容（见 SelfTalkTtsGate）
-                SelfTalkTtsGate.runWith(token, () ->
-                        chatManager.tts(chatManager.getTTSSite(), chatText, ttsText, waitingChatBubbleId));
+                // TTS 是附加步骤：只隔离「发起」阶段的同步异常。失败不重试、不调 TTS 错误回调、
+                // 不改判为 LLM 失败；本轮的窗口写入、归档、对方投递、广播与链终态照常各执行一次。
+                // 同步异常时本请求的等待气泡由 TLM 不会接管（TTS 未受理），在此清掉，避免留「思考中」气泡。
+                try {
+                    // 令牌随 TTS 发起一并登记：TLM 在这段同步区间内新建的 TTSCallback（远程 TTS）或
+                    // 投递的主线程发声任务（系统 TTS）据此在<b>交付当下</b>判清空作废，
+                    // 「回复已返回并开始合成 → 清空 → 合成结果到达」不会播出清空前的旧内容（见 SelfTalkTtsGate）
+                    SelfTalkTtsGate.runWith(token, () ->
+                            chatManager.tts(chatManager.getTTSSite(), chatText, ttsText, waitingChatBubbleId));
+                } catch (Exception e) {
+                    MaidSelfTalkMod.LOGGER.warn(
+                            "Inter-chat TTS dispatch failed for maid {} chain {} (peer {}); "
+                                    + "delivery continues without speech",
+                            maid.getId(), chain == null ? 0 : chain.id(), peer == null ? "?" : peer.getId(), e);
+                    discardWaitingBubble(maid);
+                }
             } else if (maid.level() instanceof ServerLevel serverLevel) {
                 // 非 TTS 分支的文字上屏是另一次 submit 的延迟任务：上面那次许可判定到此已经过去，
                 // 清空可能恰好落在两者之间，因此在这一任务执行当下再判一次（判完即上屏，同一任务内原子完成）
