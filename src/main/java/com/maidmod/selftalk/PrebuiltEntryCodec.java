@@ -8,6 +8,10 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
 import org.yaml.snakeyaml.nodes.Tag;
 import org.yaml.snakeyaml.representer.Representer;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -15,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * 预制复用条目的 YAML frontmatter + Markdown 正文编解码器（机器条目 schemaVersion 3）。
@@ -39,8 +44,12 @@ import java.util.UUID;
  * <p>
  * 机器条目严格校验（任一不满足整文件跳过）：{@code schemaVersion == 3}、{@code entryId}
  * 合法 UUID 且与 {@code entry-<UUID>.md} 文件名一致、{@code createdAt}/{@code chatLanguage}/
- * {@code chatText} 非空。人类条目宽松：允许无头、部分头、缺语言字段（缺 {@code chatLanguage}
- * 表示语言通配），{@code entryId}/{@code schemaVersion}/{@code createdAt} 一律不要求。
+ * {@code chatText} 非空。唯一例外：从文件读取机器条目时（带文件时间来源的
+ * {@link #readMachine(String, String, Supplier)} 重载），{@code createdAt} 缺失或空白
+ * 不直接拒绝，而用文件最后修改时间补足并记告警（格式与时区见 {@link #formatCreatedAt}）；
+ * 日期为列表/映射等非标量仍拒绝，其余校验不放宽。人类条目宽松：允许无头、部分头、
+ * 缺语言字段（缺 {@code chatLanguage} 表示语言通配），{@code entryId}/{@code schemaVersion}/
+ * {@code createdAt} 一律不要求。
  * 全部方法仅服务端主线程调用；Yaml 实例非线程安全，每次调用各自新建。
  */
 final class PrebuiltEntryCodec {
@@ -48,7 +57,20 @@ final class PrebuiltEntryCodec {
     /** 机器条目 schema 版本：3 = YAML 头 Markdown（旧 1 扁平 JSON / 2 指纹 JSON 不读不迁不删） */
     static final int SCHEMA_VERSION = 3;
 
+    /** 入库时间格式（服务端本地时间；yy 非 YYYY、mm 为分钟，写错即时间序全乱） */
+    private static final DateTimeFormatter CREATED_AT_FORMAT =
+            DateTimeFormatter.ofPattern("yy-MM-dd-HH:mm:ss");
+
     private PrebuiltEntryCodec() {
+    }
+
+    /**
+     * 机器条目 createdAt 的统一格式化入口：正常生成（当前时刻）与缺日期补足（文件最后
+     * 修改时间）共用同一格式与时区口径（服务器 JVM 默认时区）。不在方法内部读取当前
+     * 时间，由调用方明确提供时刻来源。
+     */
+    static String formatCreatedAt(Instant instant) {
+        return LocalDateTime.ofInstant(instant, ZoneId.systemDefault()).format(CREATED_AT_FORMAT);
     }
 
     /** 单条解析告警：line 为 1 起的行号，定位不到时为 -1 */
@@ -115,8 +137,20 @@ final class PrebuiltEntryCodec {
 
     // ===== 读取 =====
 
-    /** 机器条目读取（严格校验，见类注释）；entry 为 null 表示跳过该文件 */
+    /**
+     * 机器条目读取（严格校验，见类注释）；无文件时间来源，{@code createdAt} 缺失或空白
+     * 仍按缺失拒绝。entry 为 null 表示跳过该文件。
+     */
     static ReadResult readMachine(String content, String fileName) {
+        return readMachine(content, fileName, null);
+    }
+
+    /**
+     * 机器条目读取（严格校验，见类注释）；{@code lastModifiedTime} 提供所在文件的最后
+     * 修改时间来源，惰性调用——仅当 {@code createdAt} 缺失或空白时才取，一次解析至多
+     * 一次，读取失败只跳过本文件。entry 为 null 表示跳过该文件。
+     */
+    static ReadResult readMachine(String content, String fileName, Supplier<Instant> lastModifiedTime) {
         List<Issue> issues = new ArrayList<>();
         Parse p = parse(content, issues);
         if (p.meta() == null) {
@@ -139,7 +173,7 @@ final class PrebuiltEntryCodec {
                     "entryId 与文件名不一致（应为 entry-" + entryId + ".md），跳过"));
             return new ReadResult(null, issues);
         }
-        String createdAt = requireString(meta, "createdAt", issues, p.fmLines());
+        String createdAt = resolveCreatedAt(meta, issues, p.fmLines(), lastModifiedTime);
         if (createdAt == null) {
             return new ReadResult(null, issues);
         }
@@ -377,6 +411,44 @@ final class PrebuiltEntryCodec {
         }
         String s = String.valueOf(value);
         return s.isBlank() ? null : s;
+    }
+
+    /**
+     * 机器条目 createdAt 解析：非空标量沿用原值（不校验格式、不修剪、不读文件时间）；
+     * 键缺失、YAML 空值或空白字符串视为「缺日期」，用文件最后修改时间补足并记告警；
+     * 列表/映射等非标量不属于缺日期，按必填校验拒绝（不调用时间来源）。无时间来源、
+     * 时间读取失败或无法转换时记失败告警并返回 null（跳过文件，绝不改用当前时刻）。
+     */
+    private static String resolveCreatedAt(Map<String, Object> meta, List<Issue> issues,
+                                           List<String> fmLines, Supplier<Instant> lastModifiedTime) {
+        Object raw = meta.get("createdAt");
+        if (raw != null && !isScalar(raw)) {
+            issues.add(new Issue(locateLine(fmLines, "createdAt"), "createdAt 必须是标量，跳过"));
+            return null;
+        }
+        if (raw != null && !String.valueOf(raw).isBlank()) {
+            return String.valueOf(raw);
+        }
+        if (lastModifiedTime == null) {
+            issues.add(new Issue(locateLine(fmLines, "createdAt"), "机器条目缺少必填字段 createdAt，跳过"));
+            return null;
+        }
+        try {
+            Instant fileTime = lastModifiedTime.get();
+            if (fileTime == null) {
+                issues.add(new Issue(locateLine(fmLines, "createdAt"),
+                        "createdAt 缺失或空白，无可用文件最后修改时间，跳过"));
+                return null;
+            }
+            String backfilled = formatCreatedAt(fileTime);
+            issues.add(new Issue(locateLine(fmLines, "createdAt"),
+                    "createdAt 缺失或空白，已使用文件最后修改时间补足：" + backfilled));
+            return backfilled;
+        } catch (RuntimeException e) {
+            issues.add(new Issue(locateLine(fmLines, "createdAt"),
+                    "createdAt 缺失或空白，文件最后修改时间不可用：" + e + "，跳过"));
+            return null;
+        }
     }
 
     /** 机器条目必填字符串字段：缺失/空白记告警并返回 null（调用方跳过文件） */
