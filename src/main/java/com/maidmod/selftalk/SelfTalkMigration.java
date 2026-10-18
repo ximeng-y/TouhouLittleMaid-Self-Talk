@@ -22,8 +22,9 @@ import java.util.UUID;
  *   <li>目标组名单损坏（SavedData 里该玩家名单无法解析、已整条保留原始 NBT）→
  *       保留该组全部旧键，不迁移不删除；等显式调用该玩家的单只名单 setter
  *       以新输入替换损坏名单后再试；</li>
- *   <li>目标组已有有效数据（全局键或非空名单）→ 保持「新组优先」语义，
- *       仅清除旧键（残留清洗）；</li>
+ *   <li>目标组已有有效数据（全局键、非空名单或显式接管标记）→ 保持「新组优先」语义，
+ *       仅清除旧键（残留清洗）；接管标记随清洗解除——显式替换损坏名单后即使结果为空名单，
+ *       也不得让旧值在下一次登录回灌；</li>
  *   <li>目标组无有效数据 → 先完整校验旧布尔与字符串名单（布尔须是数值型 NBT，
  *       名单须全是可解析为 UUID 的字符串），全部合法才一次性迁移；任一非法则
  *       保留旧键、不部分写入，下次登录重试。</li>
@@ -58,8 +59,10 @@ public final class SelfTalkMigration {
         if (data.hasCorruptedSelfTalkMaidList(playerUuid)) {
             // 目标组名单损坏：整组保留旧键，不迁移不删除（不部分写入），等显式修复后重试
         } else if (data.hasSelfTalkData(playerUuid)) {
-            // 目标组已有有效数据：保持「新组优先」，旧键仅作残留清洗
+            // 目标组已有有效数据（含显式接管标记）：保持「新组优先」，旧键仅作残留清洗。
+            // 接管标记须在旧键清洗后解除——否则显式清空到空名单的玩家会在下次登录被旧名单灌回。
             clearOldKeys(sub, OLD_ENABLED, OLD_DISABLED_MAIDS);
+            data.clearSelfTalkMaidListTakenOver(playerUuid);
         } else {
             LegacyValues old = readLegacyValues(sub, OLD_ENABLED, OLD_DISABLED_MAIDS);
             if (old != null) {
@@ -79,6 +82,7 @@ public final class SelfTalkMigration {
             // 目标组名单损坏：整组保留旧键，不迁移不删除
         } else if (data.hasInterChatData(playerUuid)) {
             clearOldKeys(sub, OLD_INTER_CHAT_ENABLED, OLD_INTER_CHAT_DISABLED_MAIDS);
+            data.clearInterChatMaidListTakenOver(playerUuid);
         } else {
             LegacyValues old = readLegacyValues(sub, OLD_INTER_CHAT_ENABLED, OLD_INTER_CHAT_DISABLED_MAIDS);
             if (old != null) {

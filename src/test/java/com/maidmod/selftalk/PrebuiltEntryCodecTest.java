@@ -253,6 +253,32 @@ public final class PrebuiltEntryCodecTest {
         r = PrebuiltEntryCodec.readCustom(
                 "---\nbodyFormat: \"fenced-v1\"\nenv:\n  weather:\n---\n\n## Chat\n\n```\n你好。\n```", any);
         check(r.entry() == null && hasIssue(r.issues(), "整条拒绝"), "env 空值应整条拒绝");
+        // 显式 !!null 标签：标签实例与 Tag.NULL 等值但不同对象，仍须按空值整条拒绝
+        r = PrebuiltEntryCodec.readCustom(
+                "---\nbodyFormat: \"fenced-v1\"\nenv:\n  weather: !!null null\n---\n\n## Chat\n\n```\n你好。\n```", any);
+        check(r.entry() == null && hasIssue(r.issues(), "整条拒绝"), "env 显式 !!null 空值应整条拒绝");
+        // 显式空值（~ / null）：字面量不是合法环境值，同样整条拒绝
+        r = PrebuiltEntryCodec.readCustom(
+                "---\nbodyFormat: \"fenced-v1\"\nenv:\n  weather: ~\n---\n\n## Chat\n\n```\n你好。\n```", any);
+        check(r.entry() == null && hasIssue(r.issues(), "整条拒绝"), "env 波浪号空值应整条拒绝");
+        // 引号 "null" 是字符串字面量，必须保留可用
+        r = PrebuiltEntryCodec.readCustom(
+                "---\nbodyFormat: \"fenced-v1\"\nenv:\n  weather: \"null\"\n---\n\n## Chat\n\n```\n你好。\n```", any);
+        check(r.entry() != null && "null".equals(r.entry().env.get("weather")),
+                "引号 null 是字符串字面量，应保留并可用");
+        // 顶层 env 显式空值：与「未写 env」区分，整条拒绝
+        for (String form : List.of("env:", "env: null", "env: ~", "env: !!null null")) {
+            r = PrebuiltEntryCodec.readCustom(
+                    "---\nbodyFormat: \"fenced-v1\"\n" + form + "\n---\n\n## Chat\n\n```\n你好。\n```", any);
+            check(r.entry() == null && hasIssue(r.issues(), "整条拒绝"),
+                    "顶层 " + form + " 应整条拒绝（区别于缺省）");
+        }
+        // 缺省 env 与 env: {} 仍是合法通配
+        r = PrebuiltEntryCodec.readCustom(custom("## Chat\n\n```\n你好。\n```"), any);
+        check(r.entry() != null && r.entry().env.isEmpty(), "缺省 env 应是空映射通配");
+        r = PrebuiltEntryCodec.readCustom(
+                "---\nbodyFormat: \"fenced-v1\"\nenv: {}\n---\n\n## Chat\n\n```\n你好。\n```", any);
+        check(r.entry() != null && r.entry().env.isEmpty(), "env: {} 应是空映射通配");
         // 机器条目同理
         UUID machineId = UUID.randomUUID();
         r = PrebuiltEntryCodec.readMachine("---\nschemaVersion: 4\nbodyFormat: \"fenced-v1\"\nentryId: \""

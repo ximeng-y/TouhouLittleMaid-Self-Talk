@@ -12,8 +12,9 @@ import java.util.UUID;
  * Forge 玩家设置迁移自检（无测试框架依赖，直接 {@code main} 跑，issue #122）。
  * <p>
  * 覆盖：空目标组迁移旧值；有效新组优先不被覆盖且清洗旧键；目标名单损坏保留原始 NBT、
- * 迁移受阻、保存透传、显式单只名单写入替换解除、全局开关不清除损坏名单；旧布尔/旧名单
- * 非法时不部分写入且保留旧键；空名单外层键按无有效数据处理；重复迁移幂等。
+ * 迁移受阻、保存透传、显式单只名单写入替换解除、全局开关不清除损坏名单；显式接管后
+ * 旧值不回灌且标记随清洗解除；旧布尔/旧名单非法时不部分写入且保留旧键；空名单外层键
+ * 按无有效数据处理；重复迁移幂等。
  * 经包内 {@code PlayerSettingsSavedData.load} 与 {@code SelfTalkMigration.migrateSettings}
  * 构造调用，不启动服务器。已由 {@code gradle check} 真实执行，失败即构建失败。
  */
@@ -39,6 +40,7 @@ public final class PlayerSettingsMigrationTest {
         validNewGroupTakesPrecedence();
         corruptedTargetList();
         corruptedGroupIsolation();
+        explicitTakeoverBlocksReimport();
         invalidOldDataNoPartialWrite();
         emptyListOuterKey();
         System.out.println("PlayerSettingsMigrationTest passed: " + checks + " checks");
@@ -126,7 +128,63 @@ public final class PlayerSettingsMigrationTest {
         check(sub.contains(OLD_INTER_CHAT_DISABLED_MAIDS), "受阻组的旧键应保留");
     }
 
-    /** 5. 旧数据非法：不部分写入、保留旧键（布尔为字符串 / 名单元素非 UUID / 名单类型错误） */
+    /**
+     * 5. 显式替换损坏名单后不得回灌旧值：即便结果为「空名单 + 默认全局值」，
+     * 下一次登录的迁移也只能清洗旧键，不能把保留的旧名单重新导入并覆盖玩家操作。
+     * 覆盖显式清空（setter false）与显式写入两只女仆后清空两种路径，互聊同构。
+     */
+    private static void explicitTakeoverBlocksReimport() {
+        CompoundTag stored = new CompoundTag();
+        CompoundTag selfTalkRaw = new CompoundTag();
+        selfTalkRaw.putString(PLAYER_KEY, "损坏为字符串的名单");
+        stored.put("selfTalkMaidOverrides", selfTalkRaw);
+        CompoundTag interRaw = new CompoundTag();
+        interRaw.putString(PLAYER_KEY, "损坏");
+        stored.put("interChatMaidOverrides", interRaw);
+        PlayerSettingsSavedData data = PlayerSettingsSavedData.load(stored);
+        // 首次登录：目标组受阻，旧键保留
+        CompoundTag sub = legacySub(OLD_ENABLED, OLD_DISABLED_MAIDS, true, List.of(MAID_A.toString()));
+        putList(sub, OLD_INTER_CHAT_DISABLED_MAIDS, List.of(MAID_B.toString()));
+        SelfTalkMigration.migrateSettings(data, PLAYER, sub);
+        check(sub.contains(OLD_DISABLED_MAIDS) && sub.contains(OLD_INTER_CHAT_DISABLED_MAIDS),
+                "受阻时两组旧名单都应保留");
+        // 玩家显式操作：自话把 MAID_A 关闭（替换损坏名单），互聊显式关闭后重新开启（净结果为空名单）
+        data.setSelfTalkMaidDisabled(PLAYER, MAID_A, true);
+        data.setInterChatMaidDisabled(PLAYER, MAID_B, true);
+        data.setInterChatMaidDisabled(PLAYER, MAID_B, false);
+        check(data.isSelfTalkMaidListTakenOver(PLAYER) && data.isInterChatMaidListTakenOver(PLAYER),
+                "显式替换损坏名单应置接管标记");
+        check(data.isSelfTalkMaidDisabled(PLAYER, MAID_A), "自话显式关闭应生效");
+        check(!data.isInterChatMaidDisabled(PLAYER, MAID_B), "互聊显式重新开启后名单应为空");
+        check(data.hasSelfTalkData(PLAYER) && data.hasInterChatData(PLAYER),
+                "接管标记应计入有效数据，避免退回「尚无新数据」");
+        // 存档往返：标记持久化
+        PlayerSettingsSavedData saved = PlayerSettingsSavedData.load(data.save(new CompoundTag()));
+        check(saved.isSelfTalkMaidListTakenOver(PLAYER) && saved.isInterChatMaidListTakenOver(PLAYER),
+                "接管标记应随存档持久化");
+        // 下一次登录：只清洗旧键，不回灌旧名单、不覆盖玩家操作
+        SelfTalkMigration.migrateSettings(saved, PLAYER, sub);
+        check(!sub.contains(OLD_ENABLED) && !sub.contains(OLD_DISABLED_MAIDS),
+                "接管后旧键应被清洗（含旧全局布尔）");
+        check(!sub.contains(OLD_INTER_CHAT_DISABLED_MAIDS), "互聊接管后旧名单应被清洗");
+        check(saved.isSelfTalkMaidDisabled(PLAYER, MAID_A), "自话显式操作不得被旧值覆盖");
+        check(!saved.isInterChatMaidDisabled(PLAYER, MAID_B), "互聊显式清空不得被旧名单回灌");
+        check(!saved.isSelfTalkMaidListTakenOver(PLAYER) && !saved.isInterChatMaidListTakenOver(PLAYER),
+                "旧键清洗后应解除接管标记");
+        // 标记解除后再次登录：无旧键可迁，玩家操作保持
+        CompoundTag later = new CompoundTag();
+        SelfTalkMigration.migrateSettings(saved, PLAYER, later);
+        check(saved.isSelfTalkMaidDisabled(PLAYER, MAID_A) && !saved.isInterChatMaidDisabled(PLAYER, MAID_B),
+                "标记解除后重复登录不得改变玩家操作");
+        // 存档往返后依旧保持
+        PlayerSettingsSavedData finalData = PlayerSettingsSavedData.load(saved.save(new CompoundTag()));
+        check(finalData.isSelfTalkMaidDisabled(PLAYER, MAID_A)
+                        && !finalData.isInterChatMaidDisabled(PLAYER, MAID_B)
+                        && !finalData.isSelfTalkMaidListTakenOver(PLAYER),
+                "最终结果应稳定持久化");
+    }
+
+    /** 6. 旧数据非法：不部分写入、保留旧键（布尔为字符串 / 名单元素非 UUID / 名单类型错误） */
     private static void invalidOldDataNoPartialWrite() {
         PlayerSettingsSavedData data = PlayerSettingsSavedData.load(new CompoundTag());
         // 旧布尔是字符串
@@ -164,7 +222,7 @@ public final class PlayerSettingsMigrationTest {
         check(data4.getSelfTalkEnabled(PLAYER), "元素类型错误的旧名单应整组保留不迁移");
     }
 
-    /** 6. 空名单外层键：按无有效数据处理，迁移照常进行 */
+    /** 7. 空名单外层键：按无有效数据处理，迁移照常进行 */
     private static void emptyListOuterKey() {
         CompoundTag stored = new CompoundTag();
         CompoundTag overrides = new CompoundTag();

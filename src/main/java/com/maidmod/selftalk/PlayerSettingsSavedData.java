@@ -41,6 +41,14 @@ public final class PlayerSettingsSavedData extends SavedData {
     private final Map<String, Tag> selfTalkMaidOverridesRaw = new HashMap<>();
     /** 互聊名单损坏条目的原始 NBT（语义同上） */
     private final Map<String, Tag> interChatMaidOverridesRaw = new HashMap<>();
+    /**
+     * 自话名单已被显式输入接管的玩家（损坏名单被单只 setter 覆盖时置位，随存档持久化）：
+     * 迁移见此标记按「有效新组优先」处理——只清洗旧键，不得把旧名单重新灌回；
+     * 旧键清洗后由迁移解除标记。否则显式清空到空名单会退回「尚无新数据」，下次登录被旧值覆盖。
+     */
+    private final Map<String, Boolean> selfTalkMaidListTakenOver = new HashMap<>();
+    /** 互聊名单显式接管标记（语义同自话） */
+    private final Map<String, Boolean> interChatMaidListTakenOver = new HashMap<>();
     /** 睡觉时安静全局开关（缺失 = true 安静；极性与上相反） */
     private final Map<String, Boolean> sleepQuietEnabled = new HashMap<>();
     /** 睡觉时安静单只名单（值恒 true 安静项，仅全局关闭时生效） */
@@ -128,9 +136,11 @@ public final class PlayerSettingsSavedData extends SavedData {
         // 自话/互聊两组走严格读取：空名单 = 无有效数据；损坏条目整条保留原始 NBT 并标记迁移受阻
         readMaidListStrict(tag, "selfTalkMaidOverrides", data.selfTalkMaidOverrides,
                 data.selfTalkMaidOverridesRaw);
+        readGlobal(tag, "selfTalkMaidListTakenOver", data.selfTalkMaidListTakenOver);
         readGlobal(tag, "interChatEnabled", data.interChatEnabled);
         readMaidListStrict(tag, "interChatMaidOverrides", data.interChatMaidOverrides,
                 data.interChatMaidOverridesRaw);
+        readGlobal(tag, "interChatMaidListTakenOver", data.interChatMaidListTakenOver);
         readGlobal(tag, "sleepQuietEnabled", data.sleepQuietEnabled);
         readMaidList(tag, "sleepQuietMaidOverrides", data.sleepQuietMaidOverrides);
         readStringGlobal(tag, "customPromptGlobal", data.customPromptGlobal);
@@ -163,8 +173,10 @@ public final class PlayerSettingsSavedData extends SavedData {
     public CompoundTag save(CompoundTag tag) {
         writeGlobal(tag, "selfTalkEnabled", selfTalkEnabled);
         writeMaidList(tag, "selfTalkMaidOverrides", selfTalkMaidOverrides, selfTalkMaidOverridesRaw);
+        writeGlobal(tag, "selfTalkMaidListTakenOver", selfTalkMaidListTakenOver);
         writeGlobal(tag, "interChatEnabled", interChatEnabled);
         writeMaidList(tag, "interChatMaidOverrides", interChatMaidOverrides, interChatMaidOverridesRaw);
+        writeGlobal(tag, "interChatMaidListTakenOver", interChatMaidListTakenOver);
         writeGlobal(tag, "sleepQuietEnabled", sleepQuietEnabled);
         writeMaidList(tag, "sleepQuietMaidOverrides", sleepQuietMaidOverrides);
         writeStringGlobal(tag, "customPromptGlobal", customPromptGlobal);
@@ -223,9 +235,17 @@ public final class PlayerSettingsSavedData extends SavedData {
     /**
      * 写自话单只关闭项：显式新输入替换该玩家的损坏名单并解除迁移受阻标记
      * （单独改变全局开关不清除损坏名单）。
+     * <p>
+     * 替换损坏名单时同时置「已接管」标记：player.dat 里保留的旧迁移数据尚未删除，
+     * 若没有该标记，显式清空到空名单后 {@code hasSelfTalkData} 会退回 false，
+     * 下次登录的迁移会把旧名单重新灌回、覆盖玩家刚做的操作。
      */
     public void setSelfTalkMaidDisabled(UUID playerUuid, UUID maidUuid, boolean disabled) {
-        selfTalkMaidOverridesRaw.remove(playerUuid.toString());
+        String key = playerUuid.toString();
+        if (selfTalkMaidOverridesRaw.remove(key) != null) {
+            selfTalkMaidListTakenOver.put(key, true);
+            setDirty();
+        }
         setMaidItem(selfTalkMaidOverrides, playerUuid, maidUuid, disabled, false);
     }
 
@@ -235,7 +255,11 @@ public final class PlayerSettingsSavedData extends SavedData {
 
     /** 写互聊单只关闭项：显式新输入替换损坏名单并解除迁移受阻标记（语义同自话） */
     public void setInterChatMaidDisabled(UUID playerUuid, UUID maidUuid, boolean disabled) {
-        interChatMaidOverridesRaw.remove(playerUuid.toString());
+        String key = playerUuid.toString();
+        if (interChatMaidOverridesRaw.remove(key) != null) {
+            interChatMaidListTakenOver.put(key, true);
+            setDirty();
+        }
         setMaidItem(interChatMaidOverrides, playerUuid, maidUuid, disabled, false);
     }
 
@@ -662,16 +686,45 @@ public final class PlayerSettingsSavedData extends SavedData {
         setDirty();
     }
 
-    /** 自话组是否已有该玩家条目（迁移幂等判定：只认可已有全局键或非空有效名单，空名单与损坏条目不计入） */
+    /**
+     * 自话组是否已有该玩家条目（迁移幂等判定：只认可已有全局键、非空有效名单或已显式接管，
+     * 空名单与损坏条目不计入）。显式接管视为已有数据，迁移据此只清洗旧键而不回灌旧名单。
+     */
     public boolean hasSelfTalkData(UUID playerUuid) {
         String key = playerUuid.toString();
-        return selfTalkEnabled.containsKey(key) || selfTalkMaidOverrides.containsKey(key);
+        return selfTalkEnabled.containsKey(key) || selfTalkMaidOverrides.containsKey(key)
+                || selfTalkMaidListTakenOver.containsKey(key);
     }
 
     /** 互聊组是否已有该玩家条目（迁移幂等判定：语义同自话） */
     public boolean hasInterChatData(UUID playerUuid) {
         String key = playerUuid.toString();
-        return interChatEnabled.containsKey(key) || interChatMaidOverrides.containsKey(key);
+        return interChatEnabled.containsKey(key) || interChatMaidOverrides.containsKey(key)
+                || interChatMaidListTakenOver.containsKey(key);
+    }
+
+    /** 该玩家自话名单是否已被显式输入接管（旧迁移数据尚未清洗；迁移清洗后解除） */
+    public boolean isSelfTalkMaidListTakenOver(UUID playerUuid) {
+        return selfTalkMaidListTakenOver.containsKey(playerUuid.toString());
+    }
+
+    /** 该玩家互聊名单是否已被显式输入接管（语义同自话） */
+    public boolean isInterChatMaidListTakenOver(UUID playerUuid) {
+        return interChatMaidListTakenOver.containsKey(playerUuid.toString());
+    }
+
+    /** 旧迁移数据已清洗：解除自话名单的显式接管标记 */
+    public void clearSelfTalkMaidListTakenOver(UUID playerUuid) {
+        if (selfTalkMaidListTakenOver.remove(playerUuid.toString()) != null) {
+            setDirty();
+        }
+    }
+
+    /** 旧迁移数据已清洗：解除互聊名单的显式接管标记 */
+    public void clearInterChatMaidListTakenOver(UUID playerUuid) {
+        if (interChatMaidListTakenOver.remove(playerUuid.toString()) != null) {
+            setDirty();
+        }
     }
 
     /** 该玩家自话名单是否处于损坏保留态（迁移受阻；显式单只名单写入后解除） */
