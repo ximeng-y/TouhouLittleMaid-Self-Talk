@@ -84,6 +84,26 @@ public final class PlayerSettingsSavedData extends SavedData {
      * 恢复继承只能删条目；内层表清空后删外层键。
      */
     private final Map<String, Map<String, Boolean>> prebuiltReuseMaidOverrides = new HashMap<>();
+    /**
+     * 预制复用服务器默认最低可用条数（缺失 = {@link PrebuiltReuseParameters#DEFAULT_MIN_ELIGIBLE_ENTRIES}）。
+     * <p>
+     * issue #108 起改由世界设置承载；旧 TOML 的 {@code minEligibleEntries} 不再读取，也不用于初始化。
+     */
+    private int prebuiltReuseServerMinEligible = PrebuiltReuseParameters.DEFAULT_MIN_ELIGIBLE_ENTRIES;
+    /** 预制复用服务器默认使用概率（缺失 = 缺省值） */
+    private int prebuiltReuseServerHitChance = PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT;
+    /** 是否允许玩家自定义预制复用参数（缺失 = false 不允许，玩家一律跟随服务器） */
+    private boolean prebuiltReusePlayerParametersAllowed = false;
+    /**
+     * 玩家「跟随服务器默认参数」状态：玩家 UUID -> false（仅存<b>取消跟随</b>项，缺失 = true 跟随）。
+     * <p>
+     * 管理员撤回「允许个人参数」时整表清空——撤权一次性完成，不依赖逐次匹配或登录修复。
+     */
+    private final Map<String, Boolean> prebuiltReuseFollowServer = new HashMap<>();
+    /** 玩家个人最低可用条数：玩家 UUID -> 整数（缺失 = 缺省值；两项独立保存） */
+    private final Map<String, Integer> prebuiltReusePlayerMinEligible = new HashMap<>();
+    /** 玩家个人使用概率：玩家 UUID -> 整数（缺失 = 缺省值；两项独立保存） */
+    private final Map<String, Integer> prebuiltReusePlayerHitChance = new HashMap<>();
 
     private PlayerSettingsSavedData() {
     }
@@ -112,6 +132,19 @@ public final class PlayerSettingsSavedData extends SavedData {
         readStringGlobal(tag, "historyContextModes", data.historyContextModes);
         readGlobal(tag, "prebuiltReuseEnabled", data.prebuiltReuseEnabled);
         readMaidList(tag, "prebuiltReuseMaidOverrides", data.prebuiltReuseMaidOverrides);
+        // issue #108：参数分组。旧存档缺键时保留字段初始值（固定缺省），不从 TOML 迁移
+        data.prebuiltReuseServerMinEligible = readIntOrDefault(tag, "prebuiltReuseServerMinEligible",
+                PrebuiltReuseParameters.DEFAULT_MIN_ELIGIBLE_ENTRIES, PrebuiltReuseParameters.MIN_ELIGIBLE_MIN,
+                PrebuiltReuseParameters.MIN_ELIGIBLE_MAX);
+        data.prebuiltReuseServerHitChance = readIntOrDefault(tag, "prebuiltReuseServerHitChance",
+                PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT, PrebuiltReuseParameters.HIT_CHANCE_MIN,
+                PrebuiltReuseParameters.HIT_CHANCE_MAX);
+        data.prebuiltReusePlayerParametersAllowed = readBoolean(tag, "prebuiltReusePlayerParametersAllowed", false);
+        readBooleanMap(tag, "prebuiltReuseFollowServer", data.prebuiltReuseFollowServer);
+        readIntMap(tag, "prebuiltReusePlayerMinEligible", data.prebuiltReusePlayerMinEligible,
+                PrebuiltReuseParameters.MIN_ELIGIBLE_MIN, PrebuiltReuseParameters.MIN_ELIGIBLE_MAX);
+        readIntMap(tag, "prebuiltReusePlayerHitChance", data.prebuiltReusePlayerHitChance,
+                PrebuiltReuseParameters.HIT_CHANCE_MIN, PrebuiltReuseParameters.HIT_CHANCE_MAX);
         return data;
     }
 
@@ -133,6 +166,13 @@ public final class PlayerSettingsSavedData extends SavedData {
         writeStringGlobal(tag, "historyContextModes", historyContextModes);
         writeGlobal(tag, "prebuiltReuseEnabled", prebuiltReuseEnabled);
         writeMaidList(tag, "prebuiltReuseMaidOverrides", prebuiltReuseMaidOverrides);
+        // issue #108 参数分组：标量固定写出（缺省值也写，读侧另有缺省兜底）；玩家表只存非缺省项
+        tag.putInt("prebuiltReuseServerMinEligible", prebuiltReuseServerMinEligible);
+        tag.putInt("prebuiltReuseServerHitChance", prebuiltReuseServerHitChance);
+        tag.putBoolean("prebuiltReusePlayerParametersAllowed", prebuiltReusePlayerParametersAllowed);
+        writeBooleanGlobal(tag, "prebuiltReuseFollowServer", prebuiltReuseFollowServer);
+        writeIntGlobal(tag, "prebuiltReusePlayerMinEligible", prebuiltReusePlayerMinEligible);
+        writeIntGlobal(tag, "prebuiltReusePlayerHitChance", prebuiltReusePlayerHitChance);
         return tag;
     }
 
@@ -320,6 +360,124 @@ public final class PlayerSettingsSavedData extends SavedData {
                 prebuiltReuseMaidOverrides.put(playerKey, inner);
             }
             inner.put(maidKey, override);
+        }
+        setDirty();
+    }
+
+    // ===== 预制复用匹配参数（issue #108，世界级默认 + 受控玩家覆盖） =====
+
+    /** 服务器默认最低可用条数 */
+    public int getPrebuiltReuseServerMinEligible() {
+        return prebuiltReuseServerMinEligible;
+    }
+
+    /** 写服务器默认最低可用条数（值必须已通过范围校验；实际变更才置脏） */
+    public void setPrebuiltReuseServerMinEligible(int value) {
+        if (prebuiltReuseServerMinEligible == value) {
+            return;
+        }
+        prebuiltReuseServerMinEligible = value;
+        setDirty();
+    }
+
+    /** 服务器默认使用概率 */
+    public int getPrebuiltReuseServerHitChance() {
+        return prebuiltReuseServerHitChance;
+    }
+
+    /** 写服务器默认使用概率（值必须已通过范围校验；实际变更才置脏） */
+    public void setPrebuiltReuseServerHitChance(int value) {
+        if (prebuiltReuseServerHitChance == value) {
+            return;
+        }
+        prebuiltReuseServerHitChance = value;
+        setDirty();
+    }
+
+    /** 是否允许玩家自定义预制复用参数 */
+    public boolean isPrebuiltReusePlayerParametersAllowed() {
+        return prebuiltReusePlayerParametersAllowed;
+    }
+
+    /**
+     * 写「允许玩家自定义参数」：关闭时<b>同一次操作内</b>清空整张「玩家取消跟随」表
+     * （覆盖所有已存玩家，含离线玩家，不遍历在线实体），但<b>保留</b>两张个人数值表——
+     * 重新开放权限只改权限布尔值，不恢复任何玩家的取消跟随状态。
+     */
+    public void setPrebuiltReusePlayerParametersAllowed(boolean allowed) {
+        if (prebuiltReusePlayerParametersAllowed == allowed) {
+            return;
+        }
+        prebuiltReusePlayerParametersAllowed = allowed;
+        if (!allowed) {
+            prebuiltReuseFollowServer.clear();
+        }
+        setDirty();
+    }
+
+    /** 玩家是否跟随服务器默认参数（缺失 = true 跟随；只存取消跟单项） */
+    public boolean isPrebuiltReuseFollowServer(UUID playerUuid) {
+        return prebuiltReuseFollowServer.getOrDefault(playerUuid.toString(), true);
+    }
+
+    /** 玩家是否明确取消跟随（只在「允许个人参数」时才有意义；撤权时整表清空） */
+    public boolean hasPrebuiltReusePersonalOverride(UUID playerUuid) {
+        return !isPrebuiltReuseFollowServer(playerUuid);
+    }
+
+    /**
+     * 写跟随状态：跟随 = 删键（回到缺省），取消跟随 = 存 false。
+     * 值未变化时不动存档。
+     */
+    public void setPrebuiltReuseFollowServer(UUID playerUuid, boolean follow) {
+        String key = playerUuid.toString();
+        boolean current = isPrebuiltReuseFollowServer(playerUuid);
+        if (current == follow) {
+            return;
+        }
+        if (follow) {
+            prebuiltReuseFollowServer.remove(key);
+        } else {
+            prebuiltReuseFollowServer.put(key, false);
+        }
+        setDirty();
+    }
+
+    /** 玩家个人最低可用条数（缺失 = 缺省值） */
+    public int getPrebuiltReusePlayerMinEligible(UUID playerUuid) {
+        return prebuiltReusePlayerMinEligible.getOrDefault(playerUuid.toString(),
+                PrebuiltReuseParameters.DEFAULT_MIN_ELIGIBLE_ENTRIES);
+    }
+
+    /** 写玩家个人最低可用条数：等于缺省值时删键（仅存非缺省项）；实际变更才置脏 */
+    public void setPrebuiltReusePlayerMinEligible(UUID playerUuid, int value) {
+        setIntItem(prebuiltReusePlayerMinEligible, playerUuid, value,
+                PrebuiltReuseParameters.DEFAULT_MIN_ELIGIBLE_ENTRIES);
+    }
+
+    /** 玩家个人使用概率（缺失 = 缺省值） */
+    public int getPrebuiltReusePlayerHitChance(UUID playerUuid) {
+        return prebuiltReusePlayerHitChance.getOrDefault(playerUuid.toString(),
+                PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT);
+    }
+
+    /** 写玩家个人使用概率：等于缺省值时删键（仅存非缺省项）；实际变更才置脏 */
+    public void setPrebuiltReusePlayerHitChance(UUID playerUuid, int value) {
+        setIntItem(prebuiltReusePlayerHitChance, playerUuid, value,
+                PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT);
+    }
+
+    private void setIntItem(Map<String, Integer> map, UUID playerUuid, int value, int defaultValue) {
+        String key = playerUuid.toString();
+        Integer current = map.get(key);
+        Integer target = value == defaultValue ? null : value;
+        if (java.util.Objects.equals(current, target)) {
+            return;
+        }
+        if (target == null) {
+            map.remove(key);
+        } else {
+            map.put(key, target);
         }
         setDirty();
     }
@@ -624,5 +782,58 @@ public final class PlayerSettingsSavedData extends SavedData {
             }
             target.put(playerKey, inner);
         }
+    }
+
+    /** 顶层整数读：键缺失或越界一律回退缺省值（旧存档 / 手改存档不吃进非法值） */
+    private static int readIntOrDefault(CompoundTag tag, String key, int defaultValue, int min, int max) {
+        if (!tag.contains(key)) {
+            return defaultValue;
+        }
+        int value = tag.getInt(key);
+        return value >= min && value <= max ? value : defaultValue;
+    }
+
+    /** 顶层布尔读：键缺失时回退缺省值 */
+    private static boolean readBoolean(CompoundTag tag, String key, boolean defaultValue) {
+        return tag.contains(key) ? tag.getBoolean(key) : defaultValue;
+    }
+
+    /** 玩家布尔表读：只认显式 false 项（跟随是缺省，不存 true） */
+    private static void readBooleanMap(CompoundTag tag, String key, Map<String, Boolean> target) {
+        CompoundTag sub = tag.getCompound(key);
+        for (String k : sub.getAllKeys()) {
+            if (!sub.getBoolean(k)) {
+                target.put(k, false);
+            }
+        }
+    }
+
+    /** 玩家整数表读：越界项直接丢弃（不写入目标表，回落缺省值） */
+    private static void readIntMap(CompoundTag tag, String key, Map<String, Integer> target, int min, int max) {
+        CompoundTag sub = tag.getCompound(key);
+        for (String k : sub.getAllKeys()) {
+            int value = sub.getInt(k);
+            if (value >= min && value <= max) {
+                target.put(k, value);
+            }
+        }
+    }
+
+    /** 玩家布尔表序列化（只存取消跟单项） */
+    private static void writeBooleanGlobal(CompoundTag tag, String key, Map<String, Boolean> map) {
+        CompoundTag sub = new CompoundTag();
+        for (Map.Entry<String, Boolean> e : map.entrySet()) {
+            sub.putBoolean(e.getKey(), e.getValue());
+        }
+        tag.put(key, sub);
+    }
+
+    /** 玩家整数表序列化 */
+    private static void writeIntGlobal(CompoundTag tag, String key, Map<String, Integer> map) {
+        CompoundTag sub = new CompoundTag();
+        for (Map.Entry<String, Integer> e : map.entrySet()) {
+            sub.putInt(e.getKey(), e.getValue());
+        }
+        tag.put(key, sub);
     }
 }
