@@ -4,6 +4,8 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatMana
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.summary.HistorySummaryManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.AutonomousChatHistory;
+import com.maidmod.selftalk.AutonomousChatHistoryHost;
 import com.maidmod.selftalk.AutonomousChatHistoryMigration;
 import com.maidmod.selftalk.CompressionHistoryPolicy;
 import com.maidmod.selftalk.HistoryRetrievalCache;
@@ -67,7 +69,15 @@ public abstract class HistorySummaryManagerMixin {
         EntityMaid maid = manager.getMaid();
         SelfTalkProvenance.removeByMessages(maid, snapshot);
         if (maid != null && !maid.level().isClientSide()) {
-            maid.level().getServer().execute(() -> HistoryRetrievalCache.invalidate(maid));
+            maid.level().getServer().execute(() -> {
+                // 压缩已从队尾删掉旧消息：旁路顺序号对死消息的引用随之修剪，
+                // 与检索缓存失效在同一主线程任务里完成（响应线程不直接动实体数据）
+                AutonomousChatHistory history = AutonomousChatHistoryHost.of(maid);
+                if (history != null) {
+                    history.pruneOrderMetadata(manager.getHistory().getDeque());
+                }
+                HistoryRetrievalCache.invalidate(maid);
+            });
         }
     }
 }
