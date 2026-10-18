@@ -2,6 +2,7 @@ package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.attachment.AttachmentType;
 import org.apache.commons.lang3.StringUtils;
 
@@ -523,8 +524,157 @@ public final class PlayerSettingsStore {
         return override != null ? override : isPrebuiltReuseEnabled(server, ownerUuid);
     }
 
-    // ===== 共用读写 =====
+    // ===== 预制复用匹配参数（issue #108：世界级默认 + 受控玩家覆盖） =====
+    //
+    // 三个概念严格分开：
+    //   1. 复用开关        —— isPrebuiltReuseEnabledForMaid（原有）；
+    //   2. 玩家配置总闸    —— Config.PLAYER_OPTION_ENABLED（原有，不清除已存偏好）；
+    //   3. 个人参数权限    —— 只决定参数来源；关闭它不关闭复用功能本身。
+    // 管理员编辑服务器参数既不受「允许个人参数」限制，也不因总闸关闭而失去能力。
 
+    /** 服务器默认最低可用条数（读路径带范围兜底：存档里的越界值不吃进运行期） */
+    public static int getPrebuiltReuseServerMinEligible(MinecraftServer server) {
+        int value = server.overworld().getData(SelfTalkAttachments.LEVEL_PREBUILT_REUSE_SERVER_MIN_ELIGIBLE);
+        return PrebuiltReuseParameters.isValidMinEligibleEntries(value)
+                ? value : PrebuiltReuseParameters.DEFAULT_MIN_ELIGIBLE_ENTRIES;
+    }
+
+    /** 写服务器默认最低可用条数（调用方负责先做范围校验与管理员校验） */
+    public static void setPrebuiltReuseServerMinEligible(MinecraftServer server, int value) {
+        server.overworld().setData(SelfTalkAttachments.LEVEL_PREBUILT_REUSE_SERVER_MIN_ELIGIBLE, value);
+    }
+
+    /** 服务器默认使用概率 */
+    public static int getPrebuiltReuseServerHitChance(MinecraftServer server) {
+        int value = server.overworld().getData(SelfTalkAttachments.LEVEL_PREBUILT_REUSE_SERVER_HIT_CHANCE);
+        return PrebuiltReuseParameters.isValidHitChancePercent(value)
+                ? value : PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT;
+    }
+
+    /** 写服务器默认使用概率（调用方负责先做范围校验与管理员校验） */
+    public static void setPrebuiltReuseServerHitChance(MinecraftServer server, int value) {
+        server.overworld().setData(SelfTalkAttachments.LEVEL_PREBUILT_REUSE_SERVER_HIT_CHANCE, value);
+    }
+
+    /** 是否允许玩家自定义预制复用参数 */
+    public static boolean arePrebuiltReusePlayerParametersAllowed(MinecraftServer server) {
+        return server.overworld().getData(SelfTalkAttachments.LEVEL_PREBUILT_REUSE_PLAYER_PARAMETERS_ALLOWED);
+    }
+
+    /**
+     * 写「允许玩家自定义参数」：关闭时在<b>同一服务端主线程操作</b>中清空整张取消跟随表
+     * （覆盖所有已存玩家，含离线玩家，不遍历在线实体），但保留两张个人数值表——
+     * 重新开放权限只改权限布尔值，不恢复任何玩家的取消跟随状态。
+     */
+    public static void setPrebuiltReusePlayerParametersAllowed(MinecraftServer server, boolean allowed) {
+        server.overworld().setData(SelfTalkAttachments.LEVEL_PREBUILT_REUSE_PLAYER_PARAMETERS_ALLOWED, allowed);
+        if (!allowed) {
+            server.overworld().setData(SelfTalkAttachments.LEVEL_PREBUILT_REUSE_FOLLOW_SERVER,
+                    new HashMap<String, Boolean>());
+        }
+    }
+
+    /** 玩家是否跟随服务器默认参数（缺省 true = 跟随） */
+    public static boolean isPrebuiltReuseFollowingServer(MinecraftServer server, UUID playerUuid) {
+        if (playerUuid == null) {
+            return true;
+        }
+        return getMap(server, SelfTalkAttachments.LEVEL_PREBUILT_REUSE_FOLLOW_SERVER)
+                .getOrDefault(playerUuid.toString(), true);
+    }
+
+    /** 写跟随状态（跟随 = 删键，取消跟随 = 存 false） */
+    public static void setPrebuiltReuseFollowingServer(MinecraftServer server, UUID playerUuid, boolean follow) {
+        if (playerUuid == null) {
+            return;
+        }
+        setGlobalBool(server, SelfTalkAttachments.LEVEL_PREBUILT_REUSE_FOLLOW_SERVER, playerUuid, follow, true);
+    }
+
+    /** 玩家个人最低可用条数（**已存偏好**，不代表当前有效值） */
+    public static int getPrebuiltReusePlayerMinEligible(MinecraftServer server, UUID playerUuid) {
+        if (playerUuid == null) {
+            return PrebuiltReuseParameters.DEFAULT_MIN_ELIGIBLE_ENTRIES;
+        }
+        Integer value = getIntMap(server, SelfTalkAttachments.LEVEL_PREBUILT_REUSE_PLAYER_MIN_ELIGIBLE)
+                .get(playerUuid.toString());
+        return value != null && PrebuiltReuseParameters.isValidMinEligibleEntries(value)
+                ? value : PrebuiltReuseParameters.DEFAULT_MIN_ELIGIBLE_ENTRIES;
+    }
+
+    /** 写玩家个人最低可用条数（调用方负责范围校验与「已取消跟随」校验） */
+    public static void setPrebuiltReusePlayerMinEligible(MinecraftServer server, UUID playerUuid, int value) {
+        if (playerUuid == null) {
+            return;
+        }
+        setIntItem(server, SelfTalkAttachments.LEVEL_PREBUILT_REUSE_PLAYER_MIN_ELIGIBLE, playerUuid, value,
+                PrebuiltReuseParameters.DEFAULT_MIN_ELIGIBLE_ENTRIES);
+    }
+
+    /** 玩家个人使用概率（**已存偏好**，不代表当前有效值） */
+    public static int getPrebuiltReusePlayerHitChance(MinecraftServer server, UUID playerUuid) {
+        if (playerUuid == null) {
+            return PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT;
+        }
+        Integer value = getIntMap(server, SelfTalkAttachments.LEVEL_PREBUILT_REUSE_PLAYER_HIT_CHANCE)
+                .get(playerUuid.toString());
+        return value != null && PrebuiltReuseParameters.isValidHitChancePercent(value)
+                ? value : PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT;
+    }
+
+    /** 写玩家个人使用概率（调用方负责范围校验与「已取消跟随」校验） */
+    public static void setPrebuiltReusePlayerHitChance(MinecraftServer server, UUID playerUuid, int value) {
+        if (playerUuid == null) {
+            return;
+        }
+        setIntItem(server, SelfTalkAttachments.LEVEL_PREBUILT_REUSE_PLAYER_HIT_CHANCE, playerUuid, value,
+                PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT);
+    }
+
+    /**
+     * 玩家<b>有效</b>预制复用参数：服务器未开放个人参数、或玩家选择跟随时取服务器值；
+     * 只有「已开放 + 玩家明确取消跟随」才取个人值。两项各自独立判定，互不覆盖。
+     */
+    public static PrebuiltReuseParameters getPrebuiltReuseParameters(MinecraftServer server, UUID playerUuid) {
+        int serverMin = getPrebuiltReuseServerMinEligible(server);
+        int serverChance = getPrebuiltReuseServerHitChance(server);
+        if (playerUuid == null || !arePrebuiltReusePlayerParametersAllowed(server)
+                || isPrebuiltReuseFollowingServer(server, playerUuid)) {
+            return new PrebuiltReuseParameters(serverMin, serverChance);
+        }
+        return new PrebuiltReuseParameters(getPrebuiltReusePlayerMinEligible(server, playerUuid),
+                getPrebuiltReusePlayerHitChance(server, playerUuid));
+    }
+
+    /**
+     * 女仆的有效预制复用参数：按本只女仆的<b>主人 UUID</b> 解析，不查在线玩家实体
+     * （主人离线同样生效）；无主女仆用服务器默认值。
+     */
+    public static PrebuiltReuseParameters getPrebuiltReuseParametersForMaid(MinecraftServer server, EntityMaid maid) {
+        UUID ownerUuid = maid.getOwnerUUID();
+        if (ownerUuid == null) {
+            return new PrebuiltReuseParameters(getPrebuiltReuseServerMinEligible(server),
+                    getPrebuiltReuseServerHitChance(server));
+        }
+        return getPrebuiltReuseParameters(server, ownerUuid);
+    }
+
+    /**
+     * 是否具备服务器参数管理权限：OP 权限等级 ≥ 2，或单人世界的本地房主。
+     * <p>
+     * 每次调用都重新判定，不缓存——权限可能在运行时变化。
+     */
+    public static boolean isPrebuiltReuseAdmin(ServerPlayer player) {
+        if (player == null) {
+            return false;
+        }
+        if (player.hasPermissions(2)) {
+            return true;
+        }
+        return player.server.isSingleplayerOwner(player.getGameProfile());
+    }
+
+    // ===== 共用读写 =====
     /** 全局布尔读写（缺省值 defaultEnabled 时移除键，值不等于缺省才落盘） */
     private static void setGlobalBool(MinecraftServer server,
                                       Supplier<AttachmentType<Map<String, Boolean>>> type,
@@ -589,6 +739,30 @@ public final class PlayerSettingsStore {
     private static Map<String, String> getStringMap(MinecraftServer server,
                                                     Supplier<AttachmentType<Map<String, String>>> type) {
         return server.overworld().getExistingData(type).orElse(Map.of());
+    }
+
+    /** 顶层整数 map 读取（view-only，缺省空 map；不安装默认壳） */
+    private static Map<String, Integer> getIntMap(MinecraftServer server,
+                                                  Supplier<AttachmentType<Map<String, Integer>>> type) {
+        return server.overworld().getExistingData(type).orElse(Map.of());
+    }
+
+    /** 玩家整数项写：目标值等于缺省时删键（仅存非缺省项），实际变更才回写附件 */
+    private static void setIntItem(MinecraftServer server,
+                                   Supplier<AttachmentType<Map<String, Integer>>> type,
+                                   UUID playerUuid, int value, int defaultValue) {
+        Map<String, Integer> map = new HashMap<>(server.overworld().getData(type));
+        String key = playerUuid.toString();
+        Integer target = value == defaultValue ? null : value;
+        if (java.util.Objects.equals(map.get(key), target)) {
+            return;
+        }
+        if (target == null) {
+            map.remove(key);
+        } else {
+            map.put(key, target);
+        }
+        server.overworld().setData(type, map);
     }
 
     /** 某玩家单只名单当前条数（容量上限检查用；名单只存非默认项，无则 0） */

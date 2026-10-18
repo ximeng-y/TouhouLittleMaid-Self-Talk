@@ -173,6 +173,47 @@ public final class SelfTalkAttachments {
                     SelfTalkAttachments::buildLevelMaidOverrides);
 
     /**
+     * 预制复用服务器默认最低可用条数（Level 标量，issue #108）。
+     * <p>
+     * 缺失时由附件缺省值给出 {@link PrebuiltReuseParameters#DEFAULT_MIN_ELIGIBLE_ENTRIES}；
+     * 旧 TOML 的同名项不再读取，也不用于初始化。
+     */
+    public static final Supplier<AttachmentType<Integer>> LEVEL_PREBUILT_REUSE_SERVER_MIN_ELIGIBLE =
+            ATTACHMENT_TYPES.register("level_prebuilt_reuse_server_min_eligible",
+                    () -> AttachmentType.builder(() -> PrebuiltReuseParameters.DEFAULT_MIN_ELIGIBLE_ENTRIES)
+                            .serialize(Codec.INT).build());
+
+    /** 预制复用服务器默认使用概率（Level 标量） */
+    public static final Supplier<AttachmentType<Integer>> LEVEL_PREBUILT_REUSE_SERVER_HIT_CHANCE =
+            ATTACHMENT_TYPES.register("level_prebuilt_reuse_server_hit_chance",
+                    () -> AttachmentType.builder(() -> PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT)
+                            .serialize(Codec.INT).build());
+
+    /** 是否允许玩家自定义预制复用参数（Level 标量，缺失 = false） */
+    public static final Supplier<AttachmentType<Boolean>> LEVEL_PREBUILT_REUSE_PLAYER_PARAMETERS_ALLOWED =
+            ATTACHMENT_TYPES.register("level_prebuilt_reuse_player_parameters_allowed",
+                    () -> AttachmentType.builder(() -> false).serialize(Codec.BOOL).build());
+
+    /**
+     * 玩家「跟随服务器默认参数」状态（Level）：玩家 UUID -> false（仅存<b>取消跟随</b>项，缺失 = true）。
+     * 管理员撤回「允许个人参数」时整表清空。
+     */
+    public static final Supplier<AttachmentType<Map<String, Boolean>>> LEVEL_PREBUILT_REUSE_FOLLOW_SERVER =
+            ATTACHMENT_TYPES.register("level_prebuilt_reuse_follow_server",
+                    () -> AttachmentType.builder((Supplier<Map<String, Boolean>>) HashMap::new)
+                            .serialize(Codec.unboundedMap(Codec.STRING, Codec.BOOL)).build());
+
+    /** 玩家个人最低可用条数（Level）：玩家 UUID -> 整数；与概率两项独立保存 */
+    public static final Supplier<AttachmentType<Map<String, Integer>>> LEVEL_PREBUILT_REUSE_PLAYER_MIN_ELIGIBLE =
+            ATTACHMENT_TYPES.register("level_prebuilt_reuse_player_min_eligible",
+                    SelfTalkAttachments::buildIntMap);
+
+    /** 玩家个人使用概率（Level）：玩家 UUID -> 整数 */
+    public static final Supplier<AttachmentType<Map<String, Integer>>> LEVEL_PREBUILT_REUSE_PLAYER_HIT_CHANCE =
+            ATTACHMENT_TYPES.register("level_prebuilt_reuse_player_hit_chance",
+                    SelfTalkAttachments::buildIntMap);
+
+    /**
      * 女仆自话回复指纹集（来源判定用，挂女仆实体）。
      * <p>
      * 指纹 = (role, message, gameTime) 三元组拼接串。TLM 历史 deque 中自话回复与主人聊天回复
@@ -233,6 +274,13 @@ public final class SelfTalkAttachments {
         return AttachmentType.builder((Supplier<Map<String, Map<String, String>>>) HashMap::new)
                 .serialize(Codec.unboundedMap(Codec.STRING,
                         Codec.unboundedMap(Codec.STRING, Codec.STRING)))
+                .build();
+    }
+
+    /** Level 玩家整数表 builder：玩家 UUID -> 整数（issue #108 匹配参数） */
+    private static AttachmentType<Map<String, Integer>> buildIntMap() {
+        return AttachmentType.builder((Supplier<Map<String, Integer>>) HashMap::new)
+                .serialize(Codec.unboundedMap(Codec.STRING, Codec.INT))
                 .build();
     }
 
