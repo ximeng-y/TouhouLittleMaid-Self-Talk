@@ -19,7 +19,8 @@ import java.util.regex.Pattern;
  * TLM mixin 绑定目标自检入口（无测试框架依赖，直接 {@code main} 跑）。
  * <p>
  * 本 mod 的 mixin 以字符串绑定 TLM 方法名，其中 {@code SelfTalkTtsMixin}、
- * {@code SelfTalkSystemTtsMixin}、{@code InterChatToolLifecycleMixin} 绑定的 5 个目标是
+ * {@code SelfTalkSystemTtsMixin}、{@code InterChatToolLifecycleMixin}、
+ * {@code SelfTalkLateDisplayMixin} 绑定的 6 个目标是
  * javac 为 lambda 生成的合成方法（{@code lambda$方法名$序号}）：序号按 TLM 类内 lambda 出现
  * 顺序递增，TLM 换构建或升级后编号可能漂移（neoforge 线与 forge 线的 TLM artifact 在
  * {@code MaidAIChatManager} 上就已差一号）。字符串绑定在编译期不报错，漂移只会在运行期
@@ -32,7 +33,7 @@ import java.util.regex.Pattern;
  * 而常量池精确比对与 Mixin「按名字在目标类字节码中匹配」的表面完全一致——名字在，mixin 就命中。
  * <p>
  * 兼容边界：本类断言对应 TLM {@code 1.5.3-neoforge+mc1.21.1}（Modrinth）。若升级 TLM，
- * 必须同步复核三个 mixin 的 {@code method} 字符串并更新本类期望值；forge 线的对应自检
+ * 必须同步复核四个 mixin 的 {@code method} 字符串并更新本类期望值；forge 线的对应自检
  * 差异仅在 {@code lambda$onPlaySoundLocal} 的序号（forge 为 {@code $5}，本线为 {@code $4}）。
  * <p>
  * 覆盖边界：覆盖承载 lambda 绑定的四个宿主类（TTSCallback、MaidAIChatManager、LLMCallback、
@@ -40,6 +41,10 @@ import java.util.regex.Pattern;
  * （{@code addAssistantHistory}/{@code addToolHistory}，调用点 owner 为 MaidAIChatManager）
  * 与 SettingEditScreen 的 {@code drawMaid}/{@code saveConfig}/{@code mouseReleased} 命名绑定、
  * AIChatScreen 常量池里的 SettingEditScreen 构造引用（类引用 + 构造描述符，类级粒度）。
+ * LLMCallback 名单还包含 {@code SelfTalkLateDisplayMixin} 的延迟上屏 {@code @Inject} 目标
+ * （{@code lambda$onSuccess$1}），及其 {@code @Redirect} 的 {@code getTTSSite} 调用点约束
+ * （调用点在 {@code onSuccess} 内、指令 owner 为 MaidAIChatManager，方法本体声明在其父类
+ * MaidAIChatData，故名字与描述符断言在 LLMCallback 常量池）。
  * 其余 named 绑定宿主（MaidAIChatData、HistorySummaryManager、client 侧）不在覆盖范围，目标缺失时由
  * {@code maid_self_talk.mixins.json} 的 {@code defaultRequire: 1} 在启动期兜底报错。
  * <p>
@@ -76,13 +81,19 @@ public final class TlmMixinTargetTest {
                 "onSingleCall",
                 "lambda$executeSingleToolCall$5",
                 "lambda$onFunctionCall$2",
+                "lambda$onSuccess$1",
                 "refreshWaitingChatBubble",
                 "addToolResult",
                 "onFunctionCall",
                 "onSuccess",
                 "onFailure",
                 "addAssistantHistory",
-                "addToolHistory");
+                "addToolHistory",
+                // SelfTalkLateDisplayMixin 的 @Redirect：onSuccess 内 getTTSSite 调用点
+                // （指令 owner 为 MaidAIChatManager，方法本体声明在其父类 MaidAIChatData），
+                // 名字与描述符落在本类常量池
+                "getTTSSite",
+                "()Lcom/github/tartaricacid/touhoulittlemaid/ai/service/tts/TTSSite;");
         // 统一人设页：✎ 按钮 onPress lambda 内的 SettingEditScreen 构造重定向（NEW 目标：
         // 类引用 + 构造描述符；常量池是类级粒度，无法定位到单个方法，与 lambda 名存在检查配合使用），
         // 以及原版页上的布娃娃位置调整、隐藏输入框释放派发跳过与保存附带提交钩子

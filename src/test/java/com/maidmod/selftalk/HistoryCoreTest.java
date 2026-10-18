@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * 历史上下文模式纯文本内核的自检入口（不依赖 JUnit，也不依赖 Minecraft／TLM 类型）。
  * <p>
- * 覆盖计划 §8.2 中「分块与来源」「BM25」「JSON 与重试」三组检查——
+ * 覆盖「分块与来源」「BM25」「JSON 与重试」三组检查——
  * 这几组的实现全部落在 {@code history} 包与模式枚举上，可用 javac+java 直接运行。
  * <p>
  * 运行（工作根目录，JDK 17 或 21 均可；gson 用 TLM 依赖树里的 2.10.1）：

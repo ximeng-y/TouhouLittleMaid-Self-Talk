@@ -57,6 +57,7 @@ public final class EnvironmentContextRendererTest {
         notMergedAcrossMiddle();
         languageSwitchKeepsFactsAndTime();
         englishSecondPlural();
+        naturalEntryProductionDispatch();
         System.out.println("EnvironmentContextRendererTest passed: " + checks + " checks");
     }
 
@@ -355,6 +356,61 @@ public final class EnvironmentContextRendererTest {
                 "不足 20 tick 用刚才");
     }
 
+    /**
+     * 18. 生产分发 → 渲染链：直接调用 {@link EnvironmentContextRenderer#naturalEntry}
+     * （生产组装的统一分发口，与 {@code SelfTalkContexts} 同一份代码）再接 {@code assemble}。
+     * <p>
+     * 本组覆盖「生产分发 → 渲染」链；世界内采集（实体、天气实况）不在裸 JVM 自检范围。
+     */
+    private static void naturalEntryProductionDispatch() {
+        // 天气合法值：非 null 的 mergeable 条目，assemble 后含天气句子与从句
+        EnvironmentContextRenderer.Entry weather =
+                EnvironmentContextRenderer.naturalEntry("weather", "Raining", ContextLanguage.ZH);
+        check(weather != null && weather.mergeClause() != null, "合法天气应得到 mergeable 条目");
+        check(assemble(List.of(weather)).equals("当前世界天气为雨天。"),
+                "生产分发后的天气句，实际：" + assemble(List.of(weather)));
+        EnvironmentContextRenderer.Entry weatherEn =
+                EnvironmentContextRenderer.naturalEntry("weather", "Sunny", ContextLanguage.EN);
+        check(weatherEn != null && assemble(List.of(weatherEn)).equals("The world's weather is sunny."),
+                "生产分发走英文模板，实际：" + (weatherEn == null ? "null" : assemble(List.of(weatherEn))));
+
+        // 天气无法解析的取值：生产语义是返回 null（调用方回退 - label: value 原格式）
+        check(EnvironmentContextRenderer.naturalEntry("weather", "clear", ContextLanguage.ZH) == null,
+                "无法解析的天气取值应返回 null");
+
+        // 时间合法值：mergeable；时间与天气相邻两个 mergeable 条目经 assemble 合成一句
+        EnvironmentContextRenderer.Entry time =
+                EnvironmentContextRenderer.naturalEntry("game_time", "06:30", ContextLanguage.ZH);
+        check(time != null && time.mergeClause() != null, "合法时间应得到 mergeable 条目");
+        String merged = assemble(List.of(time, weather));
+        check(merged.equals("当前游戏时间是 06:30，世界天气为雨天。"), "相邻时间与天气应合句，实际：" + merged);
+
+        // 复杂列表条目：成品句子逐字保留（不反拆，物品名里的逗号与括号不被破坏）
+        String complexValue = "你附近的生物：minecraft:zombie（距你 3.5 格）；类型 minecraft:horse, 距你 12.0 格。";
+        EnvironmentContextRenderer.Entry complex =
+                EnvironmentContextRenderer.naturalEntry("nearby_entities", complexValue, ContextLanguage.ZH);
+        check(complex != null && complexValue.equals(complex.sentence()),
+                "复杂列表取值应逐字保留，实际：" + (complex == null ? "null" : complex.sentence()));
+
+        // 饰品条目：同样逐字保留
+        String accessoryValue = "Functional slots: " + EnvironmentContextRenderer.quote("Iron Ring", ContextLanguage.ZH)
+                + "x1; Cosmetic slots: Empty";
+        EnvironmentContextRenderer.Entry accessory = EnvironmentContextRenderer.naturalEntry(
+                EnvironmentContextOption.KEY_MAID_CURIOS, accessoryValue, ContextLanguage.ZH);
+        check(accessory != null && accessoryValue.equals(accessory.sentence()),
+                "饰品条目取值应逐字保留，实际：" + (accessory == null ? "null" : accessory.sentence()));
+
+        // 简单字段：交给 simpleField 成句
+        EnvironmentContextRenderer.Entry healthy =
+                EnvironmentContextRenderer.naturalEntry("healthy", "18.0 (max 20.0)", ContextLanguage.ZH);
+        check(healthy != null && assemble(List.of(healthy)).equals("你目前有 18.0 点生命值，上限为 20.0 点。"),
+                "简单字段经生产分发出句，实际：" + (healthy == null ? "null" : assemble(List.of(healthy))));
+
+        // 目录外未知 key：simpleField 不认识 → 整体返回 null（调用方保留原格式）
+        check(EnvironmentContextRenderer.naturalEntry("totally_unknown_key", "任意值", ContextLanguage.ZH) == null,
+                "目录外未知 key 应返回 null");
+    }
+
     // ===== 辅助 =====
 
     /** 以 key 走渲染器取句子并带上必要从句，模拟 SelfTalkContexts 的组装 */
@@ -362,6 +418,13 @@ public final class EnvironmentContextRendererTest {
         return entry(key, raw, ContextLanguage.ZH);
     }
 
+    /**
+     * 以 key 走渲染器取句子并带上必要从句，模拟 SelfTalkContexts 的组装。
+     * <p>
+     * 本 helper 是既有渲染单测的一部分，不走生产分发（无 complex/accessory 优先分支、
+     * simpleField 失败时兜底原值）；「生产分发 → 渲染」链已由第 18 组
+     * {@link #naturalEntryProductionDispatch} 直接调用生产本体覆盖。
+     */
     private static EnvironmentContextRenderer.Entry entry(String key, String raw, ContextLanguage lang) {
         if ("game_time".equals(key)) {
             return EnvironmentContextRenderer.Entry.mergeable(key,

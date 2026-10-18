@@ -292,7 +292,7 @@ public final class SelfTalkContexts {
                     // snapshot 只在自然语言模式下创建，「快照非空」就是「自然语言模式」——
                     // 旧 TLM 复杂条目正是靠这个判空继续按模式分流（普通模式一律走提供者字符串），
                     // 饰品两项不走本分支，它们两种模式都从 Source.ACCESSORY 那次采集取类型化结果
-                    String text = snapshot != null && EnvironmentContextCollector.isComplex(option.key())
+                    String text = snapshot != null && EnvironmentContextOption.isComplexKey(option.key())
                             ? EnvironmentContextCollector.render(snapshot, option.key(), lang)
                             : providerText(option.key(), maid);
                     if (text != null && !text.isBlank()) {
@@ -442,7 +442,7 @@ public final class SelfTalkContexts {
      * <p>
      * 取值后的去向分两条路，但要判定的事实完全一致（只走一遍遍历，不重复取提供者值）：
      * <ul>
-     *   <li>可自然语言化（{@link #naturalEntry} 认得该 key 的取值格式）：进条目表，按主题分段；</li>
+     *   <li>可自然语言化（{@link EnvironmentContextRenderer#naturalEntry} 认得该 key 的取值格式）：进条目表，按主题分段；</li>
      *   <li>否则（该功能关闭、其它 mod 覆盖过提供者、上游扩展项、目录外 key）：
      *       原样保留 {@code - label: value}，不猜测、不删项。</li>
      * </ul>
@@ -476,40 +476,11 @@ public final class SelfTalkContexts {
                 injectedSink.put(key, value);
                 String raw = "- %s: %s".formatted(context.label(), value);
                 EnvironmentContextRenderer.Entry entry =
-                        naturalLanguage && option != null ? naturalEntry(key, value, lang) : null;
+                        naturalLanguage && option != null
+                                ? EnvironmentContextRenderer.naturalEntry(key, value, lang) : null;
                 entries.add(entry != null ? entry : EnvironmentContextRenderer.Entry.raw(raw));
             }
         }
-    }
-
-    /**
-     * 把一项已取值的固定信息转成自然语言条目。
-     * <p>
-     * 复杂列表（已经由采集侧渲染成句子）直接成句；简单字段交给
-     * {@link EnvironmentContextRenderer#simpleField}；时间与天气额外带上从句，供相邻时合句。
-     *
-     * @return 条目；{@code null} 表示该取值无法自然语言化（调用方保留原格式）
-     */
-    private static EnvironmentContextRenderer.Entry naturalEntry(String key, String value, ContextLanguage lang) {
-        // 已经渲染成句子的两类：TLM 复杂列表（采集侧类型化快照）与饰品条目（本 mod 直接读取）。
-        // 两者的取值在自然语言模式下都是完整句子，再反拆会破坏物品名里的逗号与括号。
-        if (EnvironmentContextCollector.isComplex(key) || EnvironmentContextOption.isAccessoryKey(key)) {
-            return EnvironmentContextRenderer.Entry.of(key, value);
-        }
-        if ("game_time".equals(key)) {
-            String sentence = EnvironmentContextRenderer.gameTimeSentence(value, lang);
-            return sentence == null ? null
-                    : EnvironmentContextRenderer.Entry.mergeable(key, sentence,
-                    EnvironmentContextRenderer.gameTimeClause(value, lang));
-        }
-        if ("weather".equals(key)) {
-            String sentence = EnvironmentContextRenderer.weatherSentence(value, lang);
-            String clause = EnvironmentContextRenderer.weatherClause(value, lang);
-            return sentence == null || clause == null ? null
-                    : EnvironmentContextRenderer.Entry.mergeable(key, sentence, clause);
-        }
-        String sentence = EnvironmentContextRenderer.simpleField(key, value, lang);
-        return sentence == null ? null : EnvironmentContextRenderer.Entry.of(key, sentence);
     }
 
     /**
@@ -567,7 +538,7 @@ public final class SelfTalkContexts {
         List<EnvironmentContextRenderer.Entry> entries = new ArrayList<>();
         for (EnvironmentContextOption option : picked) {
             String value = rendered.get(option.key());
-            EnvironmentContextRenderer.Entry entry = naturalEntry(option.key(), value, lang);
+            EnvironmentContextRenderer.Entry entry = EnvironmentContextRenderer.naturalEntry(option.key(), value, lang);
             entries.add(entry != null ? entry : EnvironmentContextRenderer.Entry.raw(
                     "- %s: %s".formatted(EnvironmentContextSettings.labelOf(option.key()), value)));
         }
@@ -984,19 +955,6 @@ public final class SelfTalkContexts {
      */
     public static Set<String> fingerprintsForRetrieval(EntityMaid maid) {
         return SelfTalkProvenance.selfTalkFingerprints(maid);
-    }
-
-    /**
-     * 来源过滤并保留「可检索序列下标 → 原始历史区下标」的映射（检索模式的唯一入口）。
-     * <p>
-     * 过滤规则在 {@code history} 包单一实现；本方法只做消息映射与下标还原，
-     * 因此检索模式的来源口径与离线自检完全一致。
-     */
-    public static SelfTalkHistoryAssembler.SearchableIndices filterSearchable(EntityMaid maid,
-                                                                             List<LLMMessage> history) {
-        return SelfTalkHistoryAssembler.filterSearchable(
-                SelfTalkHistoryAssembler.toSearchableView(history),
-                SelfTalkProvenance.selfTalkFingerprints(maid));
     }
 
     /**
