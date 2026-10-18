@@ -65,10 +65,6 @@ public final class SelfTalkHandler {
     /** 自话闸门：下次允许自话放行的服务器 tick（仅服务端主线程访问；互聊发起者共用此闸门） */
     private static long nextSelfTalkAllowedTick = 0;
 
-    /** 被限流自话/互聊发起者的随机退避区间（tick）：8~15 秒，仅内部重试、不发请求 */
-    private static final int BACKOFF_MIN_TICKS = 8 * 20;
-    private static final int BACKOFF_MAX_TICKS = 15 * 20;
-
     /** 互聊候选均不可用（pending/无 AI）时的短退避（tick）：避免每 tick 重复 AABB 实体扫描 */
     private static final int RESPONDER_RETRY_TICKS = 2 * 20;
 
@@ -245,8 +241,7 @@ public final class SelfTalkHandler {
                         if (responder != null) {
                             if (!tryAcquireSelfTalkSlot(serverTick)) {
                                 // 共享闸门未放行：随机退避 8~15 秒再试，不发请求
-                                state.nextInterChatTriggerTick = serverTick + BACKOFF_MIN_TICKS
-                                        + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
+                                state.nextInterChatTriggerTick = serverTick + Config.randomIntervalTicks(8, 15);
                             } else {
                                 // 空闲立即派发、忙则顺延（dispatcher 内部处理），随后设置互聊冷却
                                 SelfTalkDispatcher.requestInterChatInitiator(maid, responder,
@@ -291,8 +286,7 @@ public final class SelfTalkHandler {
             }
             if (!tryAcquireSelfTalkSlot(serverTick)) {
                 // 自话闸门未放行：随机退避 8~15 秒再试，不发请求
-                state.nextTriggerTick = serverTick + BACKOFF_MIN_TICKS
-                        + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
+                state.nextTriggerTick = serverTick + Config.randomIntervalTicks(8, 15);
                 return;
             }
             // 空闲立即派发、忙则顺延、冲突/满则吞（dispatcher 内部处理）；无论何种结果都施加冷却，
@@ -314,8 +308,7 @@ public final class SelfTalkHandler {
             }
             if (!tryAcquireSelfTalkSlot(serverTick)) {
                 // 自话闸门未放行：随机退避 8~15 秒再试，不发请求
-                state.nextTriggerTick = serverTick + BACKOFF_MIN_TICKS
-                        + (int) (Math.random() * (BACKOFF_MAX_TICKS - BACKOFF_MIN_TICKS + 1));
+                state.nextTriggerTick = serverTick + Config.randomIntervalTicks(8, 15);
                 return;
             }
             SelfTalkDispatcher.requestSelfTalk(maid,
