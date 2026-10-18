@@ -333,6 +333,12 @@ public final class SelfTalkHandler {
             SelfTalkMigration.migrate(serverPlayer);
             // 记录服务器全局 tick，与欢迎窗口判定的计时基准一致（跨维度统一）
             PLAYER_LOGIN_TICKS.put(serverPlayer.getUUID(), (long) serverPlayer.server.getTickCount());
+            // 预制复用 custom/ 告警通知：本会话内该主人首次上线时按其名下女仆的具名目录合并私信一次
+            try {
+                PrebuiltCustomEntries.of(serverPlayer.server).onPlayerLogin(serverPlayer);
+            } catch (Throwable t) {
+                MaidSelfTalkMod.LOGGER.warn("Prebuilt custom diagnostics notification failed", t);
+            }
         }
     }
 
@@ -376,6 +382,8 @@ public final class SelfTalkHandler {
         lastCleanupTick = 0;
         // 预制复用库写出脏文件并释放内存缓存
         SelfTalkReuseStore.release(event.getServer());
+        // 预制复用 custom/：写出最终诊断报告并释放扫描缓存与通知状态
+        PrebuiltCustomEntries.release(event.getServer());
     }
 
     /** overworld 存档：预制复用库写出脏条目文件（每条目文件的增量保存，只写脏的） */
