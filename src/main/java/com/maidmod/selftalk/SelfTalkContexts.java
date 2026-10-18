@@ -868,19 +868,6 @@ public final class SelfTalkContexts {
     }
 
     /**
-     * 来源过滤并保留「可检索序列下标 → 原始历史区下标」的映射（检索模式的唯一入口）。
-     * <p>
-     * 过滤规则在 {@code history} 包单一实现；本方法只做消息映射与下标还原，
-     * 因此检索模式的来源口径与离线自检完全一致。
-     */
-    public static SelfTalkHistoryAssembler.SearchableIndices filterSearchable(EntityMaid maid,
-                                                                             List<LLMMessage> history) {
-        return SelfTalkHistoryAssembler.filterSearchable(
-                SelfTalkHistoryAssembler.toSearchableView(history),
-                ((SelfTalkProvenanceHost) maid).maid_self_talk$selfFingerprints());
-    }
-
-    /**
      * 语言标签 → 背景模板语言（{@link ContextLanguage}）的统一入口。
      * <p>
      * 调用方一律用本方法取模板语言，不要自己拼 {@code startsWith("zh")}：先经
