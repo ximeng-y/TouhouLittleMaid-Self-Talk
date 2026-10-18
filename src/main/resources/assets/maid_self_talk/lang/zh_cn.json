@@ -245,7 +245,12 @@
   "config.maid_self_talk.screen.persona_draft.split.error.network": "整理请求发送失败，请重试。",
   "config.maid_self_talk.screen.persona_draft.split.error.timeout": "整理超时，已取消。",
   "config.maid_self_talk.screen.persona_draft.split.error.format": "AI 返回的整理结果格式有误，请重试。",
-  "chat.maid_self_talk.split.done": "AI 整理完成：%s。重新打开四栏人设页即可载入结果。",
+  "chat.maid_self_talk.split.done": "AI 整理完成：%s。重新打开该女仆的人设页即可选择载入新结构化人设",
   "chat.maid_self_talk.prebuilt_custom_warnings": "预制复用：%s 个自定义条目有告警，详情见 custom/_diagnostics.md",
-  "chat.maid_self_talk.split.failed": "AI 整理失败。"
+  "chat.maid_self_talk.split.failed": "AI 人设整理失败，暂时无法确定原因，请稍后重试。",
+  "chat.maid_self_talk.split.failed.network": "AI 人设整理失败：AI 服务请求未成功，请检查服务配置或稍后重试。",
+  "chat.maid_self_talk.split.failed.timeout": "AI 人设整理超时，请稍后重试。",
+  "chat.maid_self_talk.split.failed.format": "AI 返回的人设内容格式不符合要求，请重新整理；若多次失败，可尝试更换模型。",
+  "chat.maid_self_talk.split.failed.not_loaded": "AI 人设整理已取消：该女仆已卸载或死亡，请在女仆可用后重试。",
+  "chat.maid_self_talk.split.failed.too_long": "AI 人设整理失败：内容超过长度限制，请精简后重试。"
 }
