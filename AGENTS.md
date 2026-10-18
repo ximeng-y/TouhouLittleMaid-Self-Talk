@@ -10,7 +10,7 @@
 - **双分支双线**：
   - `neoforge-1.21.1` 分支（GitHub 默认分支）：NeoForge 1.21.1（NeoForge 21.1.219 / ModDevGradle 2.0.95 / Java 21；TLM 1.5.3-neoforge+mc1.21.1）
   - `forge-1.20.1` 分支：Forge 1.20.1（Forge 47.2.0 / ForgeGradle 6 + parchment + mixingradle / Java 17；TLM 1.5.3-forge+mc1.20.1，fg.deobf）
-- 产物 jar（1.0.3 起加分支后缀区分）：neoforge 线 `build/libs/tlm-self-talk-1.4.0-neoforge-1.21.1.jar`；forge 线 `build/libs/tlm-self-talk-1.4.0-forge-1.20.1.jar`；部署替换 jar 后需重启服务端（代码改动无法热加载）
+- 产物 jar（1.0.3 起加分支后缀区分）：neoforge 线 `build/libs/tlm-self-talk-1.4.0-neoforge-1.21.1.jar`；forge 线 `build/libs/tlm-self-talk-1.4.0-forge-1.20.1.jar`（双线 jarJar 内嵌 SnakeYAML 后，正式发布 jar 由 jarJar 任务产出，forge 线原始 jar 退居 `-thin.jar`）；部署替换 jar 后需重启服务端（代码改动无法热加载）
 
 ## 构建
 
@@ -25,7 +25,7 @@
 - 业务服务与回调：`MaidSelfTalkService`（自话）/ `MaidInterChatService`（互聊）/ `SelfTalkCallback`、`InterChatCallback`（两条链的回调，含 Tool 轮次与历史清理）
 - 提示词与上下文：`SelfTalkPrompts`（硬编码提示词与 tool policy 段）/ `SelfTalkContexts`（环境上下文、语言指令、自定义 Prompt 块）/ `SegmentTags`（段标签与玩家输入清洗）/ `SelfTalkProvenance`（来源指纹判定）
 - 历史与人设：`HistoryContextSession` / `KeywordPlanningSession`（历史、人设共用规划）/ `SelfTalkHistoryAssembler`（请求历史组装）/ `AutonomousChatHistory`（独立自动聊天档案）；`MaidPersonaRuntime` / `MaidPersonaConfig` / `MaidPersonaHost`（每女仆原版/四栏模式与召回），`PlayerPersonaChatSession` 接入玩家聊天，`persona/PersonaSplitService` 管理独立 AI 拆分任务
-- 预制复用：`SelfTalkReuseService`（身份指纹、匹配、入库凭据）/ `SelfTalkReuseStore`（世界 JSON 库）/ `SelfTalkTtsTranslationSession`、`SelfTalkTtsTranslationCallback`（命中后独立短翻译）；由 `MaidSelfTalkService` 在历史/人设规划前分流，`SelfTalkCallback` 统一交付
+- 预制复用：`SelfTalkReuseService`（身份指纹、匹配、入库凭据）/ `SelfTalkReuseStore`（世界 YAML 头 Markdown 库）/ `PrebuiltEntryCodec`（YAML 头 Markdown 编解码与诊断告警）/ `PrebuiltCustomEntries`、`PrebuiltDiagnostics`（custom/ 人类条目扫描与诊断报告）/ `SelfTalkTtsTranslationSession`、`SelfTalkTtsTranslationCallback`（命中后独立短翻译）；由 `MaidSelfTalkService` 在历史/人设规划前分流，`SelfTalkCallback` 统一交付
 - 存储与状态：`PlayerSettingsStore`（玩家设置统一读写口）/ `SelfTalkState`（服务端内存状态）/ `SelfTalkMigration`（1.1.2 存储迁移）
   - neoforge 线另有 `SelfTalkAttachments`（Level 附件注册）；forge 线另有 `PlayerSettingsSavedData`（overworld SavedData）、`SelfTalkProvenanceHost`（无附件，经 mixin 挂接口）
 - `client/`：仅客户端 —— `SelfTalkClothConfig`（管理员配置界面，反射注册）、`SelfTalkPlayerSettingsClient`（客户端设置缓存与保存确认）、`SelfTalkPlayerSettingsScreen`（玩家开关/Prompt 界面）、`EnvironmentContextPanel` / `SelfTalkReusePanel`（互斥浮层）、`MaidPersonaEditScreen` / `MaidPersonaSplitClient`（人设编辑与拆分候选）
@@ -46,7 +46,7 @@
 - **环境事件过滤**：死亡事件固定过滤为玩家、有主动物、其他女仆——「有主动物」必须按 `OwnableEntity` 判定（马/驴/骡等坐骑不继承 `TamableAnimal` 但同样有主人）；受伤事件必须用**实际掉血**事件（neo `LivingDamageEvent.Post` / forge `LivingDamageEvent`），更早的 incoming/hurt 事件在格挡成功或减免到 0 时仍会以正数触发
 - cloth-config 界面通过反射注册（`MaidSelfTalkMod.registerClothConfigIfPresent`），未装 cloth-config 时自动跳过、不影响核心功能
 - **预制复用边界**：实验性、玩家默认关闭，单只可继承/强制开/强制关；管理员 `PLAYER_OPTION_ENABLED` 关闸时保留已存偏好。只接入自话与欢迎语，不绕过原触发和限流；命中跳过历史/人设规划与正式生成，真实生成成功才追加库存，复用投放不重复入库
-- **预制库存与翻译**：库存位于 `<世界根>/data/maid_self_talk/prebuilt/<fingerprint>.json`，按名称与生效人设指纹共享，欢迎语/自话分别限容；与女仆 NBT、玩家设置隔离，overworld 存档及停服时写出。匹配与渲染共用一次环境快照；命中后仅按需短翻译缓存 TTS，失败只投放上屏文本，取消不投放；翻译登记为在途计划并受清空/人设变更/卸载/超时取消约束
+- **预制库存与翻译**：机器条目位于 `<世界根>/data/maid_self_talk/prebuilt/generated/<source>/v1-<fingerprint>/entry-<UUID>.md`（YAML 头 + `## Chat`/`## TTS` 正文，schemaVersion 3），按名称与生效人设指纹共享，欢迎语/自话分别限容，仍走 n-of-m 匹配；人类手写条目位于同层 `custom/_global|<女仆显示名>/{welcome,self-talk}/*.md`，只读、不淘汰、不回写 TTS，env 全 key 严格相等（AND）匹配、缺 `chatLanguage` 为语言通配，entryId 由 UTF-8 相对路径派生；旧版 JSON 路径不读取、不迁移、不删除。custom/ 扫描告警覆盖写出 `custom/_diagnostics.md`，有告警具名目录的女仆主人本会话首次上线时收到一条合并私信。SnakeYAML 2.2 经 jarJar 嵌套进产物 jar（FG6 的 jarJar 依赖必须写 maven 版本区间，`2.+` 这类 Gradle 写法构建期即报错）。与女仆 NBT、玩家设置隔离，overworld 存档及停服时写出（custom/ 只在扫描与停服写诊断报告）。匹配与渲染共用一次环境快照；命中后仅按需短翻译缓存 TTS，失败只投放上屏文本，取消不投放；翻译登记为在途计划并受清空/人设变更/卸载/超时取消约束
 
 ## Code Navigation
 
