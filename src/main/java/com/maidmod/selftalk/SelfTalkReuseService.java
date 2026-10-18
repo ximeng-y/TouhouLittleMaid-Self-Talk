@@ -113,11 +113,18 @@ public final class SelfTalkReuseService {
      * {@code minEligibleEntries} 才掷概率（{@code hitChancePercent}）；
      * 未命中概率或候选不足都返回 null，调用方继续正常生成链（同一快照复用，不重采集）。
      * <p>
+     * 机器条目之外，人类可编辑条目（{@code custom/}，见 {@link PrebuiltCustomEntries}）
+     * 并入同一候选池、共用同一组阈值：语言字段缺省即对所有语言生效；环境改用 AND 语义——
+     * 条目写了的每个 key 都必须在当前快照中存在且严格相等（空 env 恒通过），
+     * 避免手写一两个条件永远凑不够 {@code minMatchingContexts}。候选池合并后再统一下限与概率，
+     * 不为纯人类条目放宽。
+     * <p>
      * 不设额外否决条件（天气/历史/Prompt/近期用过都不看）：环境匹配本身就是情境筛选。
      */
     public static SelfTalkReuseStore.PrebuiltEntry tryMatch(MinecraftServer server, RandomSource random,
                                                             String source, String fingerprint,
-                                                            Map<String, String> currentEnv, String chatLanguage) {
+                                                            Map<String, String> currentEnv, String chatLanguage,
+                                                            EntityMaid maid) {
         if (fingerprint == null) {
             return null;
         }
@@ -143,6 +150,20 @@ public final class SelfTalkReuseService {
                 candidates.add(entry);
             }
         }
+        // 人类条目：AND 语义 + 语言缺省通配；缺 TTS 段的已在解析时回退为 chatText，此处兜底同机器条目
+        String maidName = resolveMaidDirName(maid);
+        for (SelfTalkReuseStore.PrebuiltEntry entry : PrebuiltCustomEntries.of(server).entriesFor(maidName, source)) {
+            if (entry.chatLanguage != null && !entry.chatLanguage.equals(chatLanguage)) {
+                continue;
+            }
+            if (entry.ttsText == null || entry.ttsText.isBlank()) {
+                continue;
+            }
+            if (!allWrittenKeysEqual(entry.env, currentEnv)) {
+                continue;
+            }
+            candidates.add(entry);
+        }
         if (candidates.size() < minEligible) {
             return null;
         }
@@ -150,6 +171,26 @@ public final class SelfTalkReuseService {
             return null;
         }
         return candidates.get(random.nextInt(candidates.size()));
+    }
+
+    /**
+     * 人类条目的环境匹配（AND）：写入的每个 key 都必须在当前快照中存在且严格相等；
+     * 空 env（无头条目）恒通过。key 在快照中缺失视为不相等。
+     */
+    static boolean allWrittenKeysEqual(Map<String, String> written, Map<String, String> current) {
+        for (Map.Entry<String, String> writtenEntry : written.entrySet()) {
+            String now = current.get(writtenEntry.getKey());
+            if (now == null || !now.equals(writtenEntry.getValue())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 具名目录匹配用的女仆显示名：沿用 {@link SelfTalkMaidNames} 解析顺序，解析不出返回 null（只吃全局条目） */
+    private static String resolveMaidDirName(EntityMaid maid) {
+        Component name = SelfTalkMaidNames.resolveName(maid, SelfTalkMaidNames.resolveQueryLanguage(maid));
+        return name == null ? null : name.getString();
     }
 
     /**
@@ -171,7 +212,7 @@ public final class SelfTalkReuseService {
         String createdAt = LocalDateTime.now().format(CREATED_AT_FORMAT);
         SelfTalkReuseStore.PrebuiltEntry entry = new SelfTalkReuseStore.PrebuiltEntry(
                 UUID.randomUUID(), createdAt, data.matchEntries(), data.chatLanguage(),
-                chatText, ttsLanguage, ttsText);
+                chatText, ttsLanguage, ttsText, SelfTalkReuseStore.Origin.MACHINE);
         SelfTalkReuseStore.of(server).append(data.fingerprint(), data.source(), entry,
                 Config.PREBUILT_MAX_ENTRIES_PER_SOURCE.get());
     }

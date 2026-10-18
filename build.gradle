@@ -47,6 +47,8 @@ mixin {
 }
 
 repositories {
+    // SnakeYAML（预制复用 YAML 头解析，见 dependencies）
+    mavenCentral()
     maven {
         name = 'Modrinth'
         url = 'https://api.modrinth.com/maven'
@@ -67,7 +69,25 @@ dependencies {
     // Curios API（仅编译期：饰品读取类引用其 API，运行时不打包、不声明前置；
     // 未安装 Curios 时功能门拦截，不加载读取实现，不影响模组功能）
     compileOnly fg.deobf('top.theillusivec4.curios:curios-forge:5.14.1+1.20.1:api')
+    // SnakeYAML：预制复用 YAML 头解析（本项目第一个打包依赖）。implementation 供编译与自检运行时；
+    // jarJar 配置把它嵌套进产物 jar（META-INF/jarjar 元数据，ModLauncher 自动加载），
+    // 运行者照旧只装本 mod 一个 jar，无新增前置。FG6 的 jarJar 依赖要求 maven 版本区间写法
+    implementation 'org.yaml:snakeyaml:2.2'
+    jarJar 'org.yaml:snakeyaml:[2.2,2.3)'
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+// 启用 FG6 的 jarJar：产物 jar 改为 jarJar 任务产出的、内嵌依赖的完整 jar，沿用正式发布名
+// （无 classifier）；原始 jar 退居 -thin 后缀，避免误部署缺 SnakeYAML 的瘦 jar。
+// reobfJarJar 由 ForgeGradle 自动创建（输入为 jarJar 产物，assemble 自动依赖）
+jarJar.enable()
+
+tasks.named('jar') {
+    archiveClassifier = 'thin'
+}
+
+tasks.named('jarJar') {
+    archiveClassifier = ''
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -94,7 +114,8 @@ jar {
 // ===== 自检真实执行（issue #60 C13）：四个 main() 自检 + TLM 兼容自检挂到 check，
 // gradle build / CI 自动运行，失败（非零退出或异常）即构建失败 =====
 def selfCheckMains = ['EnvironmentContextTest', 'EnvironmentContextRendererTest',
-                      'HistoryCoreTest', 'SelfTalkEventBufferTest', 'TlmMixinTargetTest']
+                      'HistoryCoreTest', 'SelfTalkEventBufferTest', 'TlmMixinTargetTest',
+                      'PrebuiltEntryCodecTest']
 selfCheckMains.each { name ->
     tasks.register("selfCheck${name}", JavaExec) {
         group = 'verification'

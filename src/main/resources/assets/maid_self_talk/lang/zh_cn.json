@@ -246,5 +246,6 @@
   "config.maid_self_talk.screen.persona_draft.split.error.timeout": "整理超时，已取消。",
   "config.maid_self_talk.screen.persona_draft.split.error.format": "AI 返回的整理结果格式有误，请重试。",
   "chat.maid_self_talk.split.done": "AI 整理完成：%s。重新打开四栏人设页即可载入结果。",
+  "chat.maid_self_talk.prebuilt_custom_warnings": "预制复用：%s 个自定义条目有告警，详情见 custom/_diagnostics.md"
   "chat.maid_self_talk.split.failed": "AI 整理失败。"
 }

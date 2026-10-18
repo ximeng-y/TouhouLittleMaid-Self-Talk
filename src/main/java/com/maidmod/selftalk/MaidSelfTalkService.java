@@ -148,7 +148,7 @@ public final class MaidSelfTalkService {
                     ? welcomeEnvironment.matchEntries() : environment.injectedEntries();
             SelfTalkReuseStore.PrebuiltEntry reused = SelfTalkReuseService.tryMatch(
                     maid.level().getServer(), maid.getRandom(), source, fingerprint,
-                    matchEntries, selfTalkLanguage);
+                    matchEntries, selfTalkLanguage, maid);
             if (reused != null) {
                 return deliverReused(maid, chatManager, site, fingerprint, reused, welcome, keep,
                         broadcastRange, toolEnabled, token, messages);
@@ -244,10 +244,13 @@ public final class MaidSelfTalkService {
                 return;
             }
             if (outcome.ok()) {
-                // 只覆写仍在库内的同一条目；条目已被淘汰则仅投放、不回写
-                SelfTalkReuseStore.of(server).updateTts(fingerprint, welcome
-                                ? SelfTalkReuseStore.SOURCE_WELCOME : SelfTalkReuseStore.SOURCE_SELF_TALK,
-                        entry, outcome.translated(), targetLanguage);
+                // 只覆写仍在库内的同一条机器条目；条目已被淘汰则仅投放、不回写。
+                // 人类条目（custom/）只读：翻译结果只在内存里交付，绝不回写其文件
+                if (entry.origin == SelfTalkReuseStore.Origin.MACHINE) {
+                    SelfTalkReuseStore.of(server).updateTts(fingerprint, welcome
+                                    ? SelfTalkReuseStore.SOURCE_WELCOME : SelfTalkReuseStore.SOURCE_SELF_TALK,
+                            entry, outcome.translated(), targetLanguage);
+                }
                 callback.deliverReused(new ResponseChat(entry.chatText, outcome.translated()));
             } else {
                 callback.deliverReusedTextOnly(new ResponseChat(entry.chatText, entry.ttsText));
