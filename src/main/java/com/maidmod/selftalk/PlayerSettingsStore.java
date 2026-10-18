@@ -1,6 +1,7 @@
 package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -216,6 +217,15 @@ public final class PlayerSettingsStore {
     }
 
     // ===== 迁移专用 =====
+
+    /**
+     * 迁移专用入口：登录时把旧 persistentData 设置并入 SavedData。
+     * 实际迁移逻辑收敛在 {@link SelfTalkMigration#migrateSettings}，本入口保持
+     * 「SavedData 一律经 PlayerSettingsStore 访问」的统一出口。
+     */
+    public static void migrateFromLegacy(MinecraftServer server, UUID playerUuid, CompoundTag persistedSub) {
+        SelfTalkMigration.migrateSettings(data(server), playerUuid, persistedSub);
+    }
 
     /** 该玩家自话组是否已在 SavedData 有条目（已迁移过则迁移时以 SavedData 为准） */
     public static boolean hasSelfTalkData(MinecraftServer server, UUID playerUuid) {

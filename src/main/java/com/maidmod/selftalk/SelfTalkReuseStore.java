@@ -18,6 +18,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.WeakHashMap;
+import java.util.function.BiPredicate;
+import java.util.function.IntSupplier;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -42,15 +44,17 @@ import java.util.stream.Stream;
  *       不主动创建，首次成功写入时再建目录；</li>
  *   <li>写入只置脏，主线程不落盘——脏条目统一在 overworld 存档事件
  *       （{@code LevelEvent.Save}）与服务器停止（{@code ServerStoppedEvent} → {@link #release}）时写出；</li>
- *   <li>每个条目文件单独走「同目录临时文件 + 原子替换」写出；失败保留原文件与脏标记，
- *       下轮存档重试；容量淘汰的条目文件先等本轮全部新增/更新写成功后再删除，
+ *   <li>每个条目文件单独走「同目录临时文件 + 原子替换」写出；写入边界的 I/O 与预期运行时
+ *       故障都转为单条失败并保留原文件与脏标记，下轮存档重试，其余条目继续写；
+ *       容量淘汰的条目文件先等本轮全部新增/更新写成功后再删除，
  *       避免新增写失败时把已有条目也丢了；</li>
- *   <li>单个 Markdown 损坏、schema 不识别、字段错误或文件名与 {@code entryId} 不一致：
- *       跳过该文件、保留原文件并记诊断日志，同目录其余合法条目照常参与匹配；</li>
- *   <li>整个来源子目录无法枚举时，该来源本次运行锁为只读（坏档闩锁），
- *       绝不把「读不出来的已有库存」当空库覆盖。</li>
+ *   <li>单个 Markdown 损坏、旧格式、schema 不识别、字段错误或文件名与 {@code entryId}
+ *       不一致：跳过该文件、保留原文件并记诊断日志，同目录其余合法条目照常参与匹配；</li>
+ *   <li>整个来源子目录无法枚举时，该来源本次运行锁为只读（坏档闩锁）：
+ *       读取按空库、追加与 TTS 覆写直接放弃，绝不把「读不出来的已有库存」当空库覆盖。</li>
  * </ul>
- * 全部方法仅服务端主线程调用（写入在真实回复入库时、读取在触发匹配时，
+ * 扫描加载合法条目后按当前容量重算裁剪（沿用与追加相同的淘汰排序），容量调小后无需
+ * 等下一次新增即可收缩。全部方法仅服务端主线程调用（写入在真实回复入库时、读取在触发匹配时，
  * 落盘在存档事件里），无需加锁；静态表加同步仅为防跨线程查询。
  */
 public final class SelfTalkReuseStore {
@@ -75,15 +79,30 @@ public final class SelfTalkReuseStore {
     private static final Map<MinecraftServer, SelfTalkReuseStore> INSTANCES =
             Collections.synchronizedMap(new WeakHashMap<>());
 
-    private final MinecraftServer server;
     private final Path dir;
+    /** 扫描重算容量时现读的容量来源（生产为配置；自检注入固定值） */
+    private final IntSupplier scanCapacity;
+    /** 淘汰条目文件删除操作：(来源目录, entryId) → 是否删除成功（生产为真实文件操作；自检注入故障） */
+    private final BiPredicate<Path, UUID> deleteOperation;
     /** fingerprint → 来源 → 该来源子目录的内存态（只缓存 v1 新版库；旧版扁平文件不进内存） */
     private final Map<String, Map<String, SourceEntries>> fingerprints = new LinkedHashMap<>();
 
+    /** 生产构造：库路径取服务端世界目录，扫描容量现读配置，删除走真实文件操作 */
     private SelfTalkReuseStore(MinecraftServer server) {
-        this.server = server;
-        this.dir = server.getWorldPath(LevelResource.ROOT)
-                .resolve("data").resolve("maid_self_talk").resolve("prebuilt");
+        this(server.getWorldPath(LevelResource.ROOT)
+                        .resolve("data").resolve("maid_self_talk").resolve("prebuilt"),
+                () -> Config.PREBUILT_MAX_ENTRIES_PER_SOURCE.get(),
+                SelfTalkReuseStore::deleteEntryFile);
+    }
+
+    /**
+     * 包内自检构造：注入库路径、扫描容量来源与删除操作，用于确定性自检复现删除故障、
+     * 容量重算等状态，不依赖系统权限变更或真实文件锁；不注册进实例表。
+     */
+    SelfTalkReuseStore(Path prebuiltDir, IntSupplier scanCapacity, BiPredicate<Path, UUID> deleteOperation) {
+        this.dir = prebuiltDir;
+        this.scanCapacity = scanCapacity;
+        this.deleteOperation = deleteOperation;
     }
 
     /** 取（或创建）某服务端实例的内存库；实例由 {@link #release} 在服务器停止时移除 */
@@ -132,7 +151,7 @@ public final class SelfTalkReuseStore {
         if (allWritten) {
             allDeleted = true;
             for (UUID id : entries.removedIds) {
-                if (!deleteEntryFile(entries.dir, id)) {
+                if (!deleteEntry(entries.dir, id)) {
                     allDeleted = false;
                 }
             }
@@ -169,6 +188,10 @@ public final class SelfTalkReuseStore {
         if (entries == null) {
             return;
         }
+        // 目录锁只读：读取都失败时放弃入库，不改任何内存标记（正常生成与回复交付不受影响）
+        if (entries.unreadable) {
+            return;
+        }
         // 先确定 UUID 在本来源目录内可用，再淘汰追加；三次尝试耗尽则无变更返回，
         // 不淘汰、不追加、不触碰脏标记与待删除集合（容量淘汰只发生在已有可用候选之后）
         PrebuiltEntry available = resolveAvailableEntry(entries, entry);
@@ -177,22 +200,9 @@ public final class SelfTalkReuseStore {
         }
         // 先删最旧腾出空位再追加；maxEntries 由调用方按配置现读
         while (entries.entries.size() >= maxEntries) {
-            UUID oldest = null;
-            PrebuiltEntry oldestEntry = null;
-            for (Map.Entry<UUID, PrebuiltEntry> candidate : entries.entries.entrySet()) {
-                if (oldestEntry == null || isOlder(candidate.getKey(), candidate.getValue(),
-                        oldest, oldestEntry)) {
-                    oldest = candidate.getKey();
-                    oldestEntry = candidate.getValue();
-                }
-            }
-            if (oldest == null) {
+            if (evictOldest(entries) == null) {
                 break;
             }
-            entries.entries.remove(oldest);
-            entries.removedIds.add(oldest);
-            // 被淘汰条目若还带着未写盘的脏标记，一并撤销——它已不在库中，不再有对应文件
-            entries.dirtyIds.remove(oldest);
         }
         entries.entries.put(available.entryId, available);
         entries.dirtyIds.add(available.entryId);
@@ -255,6 +265,44 @@ public final class SelfTalkReuseStore {
     }
 
     /**
+     * 淘汰最旧一条（扫描裁剪与追加腾位共用同一排序）：入库时间升序最早优先，
+     * 同秒按 entryId 字符串升序稳定决胜。返回被淘汰的 id（库空返回 null）；
+     * 淘汰只从内存移除并登记待删清单，实际删除文件推迟到下一次落盘。
+     */
+    private static UUID evictOldest(SourceEntries entries) {
+        UUID oldest = null;
+        PrebuiltEntry oldestEntry = null;
+        for (Map.Entry<UUID, PrebuiltEntry> candidate : entries.entries.entrySet()) {
+            if (oldestEntry == null || isOlder(candidate.getKey(), candidate.getValue(),
+                    oldest, oldestEntry)) {
+                oldest = candidate.getKey();
+                oldestEntry = candidate.getValue();
+            }
+        }
+        if (oldest == null) {
+            return null;
+        }
+        entries.entries.remove(oldest);
+        entries.removedIds.add(oldest);
+        // 被淘汰条目若还带着未写盘的脏标记，一并撤销——它已不在库中，不再有对应文件
+        entries.dirtyIds.remove(oldest);
+        return oldest;
+    }
+
+    /**
+     * 扫描重算容量：合法新格式条目加载完后按当前容量裁剪，超额 id 转入待删除清单
+     * （文件在下一次落盘时删除）。旧格式、损坏文件未入内存，不会被列入删除清单；
+     * 容量调小后重启即按新容量重算，此前因删除失败留下的条目会被重新评估。
+     */
+    private static void trimToCapacity(SourceEntries entries, int maxEntries) {
+        while (entries.entries.size() > maxEntries) {
+            if (evictOldest(entries) == null) {
+                break;
+            }
+        }
+    }
+
+    /**
      * 覆写<b>仍在本库中</b>的指定条目的 TTS 段（按存储条目 {@code entryId} 直接定位）。
      * <p>
      * 人类条目（{@link Origin#CUSTOM}）只读：直接返回 false，文件保持不变（调用侧也不应对
@@ -269,6 +317,10 @@ public final class SelfTalkReuseStore {
         }
         SourceEntries entries = ensureLoaded(fingerprint, source);
         if (entries == null) {
+            return false;
+        }
+        // 目录锁只读：不返回任何修改，保持文件与标记原样
+        if (entries.unreadable) {
             return false;
         }
         PrebuiltEntry existing = entries.entries.get(target.entryId);
@@ -387,6 +439,16 @@ public final class SelfTalkReuseStore {
         for (Path file : files) {
             parseEntryFile(file, result);
         }
+        // 扫描重算容量：合法新格式条目加载完后按当前容量裁剪（容量来源失败只跳过裁剪，不影响读取）
+        int capacity;
+        try {
+            capacity = scanCapacity.getAsInt();
+        } catch (RuntimeException e) {
+            MaidSelfTalkMod.LOGGER.warn("Failed to read prebuilt reuse capacity for {} ({}), skip trimming",
+                    result.dir, e.toString());
+            return result;
+        }
+        trimToCapacity(result, capacity);
         return result;
     }
 
@@ -418,7 +480,11 @@ public final class SelfTalkReuseStore {
         }
     }
 
-    /** 单条目文件写入：临时文件 + 原子替换；失败返回 false，保留原文件与脏标记下轮重试 */
+    /**
+     * 单条目文件写入：临时文件 + 原子替换。写入边界同时捕获 I/O 与预期运行时故障
+     * （如序列化异常），单条失败不影响其余条目继续写；失败返回 false，
+     * 保留原文件与脏标记下轮重试，绝不把写一半的临时内容当成已保存。
+     */
     private static boolean writeEntryFile(Path dir, PrebuiltEntry entry) {
         Path file = dir.resolve("entry-" + entry.entryId + ".md");
         try {
@@ -431,22 +497,33 @@ public final class SelfTalkReuseStore {
                 Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
             }
             return true;
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             MaidSelfTalkMod.LOGGER.warn("Failed to save prebuilt reuse entry file {}: {}",
                     file, e.toString());
             return false;
         }
     }
 
-    /** 淘汰条目文件删除：文件不存在视为已删除；失败返回 false，下轮存档重试 */
+    /** 生产删除操作：文件不存在视为已删除；I/O 与预期运行时故障返回 false，下轮存档重试 */
     private static boolean deleteEntryFile(Path dir, UUID entryId) {
         Path file = dir.resolve("entry-" + entryId + ".md");
         try {
             Files.deleteIfExists(file);
             return true;
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             MaidSelfTalkMod.LOGGER.warn("Failed to delete prebuilt reuse entry file {}: {}",
                     file, e.toString());
+            return false;
+        }
+    }
+
+    /** 淘汰条目文件删除（经注入的删除操作）：预期运行时故障转为本轮失败，不影响其余条目 */
+    private boolean deleteEntry(Path dir, UUID entryId) {
+        try {
+            return deleteOperation.test(dir, entryId);
+        } catch (RuntimeException e) {
+            MaidSelfTalkMod.LOGGER.warn("Failed to delete prebuilt reuse entry file entry-{}.md in {}: {}",
+                    entryId, dir, e.toString());
             return false;
         }
     }

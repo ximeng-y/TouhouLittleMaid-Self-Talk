@@ -92,13 +92,36 @@ final class PrebuiltDiagnostics {
             }
             sb.append('\n');
         }
-        sb.append("\n## 正文分段规则\n\n");
-        sb.append("- `## Chat` 段为上屏文本，`## TTS` 段为语音文本；标题大小写不敏感，")
-                .append("必须以 ## 加空格开头独占一行。\n");
-        sb.append("- 没有任何已识别标题时，全文作为上屏文本，语音文本回退为同文；")
-                .append("只有 TTS 段时 TTS 文本同时作为上屏文本。\n");
-        sb.append("- 未识别的二级标题整段忽略；frontmatter 之后、首个标题之前的散文本忽略。\n");
-        sb.append("- 无头条目视为通用条目：不写 chatLanguage 对所有语言生效，env 为空则不做环境约束。\n");
+        sb.append("\n## 正文格式（fenced-v1）与回退规则\n\n");
+        sb.append("条目必须有 YAML 头并声明 `bodyFormat: \"fenced-v1\"`，正文用反引号围栏包裹。")
+                .append("最小完整样例（缩进仅为展示，实际写时不要缩进）：\n\n");
+        sb.append("    ---\n");
+        sb.append("    bodyFormat: \"fenced-v1\"\n");
+        sb.append("    chatLanguage: \"zh_cn\"\n");
+        sb.append("    env:\n");
+        sb.append("      weather: \"Sunny\"\n");
+        sb.append("    ---\n\n");
+        sb.append("    ## Chat\n\n");
+        sb.append("    ```\n");
+        sb.append("    （这里写上屏文本）\n");
+        sb.append("    ```\n\n");
+        sb.append("    ## TTS\n\n");
+        sb.append("    ```\n");
+        sb.append("    （这里写语音文本；整段可省略）\n");
+        sb.append("    ```\n\n");
+        sb.append("- 开启围栏至少 3 个反引号，且比正文里最长的连续反引号更长；")
+                .append("围栏后可留空或写 text，关闭围栏须与开启围栏等长。\n");
+        sb.append("- 标题只在围栏外识别；围栏内的二级标题、缩进与反引号都是正文。")
+                .append("每种段最多一个：重复段、未知二级标题、未闭合围栏、围栏外的非空文字都会整条拒绝。\n");
+        sb.append("- 上屏文本与语音文本原文保留（首尾空白不裁剪）。`## Chat` 缺失、空或全空白且 ")
+                .append("`## TTS` 有效时，上屏文本用 TTS 文本；`## TTS` 缺失或全空白时，")
+                .append("语音文本用上屏文本；两者都为空整条拒绝。\n");
+        sb.append("- `env` 必须是扁平键值映射：显式写成列表/映射、复合键、复合值或空值会整条拒绝")
+                .append("（不会丢掉部分条件继续匹配）；无环境约束请省略 `env` 或写 `env: {}`，")
+                .append("不要写 `env:` / `env: null`；未加引号的 yes/on/off、时间（如 1:20）、日期")
+                .append("按字面值参与匹配；未知 key 保留并告警、不参与匹配。\n");
+        sb.append("- 旧格式（无头、旧 schema 或缺少 bodyFormat）条目不会删除或改写，")
+                .append("只是停止参与匹配；按上面的样例改写成新格式即可恢复。\n");
         if (write(sb.toString()) && logSummary) {
             MaidSelfTalkMod.LOGGER.info("Prebuilt reuse custom entries: {} file(s) with {} issue(s), report: {}",
                     byFile.size(), total, customDir.resolve(DIAGNOSTICS_FILE));
