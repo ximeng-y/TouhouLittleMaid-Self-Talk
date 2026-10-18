@@ -16,6 +16,8 @@ java {
 }
 
 repositories {
+    // SnakeYAML（预制复用 YAML 头解析，见 dependencies）
+    mavenCentral()
     maven {
         name = 'Modrinth'
         url = 'https://api.modrinth.com/maven'
@@ -41,6 +43,11 @@ dependencies {
     // Curios API（仅编译期：饰品读取类引用其 API，运行时不打包、不声明前置；
     // 未安装 Curios 时功能门拦截，不加载读取实现，不影响模组功能）
     compileOnly 'top.theillusivec4.curios:curios-neoforge:9.5.1+1.21.1:api'
+    // SnakeYAML：预制复用 YAML 头解析（本项目第一个打包依赖）。implementation 供编译与自检运行时；
+    // jarJar 配置把它嵌套进产物 jar（META-INF/jarjar 元数据，ModLauncher 自动加载），
+    // 运行者照旧只装本 mod 一个 jar，无新增前置
+    implementation 'org.yaml:snakeyaml:2.2'
+    jarJar 'org.yaml:snakeyaml:2.2'
 }
 
 neoForge {
@@ -76,7 +83,8 @@ tasks.named('jar') {
 // ===== 自检真实执行（issue #60 C13）：四个 main() 自检 + TLM 兼容自检挂到 check，
 // gradle build / CI 自动运行，失败（非零退出或异常）即构建失败 =====
 def selfCheckMains = ['EnvironmentContextTest', 'EnvironmentContextRendererTest',
-                      'HistoryCoreTest', 'SelfTalkEventBufferTest', 'TlmMixinTargetTest']
+                      'HistoryCoreTest', 'SelfTalkEventBufferTest', 'TlmMixinTargetTest',
+                      'PrebuiltEntryCodecTest']
 selfCheckMains.each { name ->
     tasks.register("selfCheck${name}", JavaExec) {
         group = 'verification'
