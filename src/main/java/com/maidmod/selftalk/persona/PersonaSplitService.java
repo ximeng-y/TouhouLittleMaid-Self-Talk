@@ -248,7 +248,23 @@ public final class PersonaSplitService {
         SelfTalkPackets.CHANNEL.send(PacketDistributor.PLAYER.with(() -> current), response);
         current.sendSystemMessage(outcome.ok()
                 ? Component.translatable("chat.maid_self_talk.split.done", task.maidName)
-                : Component.translatable("chat.maid_self_talk.split.failed"));
+                : Component.translatable(failureChatKey(outcome.resultCode())));
+    }
+
+    /**
+     * 失败私信语言键：按结果码给出可确定的原因，未知码落回通用提示。
+     * 只列本链实际会交付的结果码（其余校验失败只回包、不发私信）。
+     */
+    private static String failureChatKey(String resultCode) {
+        return switch (resultCode == null ? "" : resultCode) {
+            case MaidPersonaSplitResponseMessage.RESULT_NETWORK -> "chat.maid_self_talk.split.failed.network";
+            case MaidPersonaSplitResponseMessage.RESULT_TIMEOUT -> "chat.maid_self_talk.split.failed.timeout";
+            case MaidPersonaSplitResponseMessage.RESULT_FORMAT -> "chat.maid_self_talk.split.failed.format";
+            case MaidPersonaSplitResponseMessage.RESULT_NOT_LOADED ->
+                    "chat.maid_self_talk.split.failed.not_loaded";
+            case MaidPersonaSplitResponseMessage.RESULT_TOO_LONG -> "chat.maid_self_talk.split.failed.too_long";
+            default -> "chat.maid_self_talk.split.failed";
+        };
     }
 
     /**
