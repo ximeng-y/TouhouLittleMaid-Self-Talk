@@ -357,12 +357,6 @@ public final class AutonomousChatHistory {
      * 写入自定义 tag。
      *
      * @param snapshot 与本次 TLM 历史序列<b>同一份</b>快照（由调用方从 writeToTag 内部
-     *                 实际序列化的那一份捕获），顺序元数据与之逐位对应
-     */
-    /**
-     * 写入自定义 tag。
-     *
-     * @param snapshot 与本次 TLM 历史序列<b>同一份</b>快照（由调用方从 writeToTag 内部
      *                 实际序列化的那一份捕获）。注意它的方向是 TLM 的序列化方向
      *                 ——{@code CappedQueue.add} 用 {@code offerFirst}，
      *                 {@code Lists.newArrayList(deque)} 按队头到队尾迭代，因此这份快照是「新到旧」；
