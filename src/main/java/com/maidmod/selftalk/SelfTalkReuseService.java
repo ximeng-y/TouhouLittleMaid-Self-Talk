@@ -10,8 +10,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -26,10 +25,6 @@ import java.util.UUID;
  * 全部方法仅服务端主线程调用。
  */
 public final class SelfTalkReuseService {
-
-    /** 入库时间格式（服务端本地时间；yy 非 YYYY、mm 为分钟，写错即时间序全乱） */
-    private static final DateTimeFormatter CREATED_AT_FORMAT =
-            DateTimeFormatter.ofPattern("yy-MM-dd-HH:mm:ss");
 
     private SelfTalkReuseService() {
     }
@@ -129,8 +124,11 @@ public final class SelfTalkReuseService {
             return null;
         }
         int minContexts = Config.PREBUILT_MIN_MATCHING_CONTEXTS.get();
-        int minEligible = Config.PREBUILT_MIN_ELIGIBLE_ENTRIES.get();
-        int hitChance = Config.PREBUILT_HIT_CHANCE_PERCENT.get();
+        // issue #108：最低条数与概率改由主人个人参数解析（世界设置 + 受控覆盖）；
+        // 每次匹配现读一组，不缓存到客户端或静态全局变量，改动只影响后续匹配
+        PrebuiltReuseParameters parameters = PlayerSettingsStore.getPrebuiltReuseParametersForMaid(server, maid);
+        int minEligible = parameters.minEligibleEntries();
+        int hitChance = parameters.hitChancePercent();
         List<SelfTalkReuseStore.PrebuiltEntry> candidates = new ArrayList<>();
         for (SelfTalkReuseStore.PrebuiltEntry entry : SelfTalkReuseStore.of(server).entries(fingerprint, source)) {
             // 上屏文本与 TTS 文本都必须非空白：TLM 上游对两段都做空白校验，
@@ -209,7 +207,7 @@ public final class SelfTalkReuseService {
      */
     public static void appendEntry(MinecraftServer server, ArchiveData data,
                                    String chatText, String ttsText, String ttsLanguage) {
-        String createdAt = LocalDateTime.now().format(CREATED_AT_FORMAT);
+        String createdAt = PrebuiltEntryCodec.formatCreatedAt(Instant.now());
         SelfTalkReuseStore.PrebuiltEntry entry = new SelfTalkReuseStore.PrebuiltEntry(
                 UUID.randomUUID(), createdAt, data.matchEntries(), data.chatLanguage(),
                 chatText, ttsLanguage, ttsText, SelfTalkReuseStore.Origin.MACHINE);

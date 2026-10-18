@@ -280,11 +280,16 @@ public final class Config {
                 调大会让复用更难命中。正整数。""")
                 .defineInRange("minMatchingContexts", 4, 1, 64);
         PREBUILT_HIT_CHANCE_PERCENT = builder.comment("""
-                预制复用的命中概率（0~100）：候选条数充足后按此概率决定本次是否复用，
-                未命中照常真实生成。0 = 从不复用，100 = 候选充足时必定复用。""")
+                旧兼容保留项，已不生效：旧版这里是预制复用的命中概率。issue #108 起
+                概率改由世界设置承载（预制复用设置浮层 → 服务器设置），按主人个人参数解析；
+                保留该键只为避免配置框架把已有键当作未知项移除，运行时不再读取，
+                也不用于新存档初始化或迁移。""")
                 .defineInRange("hitChancePercent", 60, 0, 100);
         PREBUILT_MIN_ELIGIBLE_ENTRIES = builder.comment("""
-                预制复用的候选条数下限 m：达标候选不足该数量时不掷概率、直接真实生成。正整数。""")
+                旧兼容保留项，已不生效：旧版这里是预制复用的候选条数下限 m。issue #108 起
+                最低可用条数改由世界设置承载（预制复用设置浮层 → 服务器设置），按主人个人参数解析；
+                保留该键只为避免配置框架把已有键当作未知项移除，运行时不再读取，
+                也不用于新存档初始化或迁移。""")
                 .defineInRange("minEligibleEntries", 8, 1, 100000);
         PREBUILT_MAX_ENTRIES_PER_SOURCE = builder.comment("""
                 每个指纹目录下每个来源子目录的库存条数上限 k：欢迎语与自话两组各自计算。

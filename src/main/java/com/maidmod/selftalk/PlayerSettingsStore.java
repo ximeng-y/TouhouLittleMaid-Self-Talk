@@ -2,6 +2,7 @@ package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -467,5 +468,136 @@ public final class PlayerSettingsStore {
         }
         Boolean override = getPrebuiltReuseMaidOverride(server, ownerUuid, maid.getUUID());
         return override != null ? override : isPrebuiltReuseEnabled(server, ownerUuid);
+    }
+
+    // ===== 预制复用匹配参数（issue #108：世界级默认 + 受控玩家覆盖） =====
+    //
+    // 三个概念严格分开：
+    //   1. 复用开关        —— isPrebuiltReuseEnabledForMaid（原有）；
+    //   2. 玩家配置总闸    —— Config.PLAYER_OPTION_ENABLED（原有，不清除已存偏好）；
+    //   3. 个人参数权限    —— 只决定参数来源；关闭它不关闭复用功能本身。
+    // 管理员编辑服务器参数既不受「允许个人参数」限制，也不因总闸关闭而失去能力。
+
+    /** 服务器默认最低可用条数 */
+    public static int getPrebuiltReuseServerMinEligible(MinecraftServer server) {
+        return data(server).getPrebuiltReuseServerMinEligible();
+    }
+
+    /** 写服务器默认最低可用条数（调用方负责先做范围校验与管理员校验） */
+    public static void setPrebuiltReuseServerMinEligible(MinecraftServer server, int value) {
+        data(server).setPrebuiltReuseServerMinEligible(value);
+    }
+
+    /** 服务器默认使用概率 */
+    public static int getPrebuiltReuseServerHitChance(MinecraftServer server) {
+        return data(server).getPrebuiltReuseServerHitChance();
+    }
+
+    /** 写服务器默认使用概率（调用方负责先做范围校验与管理员校验） */
+    public static void setPrebuiltReuseServerHitChance(MinecraftServer server, int value) {
+        data(server).setPrebuiltReuseServerHitChance(value);
+    }
+
+    /** 是否允许玩家自定义预制复用参数 */
+    public static boolean arePrebuiltReusePlayerParametersAllowed(MinecraftServer server) {
+        return data(server).isPrebuiltReusePlayerParametersAllowed();
+    }
+
+    /**
+     * 写「允许玩家自定义参数」：关闭时在<b>同一服务端主线程操作</b>中清空整张取消跟随表
+     * （覆盖所有已存玩家，含离线玩家），但保留两张个人数值表。
+     */
+    public static void setPrebuiltReusePlayerParametersAllowed(MinecraftServer server, boolean allowed) {
+        data(server).setPrebuiltReusePlayerParametersAllowed(allowed);
+    }
+
+    /** 玩家是否跟随服务器默认参数（缺省 true = 跟随） */
+    public static boolean isPrebuiltReuseFollowingServer(MinecraftServer server, UUID playerUuid) {
+        return playerUuid == null || data(server).isPrebuiltReuseFollowServer(playerUuid);
+    }
+
+    /** 写跟随状态（跟随 = 删键，取消跟随 = 存 false） */
+    public static void setPrebuiltReuseFollowingServer(MinecraftServer server, UUID playerUuid, boolean follow) {
+        if (playerUuid == null) {
+            return;
+        }
+        data(server).setPrebuiltReuseFollowServer(playerUuid, follow);
+    }
+
+    /** 玩家个人最低可用条数（**已存偏好**，不代表当前有效值） */
+    public static int getPrebuiltReusePlayerMinEligible(MinecraftServer server, UUID playerUuid) {
+        if (playerUuid == null) {
+            return PrebuiltReuseParameters.DEFAULT_MIN_ELIGIBLE_ENTRIES;
+        }
+        return data(server).getPrebuiltReusePlayerMinEligible(playerUuid);
+    }
+
+    /** 写玩家个人最低可用条数（调用方负责范围校验与「已取消跟随」校验） */
+    public static void setPrebuiltReusePlayerMinEligible(MinecraftServer server, UUID playerUuid, int value) {
+        if (playerUuid == null) {
+            return;
+        }
+        data(server).setPrebuiltReusePlayerMinEligible(playerUuid, value);
+    }
+
+    /** 玩家个人使用概率（**已存偏好**，不代表当前有效值） */
+    public static int getPrebuiltReusePlayerHitChance(MinecraftServer server, UUID playerUuid) {
+        if (playerUuid == null) {
+            return PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT;
+        }
+        return data(server).getPrebuiltReusePlayerHitChance(playerUuid);
+    }
+
+    /** 写玩家个人使用概率（调用方负责范围校验与「已取消跟随」校验） */
+    public static void setPrebuiltReusePlayerHitChance(MinecraftServer server, UUID playerUuid, int value) {
+        if (playerUuid == null) {
+            return;
+        }
+        data(server).setPrebuiltReusePlayerHitChance(playerUuid, value);
+    }
+
+    /**
+     * 玩家<b>有效</b>预制复用参数：服务器未开放个人参数、或玩家选择跟随时取服务器值；
+     * 只有「已开放 + 玩家明确取消跟随」才取个人值。两项各自独立判定，互不覆盖。
+     */
+    public static PrebuiltReuseParameters getPrebuiltReuseParameters(MinecraftServer server, UUID playerUuid) {
+        PlayerSettingsSavedData store = data(server);
+        int serverMin = store.getPrebuiltReuseServerMinEligible();
+        int serverChance = store.getPrebuiltReuseServerHitChance();
+        if (playerUuid == null || !store.isPrebuiltReusePlayerParametersAllowed()
+                || store.isPrebuiltReuseFollowServer(playerUuid)) {
+            return new PrebuiltReuseParameters(serverMin, serverChance);
+        }
+        return new PrebuiltReuseParameters(store.getPrebuiltReusePlayerMinEligible(playerUuid),
+                store.getPrebuiltReusePlayerHitChance(playerUuid));
+    }
+
+    /**
+     * 女仆的有效预制复用参数：按本只女仆的<b>主人 UUID</b> 解析，不查在线玩家实体
+     * （主人离线同样生效）；无主女仆用服务器默认值。
+     */
+    public static PrebuiltReuseParameters getPrebuiltReuseParametersForMaid(MinecraftServer server, EntityMaid maid) {
+        UUID ownerUuid = maid.getOwnerUUID();
+        if (ownerUuid == null) {
+            PlayerSettingsSavedData store = data(server);
+            return new PrebuiltReuseParameters(store.getPrebuiltReuseServerMinEligible(),
+                    store.getPrebuiltReuseServerHitChance());
+        }
+        return getPrebuiltReuseParameters(server, ownerUuid);
+    }
+
+    /**
+     * 是否具备服务器参数管理权限：OP 权限等级 ≥ 2，或单人世界的本地房主。
+     * <p>
+     * 每次调用都重新判定，不缓存——权限可能在运行时变化。
+     */
+    public static boolean isPrebuiltReuseAdmin(ServerPlayer player) {
+        if (player == null) {
+            return false;
+        }
+        if (player.hasPermissions(2)) {
+            return true;
+        }
+        return player.server.isSingleplayerOwner(player.getGameProfile());
     }
 }
