@@ -199,7 +199,7 @@ public final class SelfTalkHandler {
             // 窗口期内每 tick 自然重试，窗口过期放弃），与自话语义一致
             if (loginTick != null && maid.getOwner() != null
                     && serverTick - loginTick <= Config.WELCOME_WINDOW_TICKS.get()) {
-                if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
+                if (!PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
                     return;
                 }
                 // 欢迎语闸门未放行则不标记、不发请求，窗口期内每 tick 自然重试
@@ -231,7 +231,7 @@ public final class SelfTalkHandler {
         // 互聊触发：独立于自话的冷却，但发起者派发与自话共用全局闸门（5~8s）
         if (Config.INTER_CHAT_ENABLED.get() && serverTick >= state.nextInterChatTriggerTick) {
             // 玩家独立设置：管理员允许玩家配置时，检查该女仆主人及其单只名单（1.1.2 起离线亦可读）
-            if (!(Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), maid))) {
+            if (PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), maid)) {
                 // 互聊对锁：本女仆正与他人连续互聊中，不能发起新互聊，短退避后重试
                 if (SelfTalkDispatcher.isMaidInterChatLocked(maid, serverTick)) {
                     state.nextInterChatTriggerTick = serverTick + RESPONDER_RETRY_TICKS;
@@ -283,7 +283,7 @@ public final class SelfTalkHandler {
                 return;
             }
             // 玩家独立设置：管理员允许玩家配置时，检查该女仆主人及其单只名单（1.1.2 起离线亦可读）
-            if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
+            if (!PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
                 return;
             }
             if (!hasPlayerNearby(maid, Config.STATE1_PLAYER_RANGE.get())) {
@@ -306,7 +306,7 @@ public final class SelfTalkHandler {
                 return;
             }
             // 1.1.2 起玩家设置随世界存档（overworld），主人离线（态 2）同样检查玩家设置并生效
-            if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
+            if (!PlayerSettingsStore.isSelfTalkEnabledForMaid(level.getServer(), maid)) {
                 return;
             }
             if (!hasPlayerNearby(maid, Config.STATE2_PLAYER_RANGE.get())) {
@@ -729,7 +729,7 @@ public final class SelfTalkHandler {
             if (!MaidPersonaRuntime.hasUsablePersona(m)) {
                 continue;
             }
-            if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), m)) {
+            if (!PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), m)) {
                 continue;
             }
             available.add(m);

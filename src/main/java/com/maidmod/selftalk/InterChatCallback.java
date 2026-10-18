@@ -305,7 +305,7 @@ public class InterChatCallback extends LLMCallback {
             endChainAndComplete(null);
             return;
         }
-        if (Config.PLAYER_OPTION_ENABLED.get() && !PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), nextSpeaker)) { endChainAndComplete(null); return; }
+        if (!PlayerSettingsStore.isInterChatEnabledForMaid(level.getServer(), nextSpeaker)) { endChainAndComplete(null); return; }
         // 主人插话/请求作废可能在上方任一步之间发生：派发前再确认一次链未中断、请求未作废
         if (!isStillAllowed()) { endChainAndComplete(null); return; }
         // 链的两轮交接（第 3 轮起）：对方上一轮交付后才轮到本轮派发，此时其正式请求必然已实际
