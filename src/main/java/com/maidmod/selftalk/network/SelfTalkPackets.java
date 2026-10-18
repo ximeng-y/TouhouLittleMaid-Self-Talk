@@ -60,6 +60,8 @@ public final class SelfTalkPackets {
         // v14：新增预制复用设置三包（C2S Request/Set + S2C Response，服务端权威快照协议）；
         // v15：预制复用 Set 增加整数 value 字段与 5~10 号参数操作码，Response 增加管理员身份、
         // 服务器默认参数、个人参数权限、跟随状态与已存个人值字段（issue #108）；
+        // 人设保存请求新增 confirmMode 标记（显式保存确认模式 / 仅内容保存由服务端保留当前实际模式），
+        // 页面「保存」「保存并退出」接管为本 mod 显式保存入口，离页自动保存不再改变实际模式；
         // 同样不做向后兼容：NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
         PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("15");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,
@@ -572,7 +574,7 @@ public final class SelfTalkPackets {
         });
     }
 
-    /** 实际写入路径：按顺序校验后整份替换宿主配置，返回固定结果码对应回包（null = 无法匹配的请求，丢弃） */
+    /** 实际写入路径：按顺序校验后按保存意图构造配置并整份替换宿主，返回固定结果码对应回包（null = 无法匹配的请求，丢弃） */
     private static MaidPersonaSaveResponsePayload savePersona(ServerPlayer player, MaidPersonaSavePayload payload) {
         UUID requestId = payload.requestId();
         UUID maidUuid = payload.maidUuid();
@@ -605,9 +607,13 @@ public final class SelfTalkPackets {
             return MaidPersonaSaveResponsePayload.failure(requestId, entityId, maidUuid,
                     MaidPersonaSaveResponsePayload.RESULT_BUSY);
         }
-        MaidPersonaConfig config = payload.toConfig();
+        // 按保存意图构造最终配置：显式保存采用请求配置；内容保存读取处理请求当时的服务端配置
+        // 合并新四栏，不使用客户端传来的模式
+        MaidPersonaConfig config = payload.confirmMode()
+                ? payload.toConfig()
+                : MaidPersonaHost.configOf(maid).withDraft(payload.toDraft());
         if (!config.draft().withinLimit()) {
-            // 模式与内容一次成形：长度只按四栏合计判定（模式标签是固定短值）
+            // 长度只按四栏合计判定（模式标签是固定短值）
             return MaidPersonaSaveResponsePayload.failure(requestId, entityId, maidUuid,
                     MaidPersonaSaveResponsePayload.RESULT_TOO_LONG);
         }

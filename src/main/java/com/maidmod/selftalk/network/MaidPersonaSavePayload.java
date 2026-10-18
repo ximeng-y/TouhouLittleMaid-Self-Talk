@@ -12,7 +12,11 @@ import net.minecraft.resources.ResourceLocation;
 import java.util.UUID;
 
 /**
- * C2S：保存某只女仆的人设配置（模式 + 四栏内容，整份替换）。
+ * C2S：保存某只女仆的人设配置（意图标记 + 四栏内容）。
+ * <p>
+ * confirmMode 区分保存意图：{@code true} = 显式保存（页面「保存」/「保存并退出」），
+ * 服务端采用请求中的模式与四栏；{@code false} = 仅内容保存（离页自动保存），
+ * 请求中的模式不具写入效力，服务端保留处理请求当时的实际模式、只并入新四栏。
  * <p>
  * 四个栏位按平台原生有界编解码直传原文：不做截断、控制字符过滤与段标签清洗
  * （与自定义 Prompt 的写入清洗策略刻意不同——人设内容原样保留，界面与存档保留玩家输入）。
@@ -22,13 +26,15 @@ import java.util.UUID;
  * 同时携带女仆 UUID：实体 id 只在单个连接内、且只在发送时刻的维度内有效，
  * 服务端必须同时核对 id 与 UUID 才能确认「收到请求的这只，就是玩家当初编辑的那只」。
  *
- * @param requestId 本次提交的请求 id（回包按它匹配，避免迟到响应被当作本次结果）
- * @param entityId  女仆实体 id（服务端在玩家当前维度查找该实体）
- * @param maidUuid  女仆 UUID（与 entityId 双重校验，防实体 id 复用/换维度后错改别的女仆）
- * @param mode      人设模式标签（{@link MaidPersonaMode#tag()}，未知值服务端按原版处理）
+ * @param requestId   本次提交的请求 id（回包按它匹配，避免迟到响应被当作本次结果）
+ * @param entityId    女仆实体 id（服务端在玩家当前维度查找该实体）
+ * @param maidUuid    女仆 UUID（与 entityId 双重校验，防实体 id 复用/换维度后错改别的女仆）
+ * @param confirmMode 保存意图：true = 显式保存（确认模式与四栏），false = 仅内容保存（模式不写入）
+ * @param mode        人设模式标签（仅显式保存时生效；{@link MaidPersonaMode#tag()}，未知值服务端按原版处理）
  */
-public record MaidPersonaSavePayload(UUID requestId, int entityId, UUID maidUuid, String mode,
-                                     String identity, String personality, String background, String hobbies)
+public record MaidPersonaSavePayload(UUID requestId, int entityId, UUID maidUuid, boolean confirmMode,
+                                     String mode, String identity, String personality, String background,
+                                     String hobbies)
         implements CustomPacketPayload {
 
     /** 单栏流侧上限：等于四栏合计上限（四栏各占满也仍可解码，由服务端按合计判定超限） */
@@ -54,6 +60,7 @@ public record MaidPersonaSavePayload(UUID requestId, int entityId, UUID maidUuid
                 buf.writeUUID(payload.requestId());
                 buf.writeVarInt(payload.entityId());
                 buf.writeUUID(payload.maidUuid());
+                buf.writeBoolean(payload.confirmMode());
                 buf.writeUtf(payload.mode(), MAX_MODE_LENGTH);
                 buf.writeUtf(payload.identity(), MAX_WIRE_FIELD_LENGTH);
                 buf.writeUtf(payload.personality(), MAX_WIRE_FIELD_LENGTH);
@@ -61,7 +68,7 @@ public record MaidPersonaSavePayload(UUID requestId, int entityId, UUID maidUuid
                 buf.writeUtf(payload.hobbies(), MAX_WIRE_FIELD_LENGTH);
             },
             buf -> new MaidPersonaSavePayload(buf.readUUID(), buf.readVarInt(), buf.readUUID(),
-                    buf.readUtf(MAX_MODE_LENGTH), buf.readUtf(MAX_WIRE_FIELD_LENGTH),
+                    buf.readBoolean(), buf.readUtf(MAX_MODE_LENGTH), buf.readUtf(MAX_WIRE_FIELD_LENGTH),
                     buf.readUtf(MAX_WIRE_FIELD_LENGTH), buf.readUtf(MAX_WIRE_FIELD_LENGTH),
                     buf.readUtf(MAX_WIRE_FIELD_LENGTH)));
 
@@ -70,7 +77,7 @@ public record MaidPersonaSavePayload(UUID requestId, int entityId, UUID maidUuid
         return new MaidPersonaDraft(identity, personality, background, hobbies);
     }
 
-    /** 本次提交的完整配置快照：模式与四栏一次成形，服务端整份替换用 */
+    /** 本次提交的完整配置快照：仅显式保存时由服务端整份采用（内容保存只用 toDraft） */
     public MaidPersonaConfig toConfig() {
         return new MaidPersonaConfig(MaidPersonaMode.fromTag(mode), toDraft());
     }
