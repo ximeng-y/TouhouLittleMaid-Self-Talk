@@ -3,6 +3,8 @@ package com.maidmod.selftalk.client;
 import com.github.tartaricacid.touhoulittlemaid.client.gui.entity.maid.ai.SettingEditScreen;
 import com.github.tartaricacid.touhoulittlemaid.client.gui.widget.button.FlatColorButton;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.github.tartaricacid.touhoulittlemaid.network.NetworkHandler;
+import com.github.tartaricacid.touhoulittlemaid.network.message.ai.SaveMaidAIDataMessage;
 import com.maidmod.selftalk.MaidPersonaConfig;
 import com.maidmod.selftalk.MaidPersonaDraft;
 import com.maidmod.selftalk.MaidPersonaHost;
@@ -31,6 +33,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.lwjgl.glfw.GLFW;
 
 import javax.annotation.Nullable;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -39,22 +42,25 @@ import java.util.UUID;
  * <p>
  * 页面上同时保留原版的整段人设输入框与保存 / 保存并退出 / 返回按钮：
  * <ul>
- *   <li>整段人设模式（默认）：显示原版输入框，行为与原版一致；</li>
+ *   <li>整段人设模式（默认）：显示原版输入框；</li>
  *   <li>结构化人设模式：隐藏原版输入框（挪出屏幕，使其跟随输入框位置绘制的标签 /
  *       保存提示一并消失），同一区域改为身份 / 性格 / 背景 / 爱好四行
  *       「栏目标签 + 可滚动文本框」，四栏同时可见。</li>
  * </ul>
- * 右侧按钮列调整为：布娃娃预览在顶部，原版保存按钮位置不变，其下依次为
+ * 右侧按钮列调整为：布娃娃预览在顶部，原版位置上的「保存」/「保存并退出」按钮由本页接管
+ * （显式保存：确认模式 + 原生保存原版文字），其下依次为
  * 「导出设定」（从原版顶部移来）、模式切换按钮、AI 拆分按钮。
  * <p>
  * 模式与四栏内容独立于原版整段人设存储：切模式、改文字都不触碰原版输入框，
- * 两套内容互不复制、覆盖或删除。点击模式按钮立即把「模式 + 四栏快照」整份提交保存；
- * 原版保存按钮在页面有未保存改动时也会附带提交同一份快照。
+ * 两套内容互不复制、覆盖或删除。页面模式只代表编辑视图：切换按钮不发送保存请求；
+ * 只有「保存」/「保存并退出」才确认模式；真正离开页面时自动保存有变化的原版文字与四栏内容，
+ * 但不改变实际模式。
  * <p>
- * 保存是「请求 - 结果确认」两段式：提交时生成新 requestId 并冻结本次快照，服务端整份替换后按该
- * requestId 回结果，回包里带服务端确认的完整配置。等待期间禁止继续编辑与重复提交；只有当前打开、
- * id 匹配的页面处理响应，关闭后的迟到响应不会落到任何界面上。成功以<b>服务端确认值</b>写回客户端宿主
- * 与基线并清 dirty；失败保留页面内容与 dirty，且不得被当成已保存。
+ * 保存是「请求 - 结果确认」两段式：提交时生成新 requestId 并冻结本次快照，服务端按请求意图处理后
+ * 按该 requestId 回结果，回包里带服务端确认的完整配置。显式保存（confirmMode=true）整份采用请求中的
+ * 模式与四栏；离页内容保存（confirmMode=false）由服务端保留当前实际模式、只并入新四栏。等待期间禁止
+ * 继续编辑与重复提交；只有当前打开、id 匹配的页面处理响应，关闭后的迟到响应不会落到任何界面上。
+ * 成功以<b>服务端确认值</b>写回客户端宿主与基线；失败保留页面内容与 dirty，且不得被当成已保存。
  * <p>
  * <b>AI 拆分</b>：点击时读取原版输入框当前文本（含未保存修改），发起一次静默整理请求。
  * 成功且页面一直未离开、仍是当前页面时整份填入四栏并切到结构化模式显示（保持基线不变，
@@ -100,13 +106,19 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     /** 原版「导出设定」按钮：init 后重定位到按钮列下方 */
     @Nullable
     private FlatColorButton exportButton;
+    /** 本页接管的「保存」按钮（替换原版回调：显式保存、不退出，位置/尺寸/文字与原版一致） */
+    @Nullable
+    private FlatColorButton saveButton;
+    /** 本页接管的「保存并退出」按钮（显式保存，成功回包后退出） */
+    @Nullable
+    private FlatColorButton saveQuitButton;
     /** 原版输入框在原版布局中的位置与宽度（init 定位成功后取实际值，失败保持常量默认值） */
     private int vanillaBoxX;
     private int vanillaBoxY = BOX_TOP;
     private int vanillaBoxWidth = BOX_WIDTH;
 
-    /** 页面模式（与四栏内容一起构成待提交配置） */
-    private MaidPersonaMode mode;
+    /** 编辑视图模式：只决定页面显示/编辑哪一套内容，不代表女仆实际使用模式（实际模式见 baseline，仅显式保存可确认） */
+    private MaidPersonaMode editingMode;
     /** 四栏页面内容（编辑源；与各输入框内容实时同步） */
     private final String[] draft = new String[MaidPersonaDraft.CATEGORY_COUNT];
     /** 已保存基线：最近一次「服务端确认成功」的完整配置，用于判定 dirty */
@@ -114,6 +126,14 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
 
     /** 本次提交的 requestId；非 null 表示正在等待结果（禁止编辑与重复提交） */
     private UUID pendingRequestId;
+    /** 在途请求的保存意图：true = 显式保存（确认请求中的模式），false = 仅内容保存（模式不写入） */
+    private boolean pendingConfirmMode;
+    /** 在途请求成功后是否退出页面（「保存并退出」登记；失败或已离开原页面则不退出） */
+    private boolean pendingExitAfter;
+
+    /** 最近一次原生保存已发出的原版文字与主人称呼：离页只在有变化时补发，避免显式保存后重复发送 */
+    private String sentCustomSetting;
+    private String sentOwnerName;
 
     /** 程序化 setValue 期间挂起监听，防把载入的栏内容误当输入 */
     private boolean loadingBox;
@@ -144,11 +164,15 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         this.maid = maid;
         // 打开时读客户端已同步配置：宿主不可用（未挂载/未同步）时按默认配置处理，不阻断页面
         MaidPersonaConfig current = MaidPersonaHost.configOf(maid);
-        this.mode = current.mode();
+        this.editingMode = current.mode();
         for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
             this.draft[i] = current.draft().get(i);
         }
         this.baseline = current;
+        // 原版文字的「最近发送值」以打开页面时的内容为基线：未改动就不在离页时补发原生保存
+        // （记录只在显式/离页发送时更新，不在 init/resize 重置）
+        this.sentCustomSetting = this.maid.getAiChatManager().customSetting;
+        this.sentOwnerName = this.maid.getAiChatManager().ownerName;
         // 跨页面待确认门禁：同女仆仍有未确认保存时（旧请求回包未到），
         // 禁止编辑与提交，等待确认后由 onHostConfirmed 并入并解锁，避免旧基线覆盖新值
         this.awaitingConfirmation = SelfTalkPlayerSettingsClient.hasPendingSaveFor(this.maid.getId());
@@ -213,19 +237,30 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         applyModeVisibility();
     }
 
-    /** 从原版 init 建立的控件中找回整段人设框与导出按钮，并记录输入框的原版布局位置 */
+    /** 从原版 init 建立的控件中找回整段人设框与导出按钮，并记录输入框的原版布局位置；同时接管两个原版保存按钮 */
     private void locateVanillaWidgets() {
         this.customSetting = null;
         this.exportButton = null;
         String exportText = Component.translatable(
                 "gui.touhou_little_maid.button.maid_ai_chat_config.edit_custom_setting.export").getString();
-        for (GuiEventListener child : this.children()) {
+        String saveText = Component.translatable("selectWorld.edit.save").getString();
+        String saveQuitText = Component.translatable(
+                "gui.touhou_little_maid.button.maid_ai_chat_config.edit_custom_setting.save_and_quit").getString();
+        FlatColorButton vanillaSave = null;
+        FlatColorButton vanillaSaveQuit = null;
+        for (GuiEventListener child : List.copyOf(this.children())) {
             if (this.customSetting == null && child instanceof MultiLineEditBox box) {
                 this.customSetting = box;
             }
-            if (this.exportButton == null && child instanceof FlatColorButton button
-                    && exportText.equals(button.getMessage().getString())) {
-                this.exportButton = button;
+            if (child instanceof FlatColorButton button) {
+                String text = button.getMessage().getString();
+                if (exportText.equals(text)) {
+                    this.exportButton = button;
+                } else if (saveText.equals(text)) {
+                    vanillaSave = button;
+                } else if (saveQuitText.equals(text)) {
+                    vanillaSaveQuit = button;
+                }
             }
         }
         if (this.customSetting != null) {
@@ -238,11 +273,38 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         if (this.exportButton == null) {
             MaidSelfTalkMod.LOGGER.warn("未能在原版人设页定位导出设定按钮，该按钮保持原版位置");
         }
+        this.saveButton = replaceSaveButton(vanillaSave, saveText, false);
+        this.saveQuitButton = replaceSaveButton(vanillaSaveQuit, saveQuitText, true);
     }
 
-    /** 模式开关标签：显示当前模式（点击切到另一个） */
+    /**
+     * 接管原版保存按钮：移除原按钮，在相同位置以相同文字重建为本页回调的 FlatColorButton。
+     * 「保存」走显式保存（确认模式），「保存并退出」显式保存并在成功回包后退出。
+     * 原按钮缺失（定位失败）时按原版布局常量退位重建，保证保存入口始终存在。
+     */
+    @Nullable
+    private FlatColorButton replaceSaveButton(@Nullable FlatColorButton vanilla, String text, boolean exitAfter) {
+        int x;
+        int y;
+        if (vanilla != null) {
+            this.removeWidget(vanilla);
+            x = vanilla.getX();
+            y = vanilla.getY();
+        } else {
+            // 原版布局：保存按钮与输入框顶对齐、在右侧按钮列上，「保存并退出」在其下 25px
+            x = this.vanillaBoxX + COLUMN_OFFSET;
+            y = this.vanillaBoxY + (exitAfter ? 25 : 0);
+            MaidSelfTalkMod.LOGGER.warn("未能在原版人设页定位原版保存按钮，已按原版布局重建本页保存入口");
+        }
+        FlatColorButton button = new FlatColorButton(x, y, COLUMN_WIDTH, BUTTON_HEIGHT,
+                Component.translatable(text), b -> explicitSave(exitAfter));
+        this.addRenderableWidget(button);
+        return button;
+    }
+
+    /** 模式开关标签：显示当前编辑视图模式（点击切到另一个） */
     private Component modeLabel() {
-        return modeName(this.mode);
+        return modeName(this.editingMode);
     }
 
     private static Component modeName(MaidPersonaMode mode) {
@@ -262,9 +324,9 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         };
     }
 
-    /** 按当前模式切换原版输入框与四栏文本框的显示（同一区域互斥） */
+    /** 按当前编辑视图模式切换原版输入框与四栏文本框的显示（同一区域互斥） */
     private void applyModeVisibility() {
-        boolean structured = this.mode.isStructured();
+        boolean structured = this.editingMode.isStructured();
         if (this.customSetting != null) {
             toggleChild(this.customSetting, !structured);
             // 原版 render/mouseReleased 按字段直接引用输入框：「自定义设定」标签与保存提示跟随其位置
@@ -310,9 +372,9 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         return this.customSetting == null ? "" : this.customSetting.getValue();
     }
 
-    /** 结构化模式判定（mixin 据此跳过对隐藏原版输入框的释放派发） */
+    /** 结构化编辑视图判定（mixin 据此跳过对隐藏原版输入框的释放派发） */
     public boolean isStructuredMode() {
-        return this.mode.isStructured();
+        return this.editingMode.isStructured();
     }
 
     /**
@@ -329,21 +391,20 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     }
 
     /**
-     * 切换模式：只改页面显示与待提交配置，不触碰两套内容本身。
-     * 「只要切换就保存」——切换后立即整份提交（模式 + 四栏快照）；
-     * 提交失败时显示保持切换后的模式，基线不更新，下次点原版保存会再次提交。
+     * 切换模式：只改页面编辑视图（显示的输入框与按钮文字），不发送任何保存请求、
+     * 不触碰两套内容本身。实际模式仍以服务端已确认的为准，需点击「保存」或「保存并退出」确认。
      */
     private void toggleMode() {
         if (this.pendingRequestId != null || this.awaitingConfirmation
                 || MaidPersonaSplitClient.isRunningFor(this.maid.getUUID())) {
             return;
         }
-        this.mode = this.mode.isStructured() ? MaidPersonaMode.ORIGINAL : MaidPersonaMode.STRUCTURED;
+        this.editingMode = this.editingMode.isStructured()
+                ? MaidPersonaMode.ORIGINAL : MaidPersonaMode.STRUCTURED;
         applyModeVisibility();
         if (this.modeButton != null) {
             this.modeButton.setMessage(modeLabel());
         }
-        submitPersona();
     }
 
     /** 当前四栏值（各输入框内容经监听实时同步，无需先落盘） */
@@ -425,15 +486,15 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     }
 
     /**
-     * 载入整理候选：整份填入四栏并切到结构化模式显示，标记来源 requestId（保存时登记关联）。
-     * 这里只切显示、不立即保存——AI 结果仍需玩家确认后手动保存。
-     * 候选本身保留在缓存里，直到保存成功或被显式丢弃。
+     * 载入整理候选：整份填入四栏并切到结构化编辑视图，标记来源 requestId（保存时登记关联）。
+     * 这里只改编辑态、不立即保存也不更新基线——AI 结果需显式保存后内容才保留，
+     * 且载入本身不确认实际模式。候选保留在缓存里，直到内容保存成功或被显式丢弃。
      */
     private void loadSplitCandidate(MaidPersonaSplitClient.Entry entry) {
         if (entry.candidate() == null) {
             return;
         }
-        this.mode = MaidPersonaMode.STRUCTURED;
+        this.editingMode = MaidPersonaMode.STRUCTURED;
         for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
             this.draft[i] = entry.candidate().get(i);
         }
@@ -525,22 +586,24 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
 
     // ===== 保存 =====
 
-    /** 当前完整页面配置（模式 + 四栏），即本次保存要提交的内容 */
+    /** 当前完整页面配置（编辑模式 + 四栏）：显式保存提交这份；内容保存只用其中的四栏 */
     private MaidPersonaConfig currentConfig() {
-        return new MaidPersonaConfig(this.mode, currentDraft());
+        return new MaidPersonaConfig(this.editingMode, currentDraft());
     }
 
-    /** 页面内容（含模式）相对已保存基线是否有未保存改动 */
+    /** 四栏内容相对已保存基线是否有未保存改动（不含模式） */
+    private boolean contentDirty() {
+        return !this.baseline.draft().equals(currentDraft());
+    }
+
+    /** 编辑模式相对实际模式是否待确认（仅显式保存会确认模式） */
+    private boolean modePending() {
+        return this.editingMode != this.baseline.mode();
+    }
+
+    /** 页面整体未保存改动（内容变化或模式待确认），供替换确认等现有逻辑使用 */
     private boolean isDirty() {
-        return !this.baseline.equals(currentConfig());
-    }
-
-    /**
-     * 原版保存按钮（保存 / 保存并退出）的附带保存：内容有改动时提交同一份快照。
-     * 由 SettingEditScreenMixin 注入原版 {@code saveConfig()} 末尾调用。
-     */
-    public void onVanillaSave() {
-        submitPersona();
+        return contentDirty() || modePending();
     }
 
     /**
@@ -555,7 +618,7 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         if (this.maid.getId() != entityId || this.pendingRequestId != null || isDirty()) {
             return;
         }
-        this.mode = confirmed.mode();
+        this.editingMode = confirmed.mode();
         for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
             this.draft[i] = confirmed.draft().get(i);
         }
@@ -586,16 +649,57 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     }
 
     /**
-     * 提交保存：冻结本次完整配置快照（模式 + 四栏）并发出请求，随后进入等待态。
-     * 未变更时跳过（模式切换必然产生改动）；超限时不发包并提示。
+     * 显式保存（「保存」/「保存并退出」按钮）：原版文字始终沿用原生保存；本 mod 配置在
+     * 模式待确认或四栏有变化时发送 confirmMode=true 的确认请求。「保存并退出」等待成功回包
+     * 再退出、失败留在页面；无本 mod 配置改动时不制造等待请求，可直接退出。
      */
-    private void submitPersona() {
+    private void explicitSave(boolean exitAfter) {
+        if (this.pendingRequestId != null || this.awaitingConfirmation
+                || MaidPersonaSplitClient.isRunningFor(this.maid.getUUID())) {
+            return;
+        }
+        sendVanillaSave();
+        if (modePending() || contentDirty()) {
+            // 请求已发出：等待回包，成功且为「保存并退出」时由回包处理退出；
+            // 未发出（超限等）：留在页面，错误已在状态行提示
+            submitPersona(true, exitAfter);
+            return;
+        }
+        if (exitAfter) {
+            this.onClose();
+        }
+    }
+
+    /**
+     * 原版文字保存：沿用 TLM 原生包发送当前 AI 数据（保留 LLM、TTS、语言等原生字段与主人称呼，
+     * 从女仆当前 AI 数据直接冻结，不用默认值重建），并记录最近发送值供离页去重。
+     * 该原生包没有保存确认回包，「已发出」不代表服务端已确认。
+     */
+    private void sendVanillaSave() {
+        NetworkHandler.CHANNEL.sendToServer(new SaveMaidAIDataMessage(this.maid.getId(),
+                this.maid.getAiChatManager()));
+        this.sentCustomSetting = this.maid.getAiChatManager().customSetting;
+        this.sentOwnerName = this.maid.getAiChatManager().ownerName;
+    }
+
+    /** 原版文字或主人称呼相对最近发送值是否有变化 */
+    private boolean vanillaTextChanged() {
+        return !this.maid.getAiChatManager().customSetting.equals(this.sentCustomSetting)
+                || !this.maid.getAiChatManager().ownerName.equals(this.sentOwnerName);
+    }
+
+    /**
+     * 提交保存：冻结本次完整配置快照并发出请求，随后进入等待态。
+     * 显式保存（confirmMode=true）在整体有变化时发送，服务端确认请求中的模式与四栏；
+     * 内容保存（confirmMode=false）只在四栏有变化时发送，请求中的模式不具写入效力。
+     */
+    private void submitPersona(boolean confirmMode, boolean exitAfter) {
         if (this.pendingRequestId != null || this.awaitingConfirmation
                 || MaidPersonaSplitClient.isRunningFor(this.maid.getUUID())) {
             return;
         }
         MaidPersonaConfig snapshot = currentConfig();
-        if (snapshot.equals(this.baseline)) {
+        if (confirmMode ? snapshot.equals(this.baseline) : !contentDirty()) {
             return;
         }
         if (!snapshot.draft().withinLimit()) {
@@ -604,45 +708,66 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
             return;
         }
         this.pendingRequestId = UUID.randomUUID();
+        this.pendingConfirmMode = confirmMode;
+        this.pendingExitAfter = exitAfter;
         setStatus(Component.translatable(
                 "config.maid_self_talk.screen.persona_draft.status.saving"), 0xFFAA55);
         // 客户端级登记：页面提前关闭时，回包仍能独立定位女仆并更新客户端宿主（见 SelfTalkPlayerSettingsClient）
         SelfTalkPlayerSettingsClient.registerPersonaSave(this.pendingRequestId, this.maid);
-        // 本页载入过整理候选：登记「保存请求 → 整理候选」关联，保存成功后由整理缓存消费候选
+        // 本页载入过整理候选：登记「保存请求 → 整理候选」关联，内容保存成功即可消费候选（模式仍需显式确认）
         if (this.loadedSplitRequestId != null) {
             MaidPersonaSplitClient.linkSave(this.pendingRequestId, this.maid.getUUID(),
                     this.loadedSplitRequestId);
         }
         SelfTalkPackets.CHANNEL.sendToServer(new MaidPersonaSaveMessage(this.pendingRequestId,
-                this.maid.getId(), this.maid.getUUID(), snapshot.mode().tag(),
+                this.maid.getId(), this.maid.getUUID(), confirmMode, snapshot.mode().tag(),
                 snapshot.draft().identity(), snapshot.draft().personality(),
                 snapshot.draft().background(), snapshot.draft().hobbies()));
     }
 
     /**
-     * 处理服务端结果：只认正在等待的那一个 requestId。
-     * 成功时以<b>服务端确认值</b>作为页面内容与基线（不另显示「已保存」成功提示）——客户端宿主的更新已由
-     * {@link SelfTalkPlayerSettingsClient#onPersonaSaveResponse} 独立完成，此处不重复写；
-     * 失败保留页面内容与 dirty，绝不把失败当成已保存。
+     * 处理服务端结果：只认正在等待的那一个 requestId，处理前先取出本次保存意图。
+     * 内容保存成功：以回包更新基线与四栏确认值，保留当前编辑模式与「模式待确认」状态，不退出；
+     * 显式保存成功：采用服务端确认的模式、四栏及基线，「保存并退出」且仍在原页面时才退出。
+     * 失败保留页面编辑态与旧基线，清除在途与退出意图（「保存并退出」失败不自动关页），
+     * 绝不把失败当成已保存。客户端宿主的更新由
+     * {@link SelfTalkPlayerSettingsClient#onPersonaSaveResponse} 独立完成，此处不重复写。
      */
     public void applySaveResponse(MaidPersonaSaveResponseMessage msg) {
         if (this.pendingRequestId == null || !this.pendingRequestId.equals(msg.getRequestId())) {
             return;
         }
+        boolean confirmMode = this.pendingConfirmMode;
+        boolean exitAfter = this.pendingExitAfter;
         this.pendingRequestId = null;
+        this.pendingConfirmMode = false;
+        this.pendingExitAfter = false;
         if (msg.isSuccess()) {
             MaidPersonaConfig saved = msg.getConfirmed();
-            this.mode = saved.mode();
-            for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
-                this.draft[i] = saved.draft().get(i);
+            if (confirmMode) {
+                // 显式保存：模式与四栏一次采用服务端确认值
+                this.editingMode = saved.mode();
+                for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
+                    this.draft[i] = saved.draft().get(i);
+                }
+            } else {
+                // 内容保存：只并入四栏确认值，编辑模式与「模式待确认」状态保留
+                for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
+                    this.draft[i] = saved.draft().get(i);
+                }
             }
             this.baseline = saved;
             // 成功不显示状态行：清掉通用状态文本，避免旧提示残留
             this.statusText = Component.empty();
-            applyModeVisibility();
+            if (confirmMode) {
+                applyModeVisibility();
+            }
             refreshBoxes();
-            if (this.modeButton != null) {
+            if (confirmMode && this.modeButton != null) {
                 this.modeButton.setMessage(modeLabel());
+            }
+            if (exitAfter && this.minecraft != null && this.minecraft.screen == this) {
+                this.onClose();
             }
             return;
         }
@@ -692,6 +817,26 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         // 真正离开：不取消任务，只标记离开（结果改为暂存，重开该女仆页面时确认载入）
         this.leftPage = true;
         MaidPersonaSplitClient.markLeft(this.maid.getUUID(), this.pageId);
+        // 离页自动保存：只保存有变化的文字内容，不改变实际模式，也不等待回包
+        saveUnsavedOnExit();
+    }
+
+    /**
+     * 真正离页时的一次性自动保存：原版文字/称呼有变化才补发原生保存；四栏内容有变化且保存门禁
+     * 允许时发送仅内容保存（confirmMode=false，服务端保留当前实际模式）。不等待回包、无失败重试；
+     * 已有本 mod 保存请求在途时不叠加第二个请求。原版文字与四栏的保存判断相互独立，
+     * 四栏被门禁拦下不影响原生保存。
+     */
+    private void saveUnsavedOnExit() {
+        if (this.minecraft == null || this.minecraft.level == null) {
+            // 连接不可用：无法发送保存，静默放弃（不新增离线恢复机制）
+            return;
+        }
+        if (vanillaTextChanged()) {
+            sendVanillaSave();
+        }
+        // 门禁（在途/跨页等待/整理互斥）与「内容有变化」判断都在 submitPersona 内
+        submitPersona(false, false);
     }
 
     @Override
@@ -711,6 +856,13 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
             this.splitButton.active = !locked && !splitSourceText().isBlank()
                     && !MaidPersonaSplitClient.hasReadyCandidate(this.maid.getUUID());
         }
+        // 接管的保存按钮与模式按钮同一禁用口径：保存等待、跨页等待与 AI 整理期间不可点
+        if (this.saveButton != null) {
+            this.saveButton.active = !locked;
+        }
+        if (this.saveQuitButton != null) {
+            this.saveQuitButton.active = !locked;
+        }
         for (GuardedPersonaEditBox box : this.boxes) {
             if (box != null) {
                 box.setEditable(!locked);
@@ -720,7 +872,7 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         super.render(graphics, mouseX, mouseY, partialTick);
 
         int columnX = this.vanillaBoxX + COLUMN_OFFSET;
-        if (this.mode.isStructured()) {
+        if (this.editingMode.isStructured()) {
             // 四栏标签：画在各自文本框上方
             for (int i = 0; i < this.boxes.length; i++) {
                 if (this.boxes[i] != null) {

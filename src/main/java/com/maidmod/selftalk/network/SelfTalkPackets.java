@@ -32,8 +32,10 @@ public final class SelfTalkPackets {
     // 与服务端确认后的完整配置；
     // v13：新增 AI 拆分人设的请求/结果消息（序号 22、23）；
     // v14：新增预制复用设置三包（C2S Request/Set + S2C Response，服务端权威快照协议）；
+    // v15：人设保存请求新增 confirmMode 标记（显式保存确认模式 / 仅内容保存由服务端保留当前实际模式），
+    // 页面「保存」「保存并退出」接管为本 mod 显式保存入口，离页自动保存不再改变实际模式；
     // 不做向后兼容（既定决策），升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
-    private static final String PROTOCOL_VERSION = "14";
+    private static final String PROTOCOL_VERSION = "15";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MaidSelfTalkMod.MODID, "main"),

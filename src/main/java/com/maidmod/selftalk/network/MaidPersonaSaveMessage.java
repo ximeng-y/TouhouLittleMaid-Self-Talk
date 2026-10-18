@@ -16,7 +16,11 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * C2S：保存某只女仆的人设配置（模式 + 四栏内容，整份替换）。
+ * C2S：保存某只女仆的人设配置（意图标记 + 四栏内容）。
+ * <p>
+ * confirmMode 区分保存意图：{@code true} = 显式保存（页面「保存」/「保存并退出」），
+ * 服务端采用请求中的模式与四栏；{@code false} = 仅内容保存（离页自动保存），
+ * 请求中的模式不具写入效力，服务端保留处理请求当时的实际模式、只并入新四栏。
  * <p>
  * 四个栏位按平台原生有界编解码直传原文：不做截断、控制字符过滤与段标签清洗
  * （与自定义 Prompt 的写入清洗策略刻意不同——人设内容原样保留，界面与存档保留玩家输入）。
@@ -40,17 +44,21 @@ public class MaidPersonaSaveMessage {
     private final UUID requestId;
     private final int entityId;
     private final UUID maidUuid;
+    /** 保存意图：true = 显式保存（确认模式与四栏），false = 仅内容保存（模式不写入） */
+    private final boolean confirmMode;
     private final String mode;
     private final String identity;
     private final String personality;
     private final String background;
     private final String hobbies;
 
-    public MaidPersonaSaveMessage(UUID requestId, int entityId, UUID maidUuid, String mode, String identity,
+    public MaidPersonaSaveMessage(UUID requestId, int entityId, UUID maidUuid, boolean confirmMode,
+                                  String mode, String identity,
                                   String personality, String background, String hobbies) {
         this.requestId = requestId;
         this.entityId = entityId;
         this.maidUuid = maidUuid;
+        this.confirmMode = confirmMode;
         this.mode = mode == null ? "" : mode;
         this.identity = identity == null ? "" : identity;
         this.personality = personality == null ? "" : personality;
@@ -75,7 +83,7 @@ public class MaidPersonaSaveMessage {
         return new MaidPersonaDraft(identity, personality, background, hobbies);
     }
 
-    /** 本次提交的完整配置快照：模式与四栏一次成形，服务端整份替换用 */
+    /** 本次提交的完整配置快照：仅显式保存时由服务端整份采用（内容保存只用 toDraft） */
     public MaidPersonaConfig toConfig() {
         return new MaidPersonaConfig(MaidPersonaMode.fromTag(mode), toDraft());
     }
@@ -84,6 +92,7 @@ public class MaidPersonaSaveMessage {
         buf.writeUUID(msg.requestId);
         buf.writeVarInt(msg.entityId);
         buf.writeUUID(msg.maidUuid);
+        buf.writeBoolean(msg.confirmMode);
         buf.writeUtf(msg.mode, MAX_MODE_LENGTH);
         buf.writeUtf(msg.identity, MAX_WIRE_FIELD_LENGTH);
         buf.writeUtf(msg.personality, MAX_WIRE_FIELD_LENGTH);
@@ -95,13 +104,14 @@ public class MaidPersonaSaveMessage {
         UUID requestId = buf.readUUID();
         int entityId = buf.readVarInt();
         UUID maidUuid = buf.readUUID();
+        boolean confirmMode = buf.readBoolean();
         String mode = buf.readUtf(MAX_MODE_LENGTH);
         String identity = buf.readUtf(MAX_WIRE_FIELD_LENGTH);
         String personality = buf.readUtf(MAX_WIRE_FIELD_LENGTH);
         String background = buf.readUtf(MAX_WIRE_FIELD_LENGTH);
         String hobbies = buf.readUtf(MAX_WIRE_FIELD_LENGTH);
-        return new MaidPersonaSaveMessage(requestId, entityId, maidUuid, mode, identity, personality, background,
-                hobbies);
+        return new MaidPersonaSaveMessage(requestId, entityId, maidUuid, confirmMode, mode, identity,
+                personality, background, hobbies);
     }
 
     public static void handle(MaidPersonaSaveMessage msg, Supplier<NetworkEvent.Context> ctx) {
@@ -119,8 +129,10 @@ public class MaidPersonaSaveMessage {
     }
 
     /**
-     * 写入路径：按顺序校验后整份替换宿主配置，返回固定结果码对应回包（null = 无法匹配的请求，丢弃）。
-     * 模式与四栏一次写入，不逐栏写入，也不触碰原版整段人设。
+     * 写入路径：按顺序校验后按保存意图构造配置并整份替换宿主，
+     * 返回固定结果码对应回包（null = 无法匹配的请求，丢弃）。
+     * 显式保存整份采用请求配置；内容保存以处理请求当时的服务端配置合并新四栏，
+     * 请求中的模式不具写入效力（禁止用客户端传来的旧模式「保留模式」）。
      */
     private static MaidPersonaSaveResponseMessage save(ServerPlayer player, MaidPersonaSaveMessage msg) {
         UUID requestId = msg.requestId;
@@ -154,9 +166,13 @@ public class MaidPersonaSaveMessage {
             return MaidPersonaSaveResponseMessage.failure(requestId, entityId, maidUuid,
                     MaidPersonaSaveResponseMessage.RESULT_BUSY);
         }
-        MaidPersonaConfig config = msg.toConfig();
+        // 按保存意图构造最终配置：显式保存采用请求配置；内容保存读取处理请求当时的服务端配置
+        // 合并新四栏，不使用客户端传来的模式
+        MaidPersonaConfig config = msg.confirmMode
+                ? msg.toConfig()
+                : MaidPersonaHost.configOf(maid).withDraft(msg.toDraft());
         if (!config.draft().withinLimit()) {
-            // 模式与内容一次成形：长度只按四栏合计判定（模式标签是固定短值）
+            // 长度只按四栏合计判定（模式标签是固定短值）
             return MaidPersonaSaveResponseMessage.failure(requestId, entityId, maidUuid,
                     MaidPersonaSaveResponseMessage.RESULT_TOO_LONG);
         }
