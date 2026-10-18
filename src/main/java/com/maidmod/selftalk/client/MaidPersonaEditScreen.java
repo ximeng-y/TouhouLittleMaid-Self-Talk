@@ -45,7 +45,7 @@ import java.util.UUID;
  *       「栏目标签 + 可滚动文本框」，四栏同时可见。</li>
  * </ul>
  * 右侧按钮列调整为：布娃娃预览在顶部，原版保存按钮位置不变，其下依次为
- * 模式切换按钮、「导出设定」（从原版顶部移来）、AI 拆分按钮。
+ * 「导出设定」（从原版顶部移来）、模式切换按钮、AI 拆分按钮。
  * <p>
  * 模式与四栏内容独立于原版整段人设存储：切模式、改文字都不触碰原版输入框，
  * 两套内容互不复制、覆盖或删除。点击模式按钮立即把「模式 + 四栏快照」整份提交保存；
@@ -70,10 +70,10 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     /** 右侧按钮列宽（与原版按钮一致） */
     private static final int COLUMN_WIDTH = 128;
     private static final int BUTTON_HEIGHT = 20;
-    /** 模式切换按钮 y（原版返回按钮之下） */
-    private static final int MODE_BUTTON_Y = 150;
-    /** 「导出设定」移到的位置（模式按钮之下） */
-    private static final int EXPORT_BUTTON_Y = 175;
+    /** 「导出设定」移到的位置（原版返回按钮之下） */
+    private static final int EXPORT_BUTTON_Y = 150;
+    /** 模式切换按钮 y（导出设定之下） */
+    private static final int MODE_BUTTON_Y = 175;
     /** AI 拆分按钮 y（两个按钮之下） */
     private static final int SPLIT_BUTTON_Y = 200;
     /** 四栏内容区顶部（与原版输入框 y 一致） */
