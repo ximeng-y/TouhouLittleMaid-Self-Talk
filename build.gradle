@@ -115,7 +115,7 @@ jar {
 // gradle build / CI 自动运行，失败（非零退出或异常）即构建失败 =====
 def selfCheckMains = ['EnvironmentContextTest', 'EnvironmentContextRendererTest',
                       'HistoryCoreTest', 'SelfTalkEventBufferTest', 'TlmMixinTargetTest',
-                      'PrebuiltEntryCodecTest']
+                      'PrebuiltEntryCodecTest', 'LanguagePredicateTest']
 selfCheckMains.each { name ->
     tasks.register("selfCheck${name}", JavaExec) {
         group = 'verification'

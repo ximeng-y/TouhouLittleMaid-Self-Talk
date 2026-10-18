@@ -738,19 +738,28 @@ public final class SelfTalkContexts {
      * 经 Locale 规范化为标准语言名（英文显示，格式"语言 (地区)"）生成英文指令——
      * 任意语言可表达，注入串无法通过 Locale 规范化回显。
      * 入参须先经 {@link #sanitizeLanguage}（本方法不重复校验，name 为空时兜底泛指令）。
+     * <p>
+     * 中英分档与背景模板同口径：合法标签允许大小写（{@code ZH_CN}），固定指令必须按
+     * {@link ContextLanguage} 判定，否则会出现「背景中文、指令走 Locale 通用分支」的分裂。
      */
     static String languageInstruction(String language) {
-        return switch (language) {
-            case "zh_cn", "zh" -> "\n\n请始终用简体中文说话。";
-            case "en_us", "en" -> "\n\nPlease always speak in English.";
+        if (ContextLanguage.of(language).isZh()) {
+            return "\n\n请始终用简体中文说话。";
+        }
+        // 通用分支按 sanitize 后的标签取 Locale：非法/缺失标签在上一步已回退 zh_cn 并返回，
+        // 这里不会拿到 null；英文固定指令的判定同样忽略大小写，EN_US 与 en_us 得到同一指令
+        switch (language.toLowerCase(Locale.ROOT)) {
+            case "en_us", "en" -> {
+                return "\n\nPlease always speak in English.";
+            }
             default -> {
                 Locale locale = Locale.forLanguageTag(language.replace('_', '-'));
                 String name = locale.getDisplayLanguage(Locale.ENGLISH);
                 String country = locale.getDisplayCountry(Locale.ENGLISH);
-                yield name.isEmpty() ? "\n\nPlease speak the language specified in the system settings."
+                return name.isEmpty() ? "\n\nPlease speak the language specified in the system settings."
                         : "\n\nPlease always speak in " + name + (country.isEmpty() ? "" : " (" + country + ")") + ".";
             }
-        };
+        }
     }
 
     /**
@@ -825,9 +834,12 @@ public final class SelfTalkContexts {
         return "\n\n" + body;
     }
 
-    /** 说明句中英选择口径：与 OWNER_CHAT_DECLARATION 相同的语言起始码判定 */
+    /**
+     * 说明句中英选择口径：与 {@link #languageOf} 同一判定（合法标签大小写不敏感），
+     * 不得自行拼 {@code startsWith("zh")}。
+     */
     private static boolean isZh(String language) {
-        return sanitizeLanguage(language).startsWith("zh");
+        return languageOf(language).isZh();
     }
 
     // ===== 历史上下文模式的固定说明段 =====

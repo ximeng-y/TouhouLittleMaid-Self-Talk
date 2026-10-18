@@ -357,9 +357,9 @@ public final class SelfTalkPrompts {
         return isChinese(language) ? PLAN_TRIGGER_INTER_CHAT_RESPONDER_ZH : PLAN_TRIGGER_INTER_CHAT_RESPONDER_EN;
     }
 
-    /** 语言口径与 {@link SelfTalkContexts#sanitizeLanguage} 一致：非中文一律走英文 */
+    /** 语言口径与 {@link SelfTalkContexts#languageOf} 一致：非中文一律走英文，标签大小写不敏感 */
     private static boolean isChinese(String language) {
-        return SelfTalkContexts.sanitizeLanguage(language).startsWith("zh");
+        return SelfTalkContexts.languageOf(language).isZh();
     }
 
     /**
@@ -405,7 +405,7 @@ public final class SelfTalkPrompts {
                                                boolean historyEnabled,
                                                boolean personaEnabled,
                                                String previousOutput, String errorText) {
-        boolean zh = SelfTalkContexts.sanitizeLanguage(language).startsWith("zh");
+        boolean zh = isChinese(language);
         StringBuilder sb = new StringBuilder();
         sb.append(zh ? "【资料一：人设】\n" : "[Material 1: Persona]\n");
         sb.append(personaText(systemPrefix));
