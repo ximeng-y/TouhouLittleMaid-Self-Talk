@@ -399,10 +399,17 @@ public final class MaidSelfTalkService {
         }
     }
 
-    /** 主人是否在身边（在线且在判定半径内） */
+    /**
+     * 主人是否在身边（在线且在判定半径内）。
+     * <p>
+     * TLM 的 {@code EntityMaid.getOwner} 在服务端经服务器玩家表取主人，主人换维度后仍会返回同一玩家；
+     * 各维度的坐标彼此独立，跨维度直接比距离会把「数字坐标恰好接近」误判成「主人在旁边」。
+     * 因此先确认主人与女仆处于同一维度，跨维度一律不算在身边（issue #125）。
+     */
     private static boolean isOwnerNearby(EntityMaid maid) {
         var owner = maid.getOwner();
-        return owner != null && maid.distanceToSqr(owner) <= OWNER_NEARBY_RANGE * OWNER_NEARBY_RANGE;
+        return owner != null && owner.level() == maid.level()
+                && maid.distanceToSqr(owner) <= OWNER_NEARBY_RANGE * OWNER_NEARBY_RANGE;
     }
 
     /**

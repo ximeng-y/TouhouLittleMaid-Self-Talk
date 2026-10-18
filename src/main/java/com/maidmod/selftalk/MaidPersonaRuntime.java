@@ -185,7 +185,8 @@ public final class MaidPersonaRuntime {
         PlayerPersonaChatSession.onConfigChanged(maid);
     }
 
+    /** 人设召回段的中英选择：与 {@link SelfTalkContexts#languageOf} 同一判定（大小写不敏感） */
     private static boolean isZh(String language) {
-        return SelfTalkContexts.sanitizeLanguage(language).startsWith("zh");
+        return SelfTalkContexts.languageOf(language).isZh();
     }
 }

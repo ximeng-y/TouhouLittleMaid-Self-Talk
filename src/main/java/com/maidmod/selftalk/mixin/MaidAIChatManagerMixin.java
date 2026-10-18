@@ -9,6 +9,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.maidmod.selftalk.AutonomousChatHistoryMigration;
+import com.maidmod.selftalk.ContextLanguage;
 import com.maidmod.selftalk.InterChatChain;
 import com.maidmod.selftalk.InterChatRequest;
 import com.maidmod.selftalk.MaidInterChatService;
@@ -240,10 +241,10 @@ public abstract class MaidAIChatManagerMixin {
         }
         // 原话中的本 mod 段标签会提前闭合主人段（标签逃逸），请求侧剥除；历史仍写原文
         String sanitizedRaw = SegmentTags.stripTagsFromPlayerInput(raw);
-        // 声明语言与输出指令取同一格式校验口径：sanitizeLanguage 非法标签回退中文
+        // 声明语言与背景模板同一判定口径：sanitizeLanguage 校验、ContextLanguage 分类（大小写不敏感）
         String chatLanguage = StringUtils.isBlank(maid.getAiChatManager().chatLanguage)
                 ? "en_us" : maid.getAiChatManager().chatLanguage;
-        boolean chinese = SelfTalkContexts.sanitizeLanguage(chatLanguage).startsWith("zh");
+        boolean chinese = ContextLanguage.of(SelfTalkContexts.sanitizeLanguage(chatLanguage)).isZh();
         String declaration = chinese ? SelfTalkPrompts.OWNER_CHAT_DECLARATION_ZH : SelfTalkPrompts.OWNER_CHAT_DECLARATION_EN;
         // 本轮人设召回块：插在动态上下文区（</context> 之后、主人段之前）。
         // 它是这一轮的资料而不是主人说的话，因此不进主人段、也不改写原话；
