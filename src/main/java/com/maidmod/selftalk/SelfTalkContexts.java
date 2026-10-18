@@ -753,19 +753,29 @@ public final class SelfTalkContexts {
      * 经 Locale 规范化为标准语言名（英文显示，格式"语言 (地区)"）生成英文指令——
      * 任意语言可表达，注入串无法通过 Locale 规范化回显。
      * 入参须先经 {@link #sanitizeLanguage}（本方法不重复校验，name 为空时兜底泛指令）。
+     * <p>
+     * 固定指令只覆盖 {@code zh}/{@code zh_cn} 与 {@code en}/{@code en_us}，判定忽略大小写
+     * （{@code ZH_CN} 与 {@code zh_cn} 同一条指令）。{@code zh_tw}、{@code zh_hk} 等地区标签
+     * 不并入简体中文固定指令，仍走 Locale 分支保留地区语义（Chinese (Taiwan) 等）——
+     * 背景模板按主语言二分类（{@link ContextLanguage}），输出指令则保留地区，两者口径不同不构成分裂。
      */
     static String languageInstruction(String language) {
-        return switch (language) {
-            case "zh_cn", "zh" -> "\n\n请始终用简体中文说话。";
-            case "en_us", "en" -> "\n\nPlease always speak in English.";
+        // 按 sanitize 后的标签取 Locale：非法/缺失标签已被调用方回退 zh_cn，这里不会拿到 null
+        switch (language.toLowerCase(Locale.ROOT)) {
+            case "zh_cn", "zh" -> {
+                return "\n\n请始终用简体中文说话。";
+            }
+            case "en_us", "en" -> {
+                return "\n\nPlease always speak in English.";
+            }
             default -> {
                 Locale locale = Locale.forLanguageTag(language.replace('_', '-'));
                 String name = locale.getDisplayLanguage(Locale.ENGLISH);
                 String country = locale.getDisplayCountry(Locale.ENGLISH);
-                yield name.isEmpty() ? "\n\nPlease speak the language specified in the system settings."
+                return name.isEmpty() ? "\n\nPlease speak the language specified in the system settings."
                         : "\n\nPlease always speak in " + name + (country.isEmpty() ? "" : " (" + country + ")") + ".";
             }
-        };
+        }
     }
 
     /**
@@ -840,9 +850,12 @@ public final class SelfTalkContexts {
         return "\n\n" + body;
     }
 
-    /** 说明句中英选择口径：与 OWNER_CHAT_DECLARATION 相同的语言起始码判定 */
+    /**
+     * 说明句中英选择口径：与 {@link #languageOf} 同一判定（合法标签大小写不敏感），
+     * 不得自行拼 {@code startsWith("zh")}。
+     */
     private static boolean isZh(String language) {
-        return sanitizeLanguage(language).startsWith("zh");
+        return languageOf(language).isZh();
     }
 
     // ===== 历史上下文模式的固定说明段 =====
