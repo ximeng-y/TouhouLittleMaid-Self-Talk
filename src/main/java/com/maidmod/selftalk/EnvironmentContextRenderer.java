@@ -161,6 +161,34 @@ final class EnvironmentContextRenderer {
         return sentence != null && !sentence.isEmpty() && sentence.charAt(0) > 0x2E80;
     }
 
+    /**
+     * 把一项已取值的固定信息转成自然语言条目（生产组装的统一分发口）。
+     * <p>
+     * 复杂列表（已经由采集侧渲染成句子）与饰品条目（本 mod 直接读取）的取值在自然语言
+     * 模式下都是完整句子，直接成句、不再反拆——反拆会破坏物品名里的逗号与括号；
+     * 简单字段交给 {@link #simpleField}；时间与天气额外带上从句，供相邻时合句。
+     *
+     * @return 条目；{@code null} 表示该取值无法自然语言化（调用方保留原格式）
+     */
+    static Entry naturalEntry(String key, String value, ContextLanguage lang) {
+        if (EnvironmentContextOption.isComplexKey(key) || EnvironmentContextOption.isAccessoryKey(key)) {
+            return Entry.of(key, value);
+        }
+        if ("game_time".equals(key)) {
+            String sentence = gameTimeSentence(value, lang);
+            return sentence == null ? null
+                    : Entry.mergeable(key, sentence, gameTimeClause(value, lang));
+        }
+        if ("weather".equals(key)) {
+            String sentence = weatherSentence(value, lang);
+            String clause = weatherClause(value, lang);
+            return sentence == null || clause == null ? null
+                    : Entry.mergeable(key, sentence, clause);
+        }
+        String sentence = simpleField(key, value, lang);
+        return sentence == null ? null : Entry.of(key, sentence);
+    }
+
     // ===== 取值格式 =====
 
     private static final Pattern TIME_PATTERN = Pattern.compile("^\\d{2}:\\d{2}$");

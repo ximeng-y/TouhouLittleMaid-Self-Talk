@@ -41,16 +41,6 @@ final class EnvironmentContextCollector {
     private EnvironmentContextCollector() {
     }
 
-    /** 复杂列表条目：这些 key 走类型化快照，不走提供者的字符串取值 */
-    static boolean isComplex(String key) {
-        return switch (key) {
-            case "mainhand_item", "offhand_item", "inventory_items", "armor_items",
-                 "user_mainhand", "user_armor", "effects",
-                 "nearby_entities", EnvironmentContextOption.KEY_IDENTITY -> true;
-            default -> false;
-        };
-    }
-
     /**
      * 采集并渲染一项复杂条目。
      *
