@@ -102,25 +102,74 @@ public final class AgentTweaksLifecycleBridge {
             return;
         }
         try {
-            Class<?> facade = Class.forName(FACADE_CLASS);
-            cancelMethod = facade.getMethod(CANCEL_METHOD, LLMCallback.class);
-            completeMethod = facade.getMethod(COMPLETE_METHOD, LLMCallback.class);
-            if (!Modifier.isStatic(cancelMethod.getModifiers()) || !Modifier.isStatic(completeMethod.getModifiers())) {
-                cancelMethod = null;
-                completeMethod = null;
-                logIntegrationError(new IllegalStateException(
-                        FACADE_CLASS + "." + CANCEL_METHOD + "/" + COMPLETE_METHOD + " must be static"));
-                return;
-            }
-            bridgeAvailable = true;
+            probeFacade();
         } catch (ClassNotFoundException e) {
             // Mod 未安装：无操作，属预期状态，不记集成错误
             bridgeAvailable = false;
         } catch (NoSuchMethodException | SecurityException e) {
             logIntegrationError(e);
+        } catch (LinkageError e) {
+            // 类初始化／链接阶段的错误（门面类的静态初始化失败、依赖的类缺失等）同样意味着
+            // 桥不可用：诊断一次即可，固定为不可用，绝不重复探测，也绝不打断本地清理。
+            // 不捕获 VirtualMachineError 等无界严重 VM 错误——那已超出「集成可降级」的边界
+            logIntegrationError(e);
         } finally {
             probed = true;
         }
+    }
+
+    /**
+     * 实际探测动作（包级私有：仅自检用它注入受控的链接失败；不构成公共 API）。
+     * <p>
+     * 抛出 {@link ClassNotFoundException} 表示 Mod 未安装；{@link LinkageError} 等由
+     * {@link #ensureProbed()} 统一归入「集成错误」并固定为不可用。
+     */
+    static void probeFacade() throws ClassNotFoundException, NoSuchMethodException {
+        Class<?> facade = Class.forName(FACADE_CLASS);
+        cancelMethod = facade.getMethod(CANCEL_METHOD, LLMCallback.class);
+        completeMethod = facade.getMethod(COMPLETE_METHOD, LLMCallback.class);
+        if (!Modifier.isStatic(cancelMethod.getModifiers()) || !Modifier.isStatic(completeMethod.getModifiers())) {
+            cancelMethod = null;
+            completeMethod = null;
+            logIntegrationError(new IllegalStateException(
+                    FACADE_CLASS + "." + CANCEL_METHOD + "/" + COMPLETE_METHOD + " must be static"));
+            return;
+        }
+        bridgeAvailable = true;
+    }
+
+    /**
+     * 以受控探测重跑一次探测（仅供自检）：重置探测状态后执行给定的探测动作。
+     * 正常运行时没有任何调用点。
+     */
+    static void reprobeForSelfCheck(ProbeAction probe) {
+        probed = false;
+        bridgeAvailable = false;
+        integrationErrorLogged = false;
+        cancelMethod = null;
+        completeMethod = null;
+        try {
+            probe.run();
+        } catch (ClassNotFoundException e) {
+            bridgeAvailable = false;
+        } catch (Exception e) {
+            logIntegrationError(e);
+        } catch (LinkageError e) {
+            logIntegrationError(e);
+        } finally {
+            probed = true;
+        }
+    }
+
+    /** 自检用的探测动作（允许抛出受检异常，便于注入未安装／链接失败两种故障） */
+    @FunctionalInterface
+    interface ProbeAction {
+        void run() throws Exception;
+    }
+
+    /** 自检可见：桥可用性（重置后由受控探测重新确定；取消在不可用时退化为纯本地清理） */
+    static boolean bridgeAvailableForSelfCheck() {
+        return bridgeAvailable;
     }
 
     /** 记录集成错误（只记录一次）：桥不可用时取消会退化为「只清本地资源、不取消上游」 */

@@ -22,6 +22,10 @@ package com.maidmod.selftalk;
  * 线程约定：世代号只在服务端主线程推进；令牌的 {@link #isValid()} 允许响应线程读取
  * （工具异步入口用它做线程安全的失效判定），因此计数器用 volatile 字段而非普通字段，
  * 且令牌在创建时快照当时的世代值——判定只读快照与计数器本身，不触碰状态表的普通 Map。
+ * <p>
+ * <b>单请求失效</b>：{@link #invalidate()} 只作废令牌自身（pending 超时兜底用），
+ * 与「推进整只女仆的清空世代」是两回事——后者作废该女仆的全部在途请求，
+ * 前者只让这一个迟到结果沉默，不影响超时之后发起的新请求。
  */
 public final class SelfTalkRequestToken {
 
@@ -30,6 +34,13 @@ public final class SelfTalkRequestToken {
     private final Generation generation;
     /** 捕获时的世代值：计数器推进到它之上即视为已被清空作废 */
     private final int capturedGeneration;
+    /**
+     * 本请求是否已被单独作废（超时兜底等场景）。
+     * <p>
+     * 只影响这一个请求，<b>不</b>推进整只女仆的清空世代：之后捕获的新请求令牌照常有效。
+     * volatile 供响应线程的迟到结果与已排队的上屏任务在最终判定时读取。
+     */
+    private volatile boolean invalidated;
 
     private SelfTalkRequestToken(int maidId, Generation generation) {
         this.maidId = maidId;
@@ -49,14 +60,29 @@ public final class SelfTalkRequestToken {
                 state == null ? new Generation() : state.clearGeneration);
     }
 
+    /** 包级私有工厂（自检用）：不查询状态表，直接以给定计数器构造令牌 */
+    static SelfTalkRequestToken withGeneration(int maidId, Generation generation) {
+        return new SelfTalkRequestToken(maidId, generation);
+    }
+
     /**
-     * 本请求是否仍然有效（未被清空作废，且所属状态未退役）。
+     * 本请求是否仍然有效（未被单独作废、未被清空作废，且所属状态未退役）。
      * <p>
-     * 线程安全：只读创建时快照的世代值与该计数器自身的 volatile 字段，
+     * 线程安全：只读创建时快照的世代值与该计数器／本请求自身的 volatile 字段，
      * 因此响应线程的工具异步入口可以安全调用。
      */
     public boolean isValid() {
-        return !generation.retired && capturedGeneration >= generation.value;
+        return !invalidated && !generation.retired && capturedGeneration >= generation.value;
+    }
+
+    /**
+     * 仅作废<b>本请求</b>（超时兜底等）：幂等，服务端主线程调用。
+     * <p>
+     * 不推进清空世代、不触碰状态条目：正在等待的迟到回调与已排队的上屏任务
+     * 在最终判定时读到失效即沉默；超时之后发起的新请求捕获新令牌，不受影响。
+     */
+    void invalidate() {
+        invalidated = true;
     }
 
     /** 女仆实体 ID（诊断用） */
@@ -85,6 +111,11 @@ public final class SelfTalkRequestToken {
         /** 服务端主线程：状态条目被移除时退役，令全部在途令牌永久失效 */
         void retire() {
             retired = true;
+        }
+
+        /** 自检可见：当前世代值（只读，不触发推进） */
+        int valueForSelfCheck() {
+            return value;
         }
     }
 }
