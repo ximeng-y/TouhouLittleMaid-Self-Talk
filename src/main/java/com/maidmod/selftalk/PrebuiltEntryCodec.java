@@ -377,9 +377,10 @@ final class PrebuiltEntryCodec {
             for (NodeTuple tuple : node.getValue()) {
                 Node keyNode = tuple.getKeyNode();
                 Node valueNode = tuple.getValueNode();
-                Object key = keyNode instanceof ScalarNode keyScalar && keyScalar.getTag() != Tag.NULL
+                // 用 Tag 值相等判断空值标签：显式 !!null 会给出与 Tag.NULL 等值但不同身份的实例
+                Object key = keyNode instanceof ScalarNode keyScalar && !Tag.NULL.equals(keyScalar.getTag())
                         ? keyScalar.getValue() : keyNode;
-                Object value = valueNode instanceof ScalarNode valueScalar && valueScalar.getTag() != Tag.NULL
+                Object value = valueNode instanceof ScalarNode valueScalar && !Tag.NULL.equals(valueScalar.getTag())
                         ? valueScalar.getValue() : valueNode;
                 raw.put(key, value);
             }
@@ -523,13 +524,21 @@ final class PrebuiltEntryCodec {
     /**
      * 解析 env：必须是扁平映射，标量键值取 YAML 原始文本（见 {@link FencedEnvConstructor}）；
      * 显式非映射、复合键、复合值或空值整条拒绝——返回 null，调用方拒绝本条目，
-     * 不能丢 key 后继续参与匹配。未知环境 key 保留并记告警（不参与匹配）。env 缺失按空映射处理。
+     * 不能丢 key 后继续参与匹配。未知环境 key 保留并记告警（不参与匹配）。
+     * <p>
+     * 缺省（未写 env 键）与 {@code env: {}} 都是合法通配；显式写空值（{@code env:} /
+     * {@code env: null} / {@code env: ~} / {@code env: !!null null}）是非法输入，与缺省区分后整条拒绝。
      */
     private static Map<String, String> readEnv(Map<String, Object> meta, List<Issue> issues,
                                                List<String> fmLines) {
+        if (!meta.containsKey("env")) {
+            return new LinkedHashMap<>();
+        }
         Object raw = meta.get("env");
         if (raw == null) {
-            return new LinkedHashMap<>();
+            issues.add(new Issue(locateLine(fmLines, "env"),
+                    "env 显式为空（YAML null）——无环境约束请删除该行或写成 env: {}，整条拒绝"));
+            return null;
         }
         if (!(raw instanceof Map<?, ?> map)) {
             issues.add(new Issue(locateLine(fmLines, "env"),
