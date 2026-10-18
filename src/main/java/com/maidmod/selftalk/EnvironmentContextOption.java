@@ -177,6 +177,16 @@ public record EnvironmentContextOption(String key, Source source,
         return KEY_MAID_BAUBLES.equals(key) || KEY_MAID_CURIOS.equals(key) || KEY_USER_CURIOS.equals(key);
     }
 
+    /** 复杂列表条目：这些 key 走类型化快照，取值已是完整句子，不做反拆 */
+    static boolean isComplexKey(String key) {
+        return switch (key) {
+            case "mainhand_item", "offhand_item", "inventory_items", "armor_items",
+                 "user_mainhand", "user_armor", "effects",
+                 "nearby_entities", KEY_IDENTITY -> true;
+            default -> false;
+        };
+    }
+
     /** 事件条目 key → 事件种类；非事件条目返回 null */
     static SelfTalkEventBuffer.Kind eventKindOf(String key) {
         if (KEY_DEATHS.equals(key)) {
