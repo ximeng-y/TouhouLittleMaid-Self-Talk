@@ -945,19 +945,6 @@ public final class SelfTalkContexts {
     }
 
     /**
-     * 来源过滤并保留「可检索序列下标 → 原始历史区下标」的映射（检索模式的唯一入口）。
-     * <p>
-     * 过滤规则在 {@code history} 包单一实现；本方法只做消息映射与下标还原，
-     * 因此检索模式的来源口径与离线自检完全一致。
-     */
-    public static SelfTalkHistoryAssembler.SearchableIndices filterSearchable(EntityMaid maid,
-                                                                             List<LLMMessage> history) {
-        return SelfTalkHistoryAssembler.filterSearchable(
-                SelfTalkHistoryAssembler.toSearchableView(history),
-                SelfTalkProvenance.selfTalkFingerprints(maid));
-    }
-
-    /**
      * 段标签包裹（内容注入式，就地写回 messages 列表）。
      * <p>
      * 结构：messages = [前导 SYSTEM(设定/摘要), 历史区(historyCount 条, 含前导 SYSTEM), 互聊窗口区(windowCount 条), ...尾部(当前回合消息)]。
