@@ -80,6 +80,8 @@ public final class SelfTalkReusePanel {
     private static final int FIELD_ROW_HEIGHT = 24;
     /** 分区标题行下方留白 */
     private static final int SECTION_GAP = 6;
+    /** 管理员区标题与上方个人说明之间的额外留白：普通玩家没有该区，不占用内容高度 */
+    private static final int SERVER_SECTION_EXTRA_GAP = 12;
 
     private static final int POLL_TICKS = 40;
     private static final int SET_CONFIRM_TIMEOUT_TICKS = 40;
@@ -286,6 +288,7 @@ public final class SelfTalkReusePanel {
         personalFooterY = y;
         y += SECTION_GAP + 6;
         if (serverAdmin) {
+            y += SERVER_SECTION_EXTRA_GAP;
             serverTitleY = y;
             y += 14;
             serverMinRowY = y;
@@ -303,7 +306,8 @@ public final class SelfTalkReusePanel {
             allowRowY = -1;
             audioRowY = -1;
         }
-        contentHeight = y;
+        // 非管理员没有服务器区：内容只算到个人说明底边，避免把不存在的分区留白算进滚动范围
+        contentHeight = serverAdmin ? y : personalFooterY + 9;
     }
 
     /** 内容坐标 → 屏幕 Y（减去滚动偏移） */
