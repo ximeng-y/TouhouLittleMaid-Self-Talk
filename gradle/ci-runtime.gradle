@@ -148,6 +148,23 @@ if (ciRuntime) {
                     "maid_self_talk%%${sourceSets.main.output.resourcesDir}",
                     "maid_self_talk_ci%%${testJar.absolutePath}",
             ].join(';')
+            def materializeArgumentFiles = { List<String> arguments, File targetDir,
+                                              String profile, String role, String kind ->
+                int index = 0
+                arguments.collect { String argument ->
+                    if (!argument.startsWith('@')) {
+                        return argument
+                    }
+                    File source = file(argument.substring(1))
+                    if (!source.isFile()) {
+                        throw new GradleException(
+                                "CI launch argument file missing: ${source.absolutePath}")
+                    }
+                    File target = new File(targetDir, "${profile}-${role}-${kind}-${index++}.args")
+                    target.bytes = source.bytes
+                    return "@${target.absolutePath}"
+                }
+            }
             def exportDescriptions = { Map<String, String> runTasks, File targetDir, String profile ->
                 def descriptions = [:]
                 targetDir.mkdirs()
@@ -158,7 +175,9 @@ if (ciRuntime) {
                 environment.putAll(runTask.environmentProperty.get())
                 def jvmArgs = new ArrayList<String>(runTask.jvmArgs)
                 jvmArgs.add(0, "-Dfml.modFolders=${modFolders}")
-                def programArgs = new ArrayList<String>(runTask.args)
+                jvmArgs = materializeArgumentFiles(jvmArgs, targetDir, profile, role, 'jvm')
+                def programArgs = materializeArgumentFiles(
+                        new ArrayList<String>(runTask.args), targetDir, profile, role, 'program')
                 def mainClass = runTask.mainClass.get()
                 def gameDir = runTask.gameDirectory.get().asFile.absolutePath
                 descriptions[role] = [
