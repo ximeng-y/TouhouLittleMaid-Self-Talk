@@ -1,0 +1,14 @@
+{
+  "id": "history-retrieval",
+  "title": "历史模式切换与检索规划请求",
+  "required": true,
+  "timeout": 180,
+  "subScenarios": [
+    {
+      "id": "history-retrieval-planning",
+      "title": "检索模式先生成关键词规划，再进行真实终答",
+      "check": "history_retrieval_planning",
+      "timeout": 120
+    }
+  ]
+}

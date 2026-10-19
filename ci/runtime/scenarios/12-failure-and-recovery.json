@@ -1,0 +1,32 @@
+{
+  "id": "failure-cancellation",
+  "title": "坏响应与 HTTP 错误不产生伪回复，恢复后真实链路继续",
+  "required": true,
+  "timeout": 320,
+  "subScenarios": [
+    {
+      "id": "failure-malformed-then-recover",
+      "title": "解析失败不派发假回复，清理在途状态后正常恢复",
+      "check": "failure_malformed_then_recover",
+      "timeout": 100
+    },
+    {
+      "id": "failure-http-error-then-recover",
+      "title": "HTTP 503 不产生伪回复，恢复后正常回答",
+      "check": "failure_http_error_then_recover",
+      "timeout": 100
+    },
+    {
+      "id": "failure-empty-then-recover",
+      "title": "空白响应不产生伪回复，恢复后正常回答",
+      "check": "failure_empty_then_recover",
+      "timeout": 100
+    },
+    {
+      "id": "failure-clear-inflight",
+      "title": "清空在途请求后迟到成功不投放，随后新请求可用",
+      "check": "failure_clear_inflight",
+      "timeout": 120
+    }
+  ]
+}

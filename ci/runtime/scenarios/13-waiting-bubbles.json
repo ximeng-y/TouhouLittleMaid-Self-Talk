@@ -1,0 +1,14 @@
+{
+  "id": "waiting-bubbles",
+  "title": "等待气泡按客户端本地设置过滤，最终回答不受影响",
+  "required": true,
+  "timeout": 120,
+  "subScenarios": [
+    {
+      "id": "waiting-bubble-client-filter",
+      "title": "同一女仆在开启端显示等待气泡、关闭端不显示",
+      "check": "waiting_bubble_client_filter",
+      "timeout": 90
+    }
+  ]
+}

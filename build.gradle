@@ -101,3 +101,6 @@ selfCheckMains.each { name ->
 tasks.named('check') {
     dependsOn selfCheckMains.collect { "selfCheck${it}" }
 }
+
+// CI 2 真实客户端链路测试的测试源集与专用运行配置（仅 -PciRuntime=true 时注册测试 mod 与运行任务）
+apply from: 'gradle/ci-runtime.gradle'

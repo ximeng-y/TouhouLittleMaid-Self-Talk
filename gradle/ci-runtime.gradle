@@ -1,0 +1,203 @@
+// CI 2 真实客户端链路测试：测试源集、专用运行配置与启动描述导出。
+// 仅当 -PciRuntime=true 时注册测试 mod 与三个专用运行配置；普通 build/run 不加载测试内容。
+
+def ciRuntime = providers.gradleProperty('ciRuntime')
+        .map { it.toBoolean() }
+        .getOrElse(false)
+
+// 独立测试源集：生产 main 不反向依赖它，正式 jar 也不会包含其输出。
+sourceSets {
+    ciTest {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+configurations {
+    ciTestImplementation.extendsFrom implementation
+    ciTestCompileOnly.extendsFrom compileOnly
+    ciTestRuntimeOnly.extendsFrom runtimeOnly
+}
+
+dependencies {
+    // 编译与运行都需要生产代码；运行配置里它同时作为 maid_self_talk mod 输出存在
+    ciTestImplementation sourceSets.main.output
+}
+
+// 把 Minecraft / NeoForge 的编译与运行依赖接到测试源集
+neoForge.addModdingDependenciesTo(sourceSets.ciTest)
+
+if (ciRuntime) {
+    def modContainer = neoForge.mods
+    modContainer.maybeCreate('maid_self_talk_ci').sourceSet(sourceSets.ciTest)
+
+    def mainMod = modContainer.named('maid_self_talk')
+    def testMod = modContainer.named('maid_self_talk_ci')
+
+    neoForge.runs {
+        ciServer {
+            server()
+            loadedMods = [mainMod.get(), testMod.get()]
+            gameDirectory = file('build/ci-runtime/run/server')
+            programArgument '--nogui'
+        }
+        ciClientOwner {
+            client()
+            loadedMods = [mainMod.get(), testMod.get()]
+            gameDirectory = file('build/ci-runtime/run/client-owner')
+        }
+        ciClientOther {
+            client()
+            loadedMods = [mainMod.get(), testMod.get()]
+            gameDirectory = file('build/ci-runtime/run/client-other')
+        }
+        // 可选依赖套件使用独立运行配置，避免把 Cloth Config / Curios 混入基础 profile。
+        // 依赖仍是生产 build.gradle 中已经声明过的坐标，只在 CI 启动描述中加入。
+        ciServerOptional {
+            server()
+            loadedMods = [mainMod.get(), testMod.get()]
+            gameDirectory = file('build/ci-runtime/run/optional/server')
+            programArgument '--nogui'
+        }
+        ciClientOwnerOptional {
+            client()
+            loadedMods = [mainMod.get(), testMod.get()]
+            gameDirectory = file('build/ci-runtime/run/optional/client-owner')
+        }
+        ciClientOtherOptional {
+            client()
+            loadedMods = [mainMod.get(), testMod.get()]
+            gameDirectory = file('build/ci-runtime/run/optional/client-other')
+        }
+    }
+
+    // 开发运行不会读取 jarJar 嵌套元数据；把 SnakeYAML 显式放进 CI 运行配置的
+    // legacy classpath，否则主 mod 的预制 YAML 代码在测试中出现 NoClassDefFoundError。
+    // 只影响 -PciRuntime 的测试启动，正式 jar 仍由 jarJar 内嵌依赖。
+    neoForge.runs.configureEach { run ->
+        if (run.name in [
+                'ciServer', 'ciClientOwner', 'ciClientOther',
+                'ciServerOptional', 'ciClientOwnerOptional', 'ciClientOtherOptional'
+        ]) {
+            run.additionalRuntimeClasspathConfiguration.dependencies.add(
+                    project.dependencies.create('org.yaml:snakeyaml:2.2'))
+        }
+        if (run.name in ['ciServerOptional', 'ciClientOwnerOptional', 'ciClientOtherOptional']) {
+            // 只给 optional profile 的三个运行任务添加可选 mod；正式依赖声明不变。
+            run.additionalRuntimeClasspathConfiguration.dependencies.add(
+                    project.dependencies.create('maven.modrinth:cloth-config:15.0.140+neoforge'))
+            run.additionalRuntimeClasspathConfiguration.dependencies.add(
+                    project.dependencies.create(
+                            'top.theillusivec4.curios:curios-neoforge:9.5.1+1.21.1'))
+        }
+    }
+
+    // 测试 mod 通过 ciTestJar + modFolders 加载；不要把 ciTest 目录再加进
+    // legacyClasspath，否则同一包会同时出现在 ciTest 和 maid_self_talk_ci 两个模块里。
+
+    tasks.register('ciTestJar', Jar) {
+        group = 'ci'
+        description = '把测试源集打成独立 mod jar；正式 build 不会依赖它'
+        dependsOn tasks.named('ciTestClasses')
+        archiveFileName = 'maid_self_talk_ci.jar'
+        destinationDirectory = layout.buildDirectory.dir('ci-runtime')
+        from sourceSets.ciTest.output
+    }
+
+    def ciRunTasks = [
+            server: 'ciServer',
+            owner : 'ciClientOwner',
+            other : 'ciClientOther',
+    ]
+    def ciOptionalRunTasks = [
+            server: 'ciServerOptional',
+            owner : 'ciClientOwnerOptional',
+            other : 'ciClientOtherOptional',
+    ]
+
+    // 三个进程的实际启动参数（classpath、JVM 参数、程序参数、环境覆盖、工作目录）由
+    // MDG 的运行任务在真实执行语义下解析；此任务只把它们序列化成启动描述后退出，
+    // 不启动游戏，也不长期占用 Gradle 项目锁。
+    tasks.register('ciPrepare') {
+        group = 'ci'
+        description = '准备 CI 2 运行环境并导出专服/双客户端启动描述'
+        dependsOn tasks.named('classes')
+        dependsOn tasks.named('ciTestClasses')
+        dependsOn tasks.named('ciTestJar')
+        // 强制解析运行任务的 classpath 及其构建依赖（但不执行游戏）
+        (ciRunTasks + ciOptionalRunTasks).each { role, runName ->
+            def cap = runName.capitalize()
+            // 只取运行任务的准备依赖，绝不把运行任务本身当作依赖
+            dependsOn tasks.named("write${cap}LegacyClasspath")
+            dependsOn tasks.named("prepare${cap}Run")
+        }
+        dependsOn tasks.named('downloadAssets')
+
+        doLast {
+            def launchDir = layout.buildDirectory.dir('ci-runtime/launch').get().asFile
+            launchDir.mkdirs()
+            def optionalLaunchDir = new File(launchDir, 'optional')
+            optionalLaunchDir.mkdirs()
+            def runId = providers.gradleProperty('ciRunId').getOrElse('local')
+            // RunGameTask.exec() 在真正启动时才补 -Dfml.modFolders；静态 jvmArgs 里没有。
+            // 导出描述时必须把它固化，否则测试源集不会被 FML 当成 mod，主 mod 的 mixin
+            // 类也可能只找得到配置却找不到类。
+            def testJar = tasks.named('ciTestJar').get().archiveFile.get().asFile
+            def modFolders = [
+                    "maid_self_talk%%${sourceSets.main.output.classesDirs.asPath}",
+                    "maid_self_talk%%${sourceSets.main.output.resourcesDir}",
+                    "maid_self_talk_ci%%${testJar.absolutePath}",
+            ].join(';')
+            def exportDescriptions = { Map<String, String> runTasks, File targetDir, String profile ->
+                def descriptions = [:]
+                targetDir.mkdirs()
+                runTasks.each { role, runName ->
+                def runTask = tasks.named("run${runName.capitalize()}").get()
+                def classpath = runTask.classpathProvider.files.collect { it.absolutePath }
+                def environment = new LinkedHashMap<String, String>()
+                environment.putAll(runTask.environmentProperty.get())
+                def jvmArgs = new ArrayList<String>(runTask.jvmArgs)
+                jvmArgs.add(0, "-Dfml.modFolders=${modFolders}")
+                def programArgs = new ArrayList<String>(runTask.args)
+                def mainClass = runTask.mainClass.get()
+                def gameDir = runTask.gameDirectory.get().asFile.absolutePath
+                descriptions[role] = [
+                        profile      : profile,
+                        role         : role,
+                        task         : "run${runName.capitalize()}",
+                        runId        : runId,
+                        mainClass    : mainClass,
+                        classpath    : classpath,
+                        jvmArgs      : jvmArgs,
+                        programArgs  : programArgs,
+                        environment  : environment,
+                        gameDirectory: gameDir,
+                        javaHome     : System.getProperty('java.home'),
+                ]
+                }
+                descriptions.each { role, description ->
+                    def target = new File(targetDir, "${role}.json")
+                    target.text = groovy.json.JsonOutput.prettyPrint(
+                            groovy.json.JsonOutput.toJson(description))
+                }
+                new File(targetDir, 'index.json').text = groovy.json.JsonOutput.prettyPrint(
+                        groovy.json.JsonOutput.toJson([
+                                runId: runId, profile: profile, roles: descriptions.keySet().toList()
+                        ]))
+                return descriptions
+            }
+            def descriptions = exportDescriptions(ciRunTasks, launchDir, 'base')
+            exportDescriptions(ciOptionalRunTasks, optionalLaunchDir, 'optional')
+            // 保持现有基础 index 的结构，同时明确本次准备已导出双 profile。
+            new File(launchDir, 'profiles.json').text = groovy.json.JsonOutput.prettyPrint(
+                    groovy.json.JsonOutput.toJson([
+                            runId: runId,
+                            profiles: [
+                                    base: 'launch/index.json',
+                                    optional: 'launch/optional/index.json'
+                            ],
+                            baseRoles: descriptions.keySet().toList()
+                    ]))
+        }
+    }
+}

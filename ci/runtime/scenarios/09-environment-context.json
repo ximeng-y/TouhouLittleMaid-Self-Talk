@@ -1,0 +1,14 @@
+{
+  "id": "environment-context",
+  "title": "真实伤害事件进入环境感知，主人与女仆自身受伤均可观察",
+  "required": true,
+  "timeout": 180,
+  "subScenarios": [
+    {
+      "id": "environment-hurt-and-self",
+      "title": "主人受伤与女仆自身受伤触发带感知背景的真实 LLM 请求",
+      "check": "environment_hurt_and_self",
+      "timeout": 120
+    }
+  ]
+}

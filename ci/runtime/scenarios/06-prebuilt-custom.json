@@ -1,0 +1,14 @@
+{
+  "id": "prebuilt-custom-content",
+  "title": "人类 custom 条目投放、原件保留与坏样本诊断",
+  "required": true,
+  "timeout": 180,
+  "subScenarios": [
+    {
+      "id": "prebuilt-custom-content",
+      "title": "命中有名字目录 custom 条目且不调真实生成，坏文件进诊断",
+      "check": "prebuilt_custom_content",
+      "timeout": 120
+    }
+  ]
+}

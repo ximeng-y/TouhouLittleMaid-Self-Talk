@@ -1,0 +1,14 @@
+{
+  "id": "prebuilt-audio",
+  "title": "预制命中后的压缩语音缓存与第二次零 TTS 请求",
+  "required": true,
+  "timeout": 210,
+  "subScenarios": [
+    {
+      "id": "prebuilt-audio-cache",
+      "title": "命中后真实合成并落盘压缩音频，再次命中直接播放缓存",
+      "check": "prebuilt_audio_cache",
+      "timeout": 150
+    }
+  ]
+}

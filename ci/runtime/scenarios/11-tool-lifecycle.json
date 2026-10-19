@@ -1,0 +1,14 @@
+{
+  "id": "tool-lifecycle",
+  "title": "真实 Tool 轮次、工具结果回填与终答",
+  "required": true,
+  "timeout": 150,
+  "subScenarios": [
+    {
+      "id": "tool-call-lifecycle",
+      "title": "switch_sit 工具调用后二次请求携带 tool 结果并改变女仆状态",
+      "check": "tool_call_lifecycle",
+      "timeout": 110
+    }
+  ]
+}

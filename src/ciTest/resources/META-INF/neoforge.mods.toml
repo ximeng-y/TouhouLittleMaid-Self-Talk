@@ -1,0 +1,43 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT"
+
+[[mods]]
+modId = "maid_self_talk_ci"
+version = "1.0.0"
+displayName = "Maid Self-Talk CI Runtime"
+description = '''
+仅用于仓库 CI 的真实客户端链路测试，不进入正式产物。
+'''
+authors = "maidmod"
+
+[[dependencies.maid_self_talk_ci]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.maid_self_talk_ci]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1,1.22)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.maid_self_talk_ci]]
+modId = "maid_self_talk"
+type = "required"
+versionRange = "[1.4.0,)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.maid_self_talk_ci]]
+modId = "touhou_little_maid"
+type = "required"
+versionRange = "[1.5.3,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[mixins]]
+config = "maid_self_talk_ci.mixins.json"

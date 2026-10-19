@@ -61,6 +61,32 @@
 - 桥只提供打开/创建/导航协商等固定公开方法，不修改任何网络协议与业务行为，也不要求外部模组存在
 - **Forge 1.20.1 线尚未适配该桥**
 
+## 开发与测试（NeoForge 1.21.1）
+
+普通 `build` / `check` 只跑快测，不会启动真实客户端，也不会把测试源集打进正式 jar：
+
+```powershell
+$env:JAVA_HOME = "D:\Games\ABOUT_MINECRAFT\JAVA\zulu21.44.17-ca-jdk21.0.8-win_x64"
+& "$env:USERPROFILE\.gradle\wrapper\dists\gradle-8.14.3-bin\cv11ve7ro1n3o1j4so8xd9n66\gradle-8.14.3\bin\gradle.bat" build
+```
+
+CI 2 用真实专服 + 两个真实客户端 + 假 LLM/TTS 跑完整链路，先准备测试 mod 与启动描述，再执行场景：
+
+```powershell
+python ci\runtime\runner.py run --loader neoforge --suite all `
+  --gradle "$env:USERPROFILE\.gradle\wrapper\dists\gradle-8.14.3-bin\cv11ve7ro1n3o1j4so8xd9n66\gradle-8.14.3\bin\gradle.bat"
+
+# 单组或子场景
+python ci\runtime\runner.py run --loader neoforge --scenario prebuilt-generated-roundtrip `
+  --gradle "<Gradle 可执行文件>"
+```
+
+- 仅支持 `--loader neoforge`；`--suite base|all|optional` 选择基础/全部/可选依赖小套件。
+- 未给 `--gradle` 时使用 PATH 中的 Gradle；本项目没有 `gradlew`。
+- 报告写入 `build/ci-runtime/<runId>/report/`：`summary.json`、`junit.xml`、`events.jsonl`、`requests.jsonl`、`report.md` 及失败附件。
+- GitHub Actions 中 CI 1 为 `Build`，CI 2 为 `CI 2 / NeoForge Runtime`，只在 PR 合入 `neoforge-1.21.1` 时执行；CI 1 另检查正式 jar 不含测试类、测试 mod 元数据或测试 Mixin。
+- 测试必须使用 `spawn-animals=true` 的专服世界属性；这是 TLM `EntityMaid` 所属 `Animal` 类的原版丢弃规则决定的，普通场景不要关闭它。
+
 ## 许可
 
 [MIT](LICENSE)
@@ -129,6 +155,28 @@ This mod exposes an optional settings-navigation bridge via `com.maidmod.selftal
 - With AgentTweaks, opening the 💬 entry is delegated to AgentTweaks, which provides a top-left navigation entry; closing the Maid Settings returns to its parent screen
 - The bridge only provides fixed public methods for opening / creating / navigation coordination — no network protocol or business behavior changes, and no hard dependency on the external mod
 - **The Forge 1.20.1 line does not include this bridge yet**
+
+## Development and testing (NeoForge 1.21.1)
+
+A normal `build` / `check` stays fast: it never launches a real client and never packages the test source set into the production jar.
+
+```powershell
+$env:JAVA_HOME = "D:\Games\ABOUT_MINECRAFT\JAVA\zulu21.44.17-ca-jdk21.0.8-win_x64"
+& "$env:USERPROFILE\.gradle\wrapper\dists\gradle-8.14.3-bin\cv11ve7ro1n3o1j4so8xd9n66\gradle-8.14.3\bin\gradle.bat" build
+```
+
+CI 2 runs a real dedicated server, two real clients and fake LLM/TTS services. It prepares the test mod and launch descriptors, then executes scenarios:
+
+```powershell
+python ci\runtime\runner.py run --loader neoforge --suite all `
+  --gradle "$env:USERPROFILE\.gradle\wrapper\dists\gradle-8.14.3-bin\cv11ve7ro1n3o1j4so8xd9n66\gradle-8.14.3\bin\gradle.bat"
+```
+
+- Only `--loader neoforge` is accepted; `--suite base|all|optional` selects the base, full, or optional-dependency suite.
+- When `--gradle` is omitted, the Gradle on PATH is used; this project has no `gradlew` wrapper.
+- Reports go to `build/ci-runtime/<runId>/report/`: `summary.json`, `junit.xml`, `events.jsonl`, `requests.jsonl`, `report.md`, and failure attachments.
+- On GitHub Actions, CI 1 is `Build` and CI 2 is `CI 2 / NeoForge Runtime`, the latter running only for PRs into `neoforge-1.21.1`; CI 1 also verifies the production jar contains no test classes, test mod metadata, or test mixins.
+- The test dedicated server must keep `spawn-animals=true`: TLM's `EntityMaid` extends `Animal`, and vanilla discards animals when that property is false.
 
 ## License
 

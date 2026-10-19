@@ -18,6 +18,8 @@ HANDOFF.md
 # Gradle 构建缓存与产物
 .gradle/
 build/
+logs/
+__pycache__/
 
 # 编译工具（gradle wrapper 等二进制工具不纳入版本管理）
 gradle/wrapper/

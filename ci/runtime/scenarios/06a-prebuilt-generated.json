@@ -1,0 +1,14 @@
+{
+  "id": "prebuilt-generated-roundtrip",
+  "title": "真实生成入库、落盘格式与第二次缓存命中",
+  "required": true,
+  "timeout": 210,
+  "subScenarios": [
+    {
+      "id": "prebuilt-generated-roundtrip",
+      "title": "生成成功后写 entry，第二次触发不再请求 LLM",
+      "check": "prebuilt_generated_roundtrip",
+      "timeout": 150
+    }
+  ]
+}

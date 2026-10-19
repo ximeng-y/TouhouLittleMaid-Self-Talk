@@ -1,0 +1,20 @@
+{
+  "id": "connection-and-delivery",
+  "title": "双客户端握手、实体同步与聊天交付",
+  "required": true,
+  "timeout": 240,
+  "subScenarios": [
+    {
+      "id": "connection-basic",
+      "title": "双客户端登录、实体同步、主人聊天交付与无重复",
+      "check": "connection_basic",
+      "timeout": 90
+    },
+    {
+      "id": "connection-reconnect",
+      "title": "旁观者真实断开后重新连接并同步实体",
+      "check": "connection_reconnect",
+      "timeout": 150
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "save-restart",
+  "title": "停服重启后女仆、档案、玩家设置仍可读且聊天继续",
+  "required": true,
+  "timeout": 360,
+  "subScenarios": [
+    {
+      "id": "save-restart-roundtrip",
+      "title": "保存后停客户端/服务端再启动，验证真实持久化与再次聊天",
+      "check": "save_restart_roundtrip",
+      "timeout": 300
+    }
+  ]
+}

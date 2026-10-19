@@ -1,0 +1,14 @@
+{
+  "id": "player-chat",
+  "title": "真实玩家 chat 输入、标签清洗、语言与原生历史",
+  "required": true,
+  "timeout": 180,
+  "subScenarios": [
+    {
+      "id": "player-chat-basic",
+      "title": "中文输入 + 标签剥离 + 英文语言指令 + 多轮历史",
+      "check": "player_chat_basic",
+      "timeout": 120
+    }
+  ]
+}

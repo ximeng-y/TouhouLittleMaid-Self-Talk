@@ -1,0 +1,14 @@
+{
+  "id": "welcome-window",
+  "title": "主人真实登录欢迎、窗口内触发与过期不补发",
+  "required": true,
+  "timeout": 240,
+  "subScenarios": [
+    {
+      "id": "welcome-window",
+      "title": "登录窗口内欢迎一次，重连后窗口过期不再补发",
+      "check": "welcome_window",
+      "timeout": 180
+    }
+  ]
+}

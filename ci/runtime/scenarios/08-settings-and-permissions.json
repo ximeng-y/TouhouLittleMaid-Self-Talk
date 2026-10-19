@@ -1,0 +1,14 @@
+{
+  "id": "settings-and-permissions",
+  "title": "真实 C2S 玩家设置、单只覆盖、越权拒绝与设置界面",
+  "required": true,
+  "timeout": 210,
+  "subScenarios": [
+    {
+      "id": "settings-and-permissions",
+      "title": "自话/互聊/睡觉/Tool/Prompt/历史/环境设置落库，非主人不可改",
+      "check": "settings_and_permissions",
+      "timeout": 150
+    }
+  ]
+}

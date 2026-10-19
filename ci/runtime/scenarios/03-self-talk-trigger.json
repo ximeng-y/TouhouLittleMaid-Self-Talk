@@ -1,0 +1,20 @@
+{
+  "id": "self-talk-trigger",
+  "title": "真实 tick 自话触发、全局关闭与历史写入",
+  "required": true,
+  "timeout": 150,
+  "subScenarios": [
+    {
+      "id": "self-talk-trigger",
+      "title": "主人在场时按配置真实触发自话并写入历史",
+      "check": "self_talk_trigger",
+      "timeout": 90
+    },
+    {
+      "id": "self-talk-disabled",
+      "title": "全局 ENABLED 关闭时不发请求、不产生回复",
+      "check": "self_talk_disabled",
+      "timeout": 40
+    }
+  ]
+}

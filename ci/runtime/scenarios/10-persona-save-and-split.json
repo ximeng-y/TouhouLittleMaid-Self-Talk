@@ -1,0 +1,14 @@
+{
+  "id": "persona-save-and-split",
+  "title": "真实人设编辑保存到服务端与 AI 拆分任务",
+  "required": true,
+  "timeout": 180,
+  "subScenarios": [
+    {
+      "id": "persona-edit-and-split",
+      "title": "打开人设页、填写四栏并保存，再发起独立 AI 拆分",
+      "check": "persona_edit_and_split",
+      "timeout": 120
+    }
+  ]
+}

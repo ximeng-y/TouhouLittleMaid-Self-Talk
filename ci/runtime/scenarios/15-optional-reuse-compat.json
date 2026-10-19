@@ -1,0 +1,27 @@
+{
+  "id": "optional-compat",
+  "title": "基础 profile 与可选依赖 profile 的兼容性",
+  "required": false,
+  "optional": true,
+  "profiles": [
+    "base",
+    "optional"
+  ],
+  "timeout": 90,
+  "subScenarios": [
+    {
+      "id": "optional-compat-base",
+      "title": "基础安装缺可选依赖时核心功能与进程保持正常",
+      "profile": "base",
+      "check": "optional_compat_base",
+      "timeout": 60
+    },
+    {
+      "id": "optional-compat-installed",
+      "title": "安装 Cloth Config 与 Curios 后配置入口和饰品上下文正常",
+      "profile": "optional",
+      "check": "optional_compat_installed",
+      "timeout": 120
+    }
+  ]
+}

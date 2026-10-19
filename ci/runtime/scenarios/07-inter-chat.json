@@ -1,0 +1,14 @@
+{
+  "id": "inter-chat-chain",
+  "title": "两只真实女仆互聊一轮、档案写入与关闭后静默",
+  "required": true,
+  "timeout": 180,
+  "subScenarios": [
+    {
+      "id": "inter-chat-round",
+      "title": "跨主人两只女仆互聊问答并写 archive，关闭后不再触发",
+      "check": "inter_chat_round",
+      "timeout": 120
+    }
+  ]
+}

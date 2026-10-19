@@ -1,0 +1,20 @@
+{
+  "id": "dispatch-gates",
+  "title": "自话共享闸门、顺延与阻挡期零请求",
+  "required": true,
+  "timeout": 180,
+  "subScenarios": [
+    {
+      "id": "dispatch-gate-shared",
+      "title": "两只女仆共用自话闸门，阻挡期不发请求",
+      "check": "dispatch_gate_shared",
+      "timeout": 100
+    },
+    {
+      "id": "dispatch-defer-queue",
+      "title": "在途请求期间顺延，不并发第二轮",
+      "check": "dispatch_defer_queue",
+      "timeout": 80
+    }
+  ]
+}
