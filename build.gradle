@@ -85,7 +85,7 @@ tasks.named('jar') {
 def selfCheckMains = ['EnvironmentContextTest', 'EnvironmentContextRendererTest',
                       'HistoryCoreTest', 'SelfTalkEventBufferTest', 'TlmMixinTargetTest',
                       'PrebuiltEntryCodecTest', 'SelfTalkReuseStoreTest', 'RequestLifecycleTest',
-                      'AutonomousChatHistoryLifecycleTest']
+                      'AutonomousChatHistoryLifecycleTest', 'VoiceDirNamesTest']
 selfCheckMains.each { name ->
     tasks.register("selfCheck${name}", JavaExec) {
         group = 'verification'
