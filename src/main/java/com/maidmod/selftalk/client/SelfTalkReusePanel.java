@@ -61,6 +61,14 @@ public final class SelfTalkReusePanel {
     private static final int BUTTON_HEIGHT = 20;
     private static final int BUTTON_WIDTH = 120;
     private static final int CLOSE_SIZE = 14;
+    /** 滚动条轨道宽度（与环境上下文浮层一致） */
+    private static final int TRACK_WIDTH = 6;
+    /** 轨道与面板右边距：轨道不贴边框，避免与 1px 边框连成一条"白边" */
+    private static final int TRACK_MARGIN = 4;
+    /** 右侧控件与轨道之间的间距 */
+    private static final int TRACK_GAP = 6;
+    /** 滚动条滑块最小高度（太短的滑块不好拖） */
+    private static final int MIN_THUMB_HEIGHT = 12;
     private static final int PANEL_MAX_WIDTH = 380;
     private static final int PANEL_MAX_HEIGHT = 340;
     private static final int SCREEN_MARGIN = 24;
@@ -242,7 +250,7 @@ public final class SelfTalkReusePanel {
         this.panelY = (screenHeight - panelHeight) / 2;
         this.listTop = panelY + 42;
         this.listBottom = panelY + panelHeight - FOOTER_HEIGHT;
-        this.buttonX = panelX + panelWidth - MARGIN - BUTTON_WIDTH;
+        this.buttonX = panelX + panelWidth - TRACK_MARGIN - TRACK_WIDTH - TRACK_GAP - BUTTON_WIDTH;
         this.fieldX = buttonX;
         this.fieldWidth = BUTTON_WIDTH;
         layoutRows();
@@ -922,12 +930,38 @@ public final class SelfTalkReusePanel {
         if (maxScroll <= 0 || viewportHeight <= 0) {
             return;
         }
-        int trackX = panelX + panelWidth - 5;
-        int thumbHeight = Math.max(12, viewportHeight * viewportHeight / contentHeight);
-        int range = viewportHeight - thumbHeight;
-        int thumbY = listTop + (range <= 0 ? 0 : scrollOffset * range / maxScroll);
-        graphics.fill(trackX, listTop, trackX + 3, listTop + viewportHeight, 0xFF202020);
-        graphics.fill(trackX, thumbY, trackX + 3, thumbY + thumbHeight, 0xFFA0A0A0);
+        int trackX = trackX();
+        int thumbHeight = thumbHeight();
+        int thumbY = thumbY();
+        graphics.fill(trackX, listTop, trackX + TRACK_WIDTH, listTop + viewportHeight, 0xFF202020);
+        graphics.fill(trackX, thumbY, trackX + TRACK_WIDTH, thumbY + thumbHeight, 0xFFA0A0A0);
+    }
+
+    /** 轨道左沿：与面板右边框之间留 {@link #TRACK_MARGIN}，不贴成一条白边 */
+    private int trackX() {
+        return panelX + panelWidth - TRACK_MARGIN - TRACK_WIDTH;
+    }
+
+    private int thumbHeight() {
+        if (maxScroll <= 0 || contentHeight <= 0) {
+            return viewportHeight;
+        }
+        return Math.max(MIN_THUMB_HEIGHT, viewportHeight * viewportHeight / contentHeight);
+    }
+
+    private int thumbY() {
+        int range = viewportHeight - thumbHeight();
+        if (maxScroll <= 0 || range <= 0) {
+            return listTop;
+        }
+        return listTop + scrollOffset * range / maxScroll;
+    }
+
+    /** 轨道命中区（含滑块拖拽与轨道点击分页） */
+    private boolean inTrack(double mouseX, double mouseY) {
+        return maxScroll > 0 && viewportHeight > 0
+                && mouseX >= trackX() && mouseX < trackX() + TRACK_WIDTH
+                && mouseY >= listTop && mouseY < listBottom;
     }
 
     private void renderFooter(GuiGraphics graphics) {
@@ -1107,12 +1141,9 @@ public final class SelfTalkReusePanel {
             }
             return true;
         }
-        int trackX = panelX + panelWidth - 5;
-        if (maxScroll > 0 && mouseX >= trackX - 4 && mouseX < trackX + 7
-                && mouseY >= listTop && mouseY < listBottom) {
-            int thumbHeight = Math.max(12, viewportHeight * viewportHeight / contentHeight);
-            int range = viewportHeight - thumbHeight;
-            int thumbY = listTop + (range <= 0 ? 0 : scrollOffset * range / maxScroll);
+        if (inTrack(mouseX, mouseY)) {
+            int thumbHeight = thumbHeight();
+            int thumbY = thumbY();
             if (mouseY >= thumbY && mouseY < thumbY + thumbHeight) {
                 draggingThumb = true;
                 dragGrabOffset = (int) mouseY - thumbY;
@@ -1144,14 +1175,11 @@ public final class SelfTalkReusePanel {
             return false;
         }
         if (draggingThumb && maxScroll > 0 && viewportHeight > 0) {
-            int trackX = panelX + panelWidth - 5;
-            if (mouseX >= trackX - 4 && mouseX < trackX + 7) {
-                int thumbHeight = Math.max(12, viewportHeight * viewportHeight / contentHeight);
-                int range = viewportHeight - thumbHeight;
-                if (range > 0) {
-                    int thumbTop = (int) mouseY - dragGrabOffset - listTop;
-                    scrollOffset = clampScroll(Math.round((float) thumbTop * maxScroll / range));
-                }
+            // 拖拽中不再要求鼠标停在轨道上：滑块可被拖出范围，松手才结束
+            int range = viewportHeight - thumbHeight();
+            if (range > 0) {
+                int thumbTop = (int) mouseY - dragGrabOffset - listTop;
+                scrollOffset = clampScroll(Math.round((float) thumbTop * maxScroll / range));
             }
             return true;
         }
@@ -1162,12 +1190,18 @@ public final class SelfTalkReusePanel {
         return true;
     }
 
+    /**
+     * 滚轮：每档 {@link #ROW_HEIGHT} × 2 像素，方向由 delta 符号决定。
+     * <p>
+     * 只让 delta 参与一次乘法——原写法 {@code signum(delta) * delta} 把方向乘掉，
+     * 上下滚动同向（都向顶部滚）。
+     */
     public boolean mouseScrolled(double delta) {
         if (!open) {
             return false;
         }
         if (delta != 0.0D && maxScroll > 0) {
-            scrollOffset = clampScroll(scrollOffset - (int) Math.signum(delta) * (int) (delta * ROW_HEIGHT * 2));
+            scrollOffset = clampScroll(scrollOffset - (int) Math.round(delta * ROW_HEIGHT * 2));
         }
         return true;
     }
