@@ -131,7 +131,7 @@
   "config.maid_self_talk.screen.player_settings.reuse.state.on": "Force On",
   "config.maid_self_talk.screen.player_settings.reuse.state.off": "Force Off",
   "config.maid_self_talk.screen.player_settings.reuse.personal_section": "Personal Settings",
-  "config.maid_self_talk.screen.player_settings.reuse.server_section": "Server Settings · Applies to Everyone",
+  "config.maid_self_talk.screen.player_settings.reuse.server_section": "Server Settings",
   "config.maid_self_talk.screen.player_settings.reuse.follow": "Follow server defaults",
   "config.maid_self_talk.screen.player_settings.reuse.follow.tooltip": "When checked, the server's default matching parameters apply; uncheck to use your own.",
   "config.maid_self_talk.screen.player_settings.reuse.player_min_eligible": "Minimum eligible entries",
