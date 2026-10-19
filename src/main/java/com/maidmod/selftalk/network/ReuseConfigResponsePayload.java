@@ -38,12 +38,14 @@ import java.util.UUID;
  * @param followingServer         服务端归一后的跟随状态（未开放权限时恒为 true）
  * @param playerMinEligible       玩家已存个人最低可用条数（不代表当前有效值）
  * @param playerHitChance         玩家已存个人使用概率（不代表当前有效值）
+ * @param prebuiltAudioEnabled    「保存并复用预制语音」世界开关（缺省 false，仅管理员可改）
  */
 public record ReuseConfigResponsePayload(UUID sessionId, long seq, boolean adminEnabled,
                                          boolean globalEnabled, UUID maidUuid, String maidStateId,
                                          boolean serverAdmin, int serverMinEligible, int serverHitChance,
                                          boolean playerParametersAllowed, boolean followingServer,
-                                         int playerMinEligible, int playerHitChance)
+                                         int playerMinEligible, int playerHitChance,
+                                         boolean prebuiltAudioEnabled)
         implements CustomPacketPayload {
 
     /** 单只覆盖存储值：跟随默认（无覆盖条目） */
@@ -78,6 +80,7 @@ public record ReuseConfigResponsePayload(UUID sessionId, long seq, boolean admin
                         ByteBufCodecs.BOOL.encode(buf, payload.followingServer());
                         ByteBufCodecs.VAR_INT.encode(buf, payload.playerMinEligible());
                         ByteBufCodecs.VAR_INT.encode(buf, payload.playerHitChance());
+                        ByteBufCodecs.BOOL.encode(buf, payload.prebuiltAudioEnabled());
                     },
                     buf -> new ReuseConfigResponsePayload(
                             ReuseConfigRequestPayload.NULLABLE_UUID_STREAM_CODEC.decode(buf),
@@ -92,7 +95,8 @@ public record ReuseConfigResponsePayload(UUID sessionId, long seq, boolean admin
                             ByteBufCodecs.BOOL.decode(buf),
                             ByteBufCodecs.BOOL.decode(buf),
                             ByteBufCodecs.VAR_INT.decode(buf),
-                            ByteBufCodecs.VAR_INT.decode(buf)));
+                            ByteBufCodecs.VAR_INT.decode(buf),
+                            ByteBufCodecs.BOOL.decode(buf)));
 
     /**
      * 组装权威快照（服务端主线程调用）。
@@ -121,7 +125,8 @@ public record ReuseConfigResponsePayload(UUID sessionId, long seq, boolean admin
                 PlayerSettingsStore.getPrebuiltReuseServerHitChance(player.server),
                 allowed, follows,
                 PlayerSettingsStore.getPrebuiltReusePlayerMinEligible(player.server, playerUuid),
-                PlayerSettingsStore.getPrebuiltReusePlayerHitChance(player.server, playerUuid));
+                PlayerSettingsStore.getPrebuiltReusePlayerHitChance(player.server, playerUuid),
+                PlayerSettingsStore.isPrebuiltAudioEnabled(player.server));
     }
 
     @Override

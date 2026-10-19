@@ -15,6 +15,7 @@
     "LLMOpenAIClientMixin",
     "CharacterSettingAccessor",
     "SelfTalkTtsMixin",
+    "SelfTalkPrebuiltTtsMixin",
     "SelfTalkSystemTtsMixin",
     "SelfTalkLateDisplayMixin",
     "GameContextRegisterAccessor",

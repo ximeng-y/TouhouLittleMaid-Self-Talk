@@ -202,6 +202,9 @@ public final class MaidSelfTalkService {
     /**
      * 投放复用命中的旧稿（服务端主线程）：置位 pending、挂等待气泡后按是否需要 TTS 翻译分流——
      * <ul>
+     *   <li>预制语音缓存开启时先于翻译分流查找音频：命中缓存音频（自动音频语言与当前严格一致，
+     *       人工音频跨语言通用）直接按缓存投放，不翻译、不调用供应商；未查得则携带捕获上下文，
+     *       本次投放的真实合成结果按命中条目身份入库；</li>
      *   <li>无需翻译（TTS 关闭／站点不可用／缓存语言与当前一致）：直接走
      *       {@link SelfTalkCallback#deliverReused} 的统一交付链；</li>
      *   <li>需要翻译：翻译会话走静默在途路径（清空/人设变更/状态移除/超时统一取消），
@@ -217,20 +220,35 @@ public final class MaidSelfTalkService {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.selfTalkPending = true;
         state.selfTalkPendingSinceTick = maid.level().getServer().getTickCount();
-        SelfTalkCallback callback = new SelfTalkCallback(chatManager, messages, welcome, keep,
-                broadcastRange, toolEnabled, token);
-        state.currentSelfTalkCallback = callback;
 
         boolean ttsActive = AIConfig.TTS_ENABLED.get() && chatManager.getTTSSite() != null
                 && chatManager.getTTSSite().enabled();
         String targetLanguage = chatManager.getTTSLanguage();
+        MinecraftServer server = maid.level().getServer();
+        // 预制语音缓存查找（世界级开关开启、复用有效、TTS 可用且供应商不被排除时）；
+        // 供应商排除与声音键失败都在 lookup 内部静默降级为 null 或捕获上下文
+        PrebuiltAudioContext audioContext = null;
+        if (ttsActive && PlayerSettingsStore.isPrebuiltAudioEnabled(server)
+                && PlayerSettingsStore.isPrebuiltReuseEnabledForMaid(server, maid)) {
+            String source = welcome ? SelfTalkReuseStore.SOURCE_WELCOME : SelfTalkReuseStore.SOURCE_SELF_TALK;
+            audioContext = PrebuiltAudioStore.lookupForReuse(server, token, fingerprint, source, entry, chatManager);
+        }
+
+        SelfTalkCallback callback = new SelfTalkCallback(chatManager, messages, welcome, keep,
+                broadcastRange, toolEnabled, token, null, false, audioContext);
+        state.currentSelfTalkCallback = callback;
+
+        if (audioContext != null && audioContext.hasHitBytes()) {
+            // 缓存命中：按缓存音频直接投放（TTS 入口由 mixin 改播缓存、取消供应商调用）
+            callback.deliverReused(new ResponseChat(entry.chatText, audioContext.deliveryTtsText()));
+            return true;
+        }
         boolean needsTranslation = ttsActive && entry.ttsLanguage != null
                 && !entry.ttsLanguage.equals(targetLanguage);
         if (!needsTranslation) {
             callback.deliverReused(new ResponseChat(entry.chatText, entry.ttsText));
             return true;
         }
-        MinecraftServer server = maid.level().getServer();
         // 待译文本必须是缓存的 TTS 段本身：上屏段与语音段允许措辞不同，
         // 且 sourceLanguage 声明的正是 ttsText 的语言（用 chatText 会译错段落并覆盖缓存语音）
         new SelfTalkTtsTranslationSession(maid, chatManager, site, entry.ttsText,
@@ -278,8 +296,15 @@ public final class MaidSelfTalkService {
         LLMClient client = site.client();
         SelfTalkCallback callback = null;
         try {
+            // 预制语音缓存捕获上下文：凭据齐全且世界开关开启时携带（条目身份待入库结果回填），
+            // TTS 关闭或供应商被排除时不携带——前者不会发起合成，后者的音频无法缓存
+            PrebuiltAudioContext captureContext = null;
+            if (archiveData != null && PlayerSettingsStore.isPrebuiltAudioEnabled(maid.level().getServer())) {
+                captureContext = PrebuiltAudioContext.forCapture(token, archiveData.fingerprint(),
+                        archiveData.source(), null, null);
+            }
             callback = new SelfTalkCallback(chatManager, messages, welcome, keep,
-                    broadcastRange, toolEnabled, token, archiveData, false);
+                    broadcastRange, toolEnabled, token, archiveData, false, captureContext);
             state.currentSelfTalkCallback = callback;
             client.chat(callback);
         } catch (Throwable t) {

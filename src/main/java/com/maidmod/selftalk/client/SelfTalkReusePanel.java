@@ -84,6 +84,8 @@ public final class SelfTalkReusePanel {
     private static final int FOCUS_FOLLOW = -5;
     /** 焦点哨兵：允许玩家自定义参数复选框 */
     private static final int FOCUS_ALLOW_PLAYER = -6;
+    /** 焦点哨兵：保存并复用预制语音复选框 */
+    private static final int FOCUS_PREBUILT_AUDIO = -7;
     /** 数值框焦点索引：0 个人最低条数、1 个人概率、2 服务器最低条数、3 服务器概率 */
     private static final int FIELD_MIN_ELIGIBLE = 0;
     private static final int FIELD_HIT_CHANCE = 1;
@@ -119,6 +121,8 @@ public final class SelfTalkReusePanel {
     private boolean followingServer = true;
     private int playerMinEligible = PrebuiltReuseParameters.DEFAULT_MIN_ELIGIBLE_ENTRIES;
     private int playerHitChance = PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT;
+    /** 「保存并复用预制语音」世界开关的权威值（快照同步；仅管理员可改，缺省关闭） */
+    private boolean prebuiltAudioEnabled;
 
     // ===== 输入草稿（每框独立：文本 + 是否未提交） =====
     private final String[] drafts = new String[FIELD_COUNT];
@@ -151,6 +155,7 @@ public final class SelfTalkReusePanel {
     private int serverMinRowY;
     private int serverChanceRowY;
     private int allowRowY;
+    private int audioRowY;
     private int personalFooterY;
 
     // ===== 交互 =====
@@ -160,6 +165,7 @@ public final class SelfTalkReusePanel {
     private Button closeButton;
     private Checkbox followBox;
     private Checkbox allowBox;
+    private Checkbox audioBox;
     /** 1.21.1 的 EditBox 无 tick 方法，浮层不需要逐 tick 驱动 */
     private final EditBox[] fields = new EditBox[FIELD_COUNT];
     /** 程序性改动输入框时置位，避免触发「用户编辑」判定 */
@@ -199,6 +205,7 @@ public final class SelfTalkReusePanel {
         this.focusedIndex = -1;
         this.serverAdmin = false;
         this.playerParametersAllowed = false;
+        this.prebuiltAudioEnabled = false;
         this.followingServer = true;
         clearDrafts();
         sendRequest(true);
@@ -277,11 +284,14 @@ public final class SelfTalkReusePanel {
             y += FIELD_ROW_HEIGHT;
             allowRowY = y;
             y += ROW_HEIGHT;
+            audioRowY = y;
+            y += ROW_HEIGHT;
         } else {
             serverTitleY = -1;
             serverMinRowY = -1;
             serverChanceRowY = -1;
             allowRowY = -1;
+            audioRowY = -1;
         }
         contentHeight = y;
     }
@@ -322,6 +332,13 @@ public final class SelfTalkReusePanel {
         }
         allowBox.setX(panelX + MARGIN);
         allowBox.setY(screenY(allowRowY));
+        if (audioBox == null) {
+            audioBox = Checkbox.builder(Component.empty(), font)
+                    .pos(panelX + MARGIN, 0)
+                    .build();
+        }
+        audioBox.setX(panelX + MARGIN);
+        audioBox.setY(screenY(audioRowY));
         for (int i = 0; i < FIELD_COUNT; i++) {
             if (fields[i] == null) {
                 fields[i] = new EditBox(font, fieldX, 0, fieldWidth, 18, Component.empty());
@@ -443,6 +460,10 @@ public final class SelfTalkReusePanel {
         if (allowBox != null) {
             setCheckboxSilently(allowBox, playerParametersAllowed);
             allowBox.active = hasSnapshot && serverAdmin;
+        }
+        if (audioBox != null) {
+            setCheckboxSilently(audioBox, prebuiltAudioEnabled);
+            audioBox.active = hasSnapshot && serverAdmin;
         }
     }
 
@@ -625,6 +646,17 @@ public final class SelfTalkReusePanel {
         issueSet(ReuseConfigSetPayload.OP_PLAYER_PARAMETERS_ALLOWED, null, playerParametersAllowed ? 1 : 0);
     }
 
+    /** 「保存并复用预制语音」世界开关（管理员）：目标绝对值；关闭不清空已有音频缓存 */
+    private void togglePrebuiltAudio() {
+        if (!hasSnapshot || !serverAdmin) {
+            applyFieldValues();
+            return;
+        }
+        prebuiltAudioEnabled = !prebuiltAudioEnabled;
+        applyFieldValues();
+        issueSet(ReuseConfigSetPayload.OP_PREBUILT_AUDIO, null, prebuiltAudioEnabled ? 1 : 0);
+    }
+
     private void issueSet(int opcode, UUID targetMaid, int value) {
         this.seq++;
         this.latestIssuedSeq = this.seq;
@@ -680,6 +712,7 @@ public final class SelfTalkReusePanel {
         this.followingServer = msg.followingServer();
         this.playerMinEligible = msg.playerMinEligible();
         this.playerHitChance = msg.playerHitChance();
+        this.prebuiltAudioEnabled = msg.prebuiltAudioEnabled();
         this.hasSnapshot = true;
         this.awaitingResponse = false;
         this.pendingSet = false;
@@ -775,6 +808,14 @@ public final class SelfTalkReusePanel {
             graphics.renderComponentTooltip(font, followTooltip(), mouseX, mouseY);
             return;
         }
+        if (serverAdmin) {
+            int audioY = screenY(audioRowY);
+            if (isRowVisible(audioY)
+                    && inRect(mouseX, mouseY, panelX + MARGIN, audioY, panelWidth - MARGIN * 2, 18)) {
+                graphics.renderComponentTooltip(font, prebuiltAudioTooltip(), mouseX, mouseY);
+                return;
+            }
+        }
         int field = fieldIndexAt(mouseX, mouseY);
         if (field >= 0) {
             graphics.renderComponentTooltip(font, fieldTooltip(field), mouseX, mouseY);
@@ -801,6 +842,7 @@ public final class SelfTalkReusePanel {
             renderFieldRow(graphics, FIELD_SERVER_MIN_ELIGIBLE, "reuse.server_min_eligible", false);
             renderFieldRow(graphics, FIELD_SERVER_HIT_CHANCE, "reuse.server_hit_chance", true);
             renderCheckboxRow(graphics, mouseX, mouseY, allowBox, screenY(allowRowY), "reuse.allow_player");
+            renderCheckboxRow(graphics, mouseX, mouseY, audioBox, screenY(audioRowY), "reuse.prebuilt_audio");
         }
         graphics.disableScissor();
     }
@@ -939,6 +981,19 @@ public final class SelfTalkReusePanel {
         return lines;
     }
 
+    /** 预制语音缓存行 tooltip：不可点（非管理员）时追加原因 */
+    private List<Component> prebuiltAudioTooltip() {
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.translatable(
+                "config.maid_self_talk.screen.player_settings.reuse.prebuilt_audio.tooltip"));
+        if (hasSnapshot && !serverAdmin) {
+            lines.add(Component.translatable(
+                            "config.maid_self_talk.screen.player_settings.reuse.disabled.not_admin")
+                    .withStyle(ChatFormatting.GRAY));
+        }
+        return lines;
+    }
+
     private List<Component> fieldTooltip(int index) {
         List<Component> lines = new ArrayList<>();
         if (isMinEligibleField(index)) {
@@ -1032,6 +1087,13 @@ public final class SelfTalkReusePanel {
                     && inRect(mouseX, mouseY, panelX + MARGIN, allowY, panelWidth - MARGIN * 2, 18)) {
                 focusedIndex = FOCUS_ALLOW_PLAYER;
                 toggleAllowPlayerParameters();
+                return true;
+            }
+            int audioY = screenY(audioRowY);
+            if (isRowVisible(audioY)
+                    && inRect(mouseX, mouseY, panelX + MARGIN, audioY, panelWidth - MARGIN * 2, 18)) {
+                focusedIndex = FOCUS_PREBUILT_AUDIO;
+                togglePrebuiltAudio();
                 return true;
             }
         }
@@ -1204,6 +1266,10 @@ public final class SelfTalkReusePanel {
         }
         if (focusedIndex == FOCUS_ALLOW_PLAYER) {
             toggleAllowPlayerParameters();
+            return;
+        }
+        if (focusedIndex == FOCUS_PREBUILT_AUDIO) {
+            togglePrebuiltAudio();
         }
     }
 
@@ -1235,6 +1301,9 @@ public final class SelfTalkReusePanel {
             if (allowBox != null && allowBox.active) {
                 candidates.add(FOCUS_ALLOW_PLAYER);
             }
+            if (audioBox != null && audioBox.active) {
+                candidates.add(FOCUS_PREBUILT_AUDIO);
+            }
         }
         candidates.add(FOCUS_CLOSE);
         int current = candidates.indexOf(focusedIndex);
@@ -1261,6 +1330,7 @@ public final class SelfTalkReusePanel {
             case FOCUS_MAID -> maidRowY;
             case FOCUS_FOLLOW -> followRowY;
             case FOCUS_ALLOW_PLAYER -> allowRowY;
+            case FOCUS_PREBUILT_AUDIO -> audioRowY;
             default -> 0;
         };
     }
