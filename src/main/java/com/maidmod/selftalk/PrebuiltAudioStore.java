@@ -316,11 +316,17 @@ public final class PrebuiltAudioStore {
         return new AutoTarget(relDir, prebuiltDir.resolve(relDirPartsOf(relDir)), stem);
     }
 
-    /** relDir（/ 分隔）→ 平台路径；段内已由上游结构保证（scope/来源/指纹/voice-key），不接收自由输入 */
+    /**
+     * 相对目录（/ 分隔）→ 平台路径，调用方再拼到 prebuilt 根上。
+     * 段内已由上游结构保证（scope/来源/指纹/voice-key），不接收自由输入；
+     * 首段只解析一次——重复解析会让落盘与查找都多出一层同名目录，
+     * 与 {@link #purgeMachineEntryAudio} 的清理路径对不上。
+     */
     private static Path relDirPartsOf(String relDir) {
-        Path path = Path.of(relDir.split("/")[0]);
-        for (String part : relDir.split("/")) {
-            path = path.resolve(part);
+        String[] parts = relDir.split("/");
+        Path path = Path.of(parts[0]);
+        for (int i = 1; i < parts.length; i++) {
+            path = path.resolve(parts[i]);
         }
         return path;
     }
