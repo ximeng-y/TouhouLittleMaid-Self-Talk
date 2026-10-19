@@ -116,7 +116,8 @@ jar {
 def selfCheckMains = ['EnvironmentContextTest', 'EnvironmentContextRendererTest',
                       'HistoryCoreTest', 'SelfTalkEventBufferTest', 'TlmMixinTargetTest',
                       'PrebuiltEntryCodecTest', 'SelfTalkReuseStoreTest', 'PlayerSettingsMigrationTest',
-                      'RequestLifecycleTest', 'AutonomousChatHistoryLifecycleTest', 'LanguagePredicateTest']
+                      'RequestLifecycleTest', 'AutonomousChatHistoryLifecycleTest', 'LanguagePredicateTest',
+                      'VoiceDirNamesTest']
 selfCheckMains.each { name ->
     tasks.register("selfCheck${name}", JavaExec) {
         group = 'verification'
