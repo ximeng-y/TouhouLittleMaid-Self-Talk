@@ -195,6 +195,16 @@ public final class SelfTalkAttachments {
                     () -> AttachmentType.builder(() -> false).serialize(Codec.BOOL).build());
 
     /**
+     * 「保存并复用预制语音」世界开关（Level 标量，缺失 = false）。
+     * <p>
+     * 真实合成入库与复用命中播缓存共用；仅管理员可改。关闭只停止新的保存与命中，
+     * 不清空已有音频缓存文件。
+     */
+    public static final Supplier<AttachmentType<Boolean>> LEVEL_PREBUILT_AUDIO_ENABLED =
+            ATTACHMENT_TYPES.register("level_prebuilt_audio_enabled",
+                    () -> AttachmentType.builder(() -> false).serialize(Codec.BOOL).build());
+
+    /**
      * 玩家「跟随服务器默认参数」状态（Level）：玩家 UUID -> false（仅存<b>取消跟随</b>项，缺失 = true）。
      * 管理员撤回「允许个人参数」时整表清空。
      */

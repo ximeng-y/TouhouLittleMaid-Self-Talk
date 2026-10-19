@@ -272,5 +272,7 @@
   "chat.maid_self_talk.split.failed.timeout": "AI persona organizing timed out. Please try again later.",
   "chat.maid_self_talk.split.failed.format": "The AI returned persona content in an unexpected format. Please organize again; if it keeps failing, try a different model.",
   "chat.maid_self_talk.split.failed.not_loaded": "AI persona organizing was cancelled: the maid is unloaded or has died. Please try again once the maid is available.",
-  "chat.maid_self_talk.split.failed.too_long": "AI persona organizing failed: the content exceeds the length limit. Shorten it and try again."
+  "chat.maid_self_talk.split.failed.too_long": "AI persona organizing failed: the content exceeds the length limit. Shorten it and try again.",
+  "config.maid_self_talk.screen.player_settings.reuse.prebuilt_audio": "Save and reuse prebuilt voices",
+  "config.maid_self_talk.screen.player_settings.reuse.prebuilt_audio.tooltip": "When enabled, successfully synthesized self-talk and welcome voices are saved as MP3/Ogg files keyed by entry, voice and language. Future hits with the same entry and voice play the cached audio instead of calling the TTS provider.\nAudio files placed by hand in custom/ are preferred (can span languages and voices). Disabling this does not delete saved audio."
 }

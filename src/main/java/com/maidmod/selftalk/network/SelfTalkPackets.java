@@ -62,8 +62,10 @@ public final class SelfTalkPackets {
         // 服务器默认参数、个人参数权限、跟随状态与已存个人值字段（issue #108）；
         // 人设保存请求新增 confirmMode 标记（显式保存确认模式 / 仅内容保存由服务端保留当前实际模式），
         // 页面「保存」「保存并退出」接管为本 mod 显式保存入口，离页自动保存不再改变实际模式；
+        // v16：预制复用 Set 新增 11 号操作码（「保存并复用预制语音」世界开关，仅管理员，value 0／1），
+        // Response 新增 prebuiltAudioEnabled 布尔字段；
         // 同样不做向后兼容：NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
-        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("15");
+        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("16");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,
                 SelfTalkPackets::handleConfigRequest);
         registrar.playToServer(SelfTalkConfigSetPayload.TYPE, SelfTalkConfigSetPayload.STREAM_CODEC,
@@ -760,7 +762,8 @@ public final class SelfTalkPackets {
                     }
                 } else if (opcode == ReuseConfigSetPayload.OP_SERVER_MIN_ELIGIBLE
                         || opcode == ReuseConfigSetPayload.OP_SERVER_HIT_CHANCE
-                        || opcode == ReuseConfigSetPayload.OP_PLAYER_PARAMETERS_ALLOWED) {
+                        || opcode == ReuseConfigSetPayload.OP_PLAYER_PARAMETERS_ALLOWED
+                        || opcode == ReuseConfigSetPayload.OP_PREBUILT_AUDIO) {
                     // 管理员身份每次重新判定：不信任客户端快照或界面状态
                     if (!PlayerSettingsStore.isPrebuiltReuseAdmin(serverPlayer)) {
                         return;
@@ -773,9 +776,13 @@ public final class SelfTalkPackets {
                         if (PrebuiltReuseParameters.isValidHitChancePercent(value)) {
                             PlayerSettingsStore.setPrebuiltReuseServerHitChance(serverPlayer.server, value);
                         }
+                    } else if (opcode == ReuseConfigSetPayload.OP_PLAYER_PARAMETERS_ALLOWED) {
+                        if (value == 0 || value == 1) {
+                            PlayerSettingsStore.setPrebuiltReusePlayerParametersAllowed(
+                                    serverPlayer.server, value == 1);
+                        }
                     } else if (value == 0 || value == 1) {
-                        PlayerSettingsStore.setPrebuiltReusePlayerParametersAllowed(
-                                serverPlayer.server, value == 1);
+                        PlayerSettingsStore.setPrebuiltAudioEnabled(serverPlayer.server, value == 1);
                     }
                 }
             }

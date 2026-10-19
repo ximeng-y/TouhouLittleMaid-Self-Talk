@@ -386,6 +386,8 @@ public final class SelfTalkHandler {
         SelfTalkReuseStore.release(event.getServer());
         // 预制复用 custom/：写出最终诊断报告并释放扫描缓存与通知状态
         PrebuiltCustomEntries.release(event.getServer());
+        // 预制语音缓存：写出全部待保存音频并释放实例
+        PrebuiltAudioStore.release(event.getServer());
     }
 
     /** overworld 存档：预制复用库写出脏条目文件（每条目文件的增量保存，只写脏的） */
@@ -394,6 +396,8 @@ public final class SelfTalkHandler {
         if (event.getLevel() instanceof ServerLevel serverLevel
                 && serverLevel.getServer().overworld() == serverLevel) {
             SelfTalkReuseStore.of(serverLevel.getServer()).saveDirty();
+            // 预制语音缓存：以「临时文件 + 原子替换」写出全部待保存音频（失败保留下轮重试）
+            PrebuiltAudioStore.of(serverLevel.getServer()).saveDirty();
         }
     }
 

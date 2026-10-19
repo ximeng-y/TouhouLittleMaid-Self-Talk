@@ -8,6 +8,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.RandomSource;
 import org.apache.commons.lang3.StringUtils;
 
+import javax.annotation.Nullable;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -204,14 +205,18 @@ public final class SelfTalkReuseService {
      * 入库：真实生成链在回复验证通过后调用一次。条目标识 entryId 由本次真实生成入库时
      * 用随机 UUID 创建（复用命中不创建新条目，复用投放绝不入库）；入库时间取服务端本地
      * 时间当下值；ttsLanguage 记录入库时聊天管理器的 TTS 语言（复用侧据此决定是否需要翻译）。
+     *
+     * @return 实际接收入库的条目（UUID 冲突重随机后的最终身份，预制语音缓存据此归属落盘）；
+     *         入库被拒（三次 UUID 尝试耗尽等）时为 null
      */
-    public static void appendEntry(MinecraftServer server, ArchiveData data,
-                                   String chatText, String ttsText, String ttsLanguage) {
+    @Nullable
+    public static SelfTalkReuseStore.PrebuiltEntry appendEntry(MinecraftServer server, ArchiveData data,
+                                                               String chatText, String ttsText, String ttsLanguage) {
         String createdAt = PrebuiltEntryCodec.formatCreatedAt(Instant.now());
         SelfTalkReuseStore.PrebuiltEntry entry = new SelfTalkReuseStore.PrebuiltEntry(
                 UUID.randomUUID(), createdAt, data.matchEntries(), data.chatLanguage(),
                 chatText, ttsLanguage, ttsText, SelfTalkReuseStore.Origin.MACHINE);
-        SelfTalkReuseStore.of(server).append(data.fingerprint(), data.source(), entry,
+        return SelfTalkReuseStore.of(server).append(data.fingerprint(), data.source(), entry,
                 Config.PREBUILT_MAX_ENTRIES_PER_SOURCE.get());
     }
 }

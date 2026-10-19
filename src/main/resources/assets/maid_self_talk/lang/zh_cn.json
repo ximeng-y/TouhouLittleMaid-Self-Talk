@@ -272,5 +272,7 @@
   "chat.maid_self_talk.split.failed.timeout": "AI 人设整理超时，请稍后重试。",
   "chat.maid_self_talk.split.failed.format": "AI 返回的人设内容格式不符合要求，请重新整理；若多次失败，可尝试更换模型。",
   "chat.maid_self_talk.split.failed.not_loaded": "AI 人设整理已取消：该女仆已卸载或死亡，请在女仆可用后重试。",
-  "chat.maid_self_talk.split.failed.too_long": "AI 人设整理失败：内容超过长度限制，请精简后重试。"
+  "chat.maid_self_talk.split.failed.too_long": "AI 人设整理失败：内容超过长度限制，请精简后重试。",
+  "config.maid_self_talk.screen.player_settings.reuse.prebuilt_audio": "保存并复用预制语音",
+  "config.maid_self_talk.screen.player_settings.reuse.prebuilt_audio.tooltip": "开启后，真实合成成功的自话与欢迎语语音会按条目、声音与语言保存为 MP3/Ogg 文件；相同条目与声音再次命中时直接播放缓存，不再请求 TTS 供应商。\n人工在 custom/ 目录放置的同名音频优先复用（可跨语言、跨声音）。关闭开关不会删除已保存的语音。"
 }
