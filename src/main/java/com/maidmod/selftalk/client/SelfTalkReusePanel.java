@@ -60,6 +60,8 @@ public final class SelfTalkReusePanel {
     private static final int FOOTER_HEIGHT = 30;
     private static final int BUTTON_HEIGHT = 20;
     private static final int BUTTON_WIDTH = 120;
+    /** 数值输入框宽度：比按钮窄 8px，给右侧百分号与滚动条轨道留出间距 */
+    private static final int FIELD_WIDTH = BUTTON_WIDTH - 8;
     private static final int CLOSE_SIZE = 14;
     /** 滚动条轨道宽度（与环境上下文浮层一致） */
     private static final int TRACK_WIDTH = 6;
@@ -74,8 +76,8 @@ public final class SelfTalkReusePanel {
     private static final int SCREEN_MARGIN = 24;
 
     private static final int ROW_HEIGHT = 24;
-    /** 数值行：标签 + 输入框 + 一行固定的范围/错误说明 */
-    private static final int FIELD_ROW_HEIGHT = 34;
+    /** 数值行：标签 + 输入框；范围/错误说明改为悬停浮层显示 */
+    private static final int FIELD_ROW_HEIGHT = 24;
     /** 分区标题行下方留白 */
     private static final int SECTION_GAP = 6;
 
@@ -252,7 +254,7 @@ public final class SelfTalkReusePanel {
         this.listBottom = panelY + panelHeight - FOOTER_HEIGHT;
         this.buttonX = panelX + panelWidth - TRACK_MARGIN - TRACK_WIDTH - TRACK_GAP - BUTTON_WIDTH;
         this.fieldX = buttonX;
-        this.fieldWidth = BUTTON_WIDTH;
+        this.fieldWidth = FIELD_WIDTH;
         layoutRows();
         this.viewportHeight = Math.max(0, listBottom - listTop);
         this.maxScroll = Math.max(0, contentHeight - viewportHeight);
@@ -423,11 +425,11 @@ public final class SelfTalkReusePanel {
     }
 
     private int serverValue(int index) {
-        return index == FIELD_SERVER_MIN_ELIGIBLE ? serverMinEligible : serverHitChance;
+        return isMinEligibleField(index) ? serverMinEligible : serverHitChance;
     }
 
     private int playerValue(int index) {
-        return index == FIELD_MIN_ELIGIBLE ? playerMinEligible : playerHitChance;
+        return isMinEligibleField(index) ? playerMinEligible : playerHitChance;
     }
 
     /** 该输入框此刻是否允许编辑 */
@@ -824,7 +826,7 @@ public final class SelfTalkReusePanel {
                 return;
             }
         }
-        int field = fieldIndexAt(mouseX, mouseY);
+        int field = fieldRowIndexAt(mouseX, mouseY);
         if (field >= 0) {
             graphics.renderComponentTooltip(font, fieldTooltip(field), mouseX, mouseY);
         }
@@ -892,7 +894,7 @@ public final class SelfTalkReusePanel {
                 enabled ? TITLE_COLOR : SUBTITLE_COLOR, false);
     }
 
-    /** 数值行：标签、输入框（右对齐）与一行固定的范围／错误说明 */
+    /** 数值行：标签与输入框（右对齐）；范围/错误说明移到悬停浮层 */
     private void renderFieldRow(GuiGraphics graphics, int index, String labelKey, boolean percent) {
         int y = screenY(fieldContentY(index));
         if (!isRowVisible(y)) {
@@ -911,13 +913,10 @@ public final class SelfTalkReusePanel {
         if (percent) {
             graphics.drawString(font, "%", fieldX + fieldWidth + 4, y + 5, SUBTITLE_COLOR, false);
         }
-        String hintKey = fieldHasError(index)
-                ? "config.maid_self_talk.screen.player_settings.reuse.error"
-                        + (isMinEligibleField(index) ? ".min_eligible" : ".hit_chance")
-                : "config.maid_self_talk.screen.player_settings.reuse.range"
-                        + (isMinEligibleField(index) ? ".min_eligible" : ".hit_chance");
-        graphics.drawString(font, Component.translatable(hintKey), panelX + MARGIN, y + 21,
-                fieldHasError(index) ? ERROR_COLOR : SUBTITLE_COLOR, false);
+        // 非法草稿仍要看得见：输入框边框不变，用红色下划线代替原先固定在行下方的一行错误提示
+        if (fieldHasError(index)) {
+            graphics.fill(fieldX, y + 18, fieldX + fieldWidth, y + 19, ERROR_COLOR);
+        }
     }
 
     /** 行是否与滚动视口相交（不可见行既不绘制也不接收点击） */
@@ -1030,6 +1029,7 @@ public final class SelfTalkReusePanel {
 
     private List<Component> fieldTooltip(int index) {
         List<Component> lines = new ArrayList<>();
+        String kind = isMinEligibleField(index) ? ".min_eligible" : ".hit_chance";
         if (isMinEligibleField(index)) {
             lines.add(Component.translatable(
                     "config.maid_self_talk.screen.player_settings.reuse.min_eligible.tooltip"));
@@ -1037,6 +1037,11 @@ public final class SelfTalkReusePanel {
             lines.add(Component.translatable(
                     "config.maid_self_talk.screen.player_settings.reuse.hit_chance.tooltip"));
         }
+        // 原先固定在行下方的范围说明改为悬停显示；非法草稿时显示错误文案
+        String hintKey = "config.maid_self_talk.screen.player_settings.reuse."
+                + (fieldHasError(index) ? "error" : "range") + kind;
+        lines.add(Component.translatable(hintKey)
+                .withStyle(fieldHasError(index) ? ChatFormatting.RED : ChatFormatting.GRAY));
         if (hasSnapshot && !fieldEditable(index)) {
             String reason = index == FIELD_SERVER_MIN_ELIGIBLE || index == FIELD_SERVER_HIT_CHANCE
                     ? "config.maid_self_talk.screen.player_settings.reuse.disabled.not_admin"
@@ -1063,6 +1068,22 @@ public final class SelfTalkReusePanel {
             }
             int y = screenY(fieldContentY(i));
             if (isRowVisible(y) && inRect(mouseX, mouseY, fieldX, y, fieldWidth, 18)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** 鼠标下的可见数值行（标签到输入框右缘）：只用于悬停浮层，不扩大点击命中区 */
+    private int fieldRowIndexAt(double mouseX, double mouseY) {
+        int rowLeft = panelX + MARGIN;
+        int rowWidth = fieldX + fieldWidth - rowLeft;
+        for (int i = 0; i < FIELD_COUNT; i++) {
+            if (!isFieldVisible(i)) {
+                continue;
+            }
+            int y = screenY(fieldContentY(i));
+            if (isRowVisible(y) && inRect(mouseX, mouseY, rowLeft, y, rowWidth, 18)) {
                 return i;
             }
         }
