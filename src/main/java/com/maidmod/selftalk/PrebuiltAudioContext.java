@@ -52,8 +52,9 @@ public final class PrebuiltAudioContext {
 
     // ===== 真实合成捕获 =====
     private boolean identityCaptured;
-    /** 声音标识键（供应商类型 + 站点 ID + 端点身份 + 有效音色 + 供应商特有字段，SHA-256） */
-    private String voiceKey;
+    /** 实际声音目录候选（可读名 + hash-only 兜底，均带完整声音键的 12 位前缀） */
+    @Nullable
+    private VoiceDirNames.Names voiceDirs;
     /** 实际发起合成时的目标 TTS 语言原文（如 zh_cn），写入 JSON */
     private String ttsLanguage;
     /** 实际送合成的 TTS 文本（JSON 内容与它一致） */
@@ -121,7 +122,7 @@ public final class PrebuiltAudioContext {
 
     /**
      * tts 入口冻结交付身份（mixin 在供应商调用发起前调用，主线程）：
-     * 声音键按<b>实际发起合成</b>的站点与音色计算，语言与文本取当次调用实参；
+     * 声音目录名按<b>实际发起合成</b>的站点与音色计算，语言与文本取当次调用实参；
      * 命中播放路径不会调用本方法。随后尝试结算（字节与条目可能都已就位）。
      */
     public synchronized void noteDeliveryIdentity(MinecraftServer server, TTSSite site, String modelId,
@@ -129,12 +130,12 @@ public final class PrebuiltAudioContext {
         if (hitBytes != null || settled || identityCaptured) {
             return;
         }
-        this.voiceKey = PrebuiltAudioStore.voiceKeyOf(site, modelId);
+        this.voiceDirs = PrebuiltAudioStore.voiceDirsOf(site, modelId);
         this.ttsLanguage = ttsLanguage;
         this.ttsText = ttsText;
         this.identityCaptured = true;
-        if (this.voiceKey == null) {
-            // 摘要计算失败（JVM 必带 SHA-256，理论不可达）：本上下文终止，不阻塞正常合成
+        if (this.voiceDirs == null) {
+            // 摘要或目录名计算失败（理论不可达）：本上下文终止，不阻塞正常合成
             this.settled = true;
             return;
         }
@@ -181,7 +182,7 @@ public final class PrebuiltAudioContext {
             settled = true;
             return false;
         }
-        if (!identityCaptured || synthesizedBytes == null || entry == null
+        if (!identityCaptured || voiceDirs == null || synthesizedBytes == null || entry == null
                 || ttsText == null || ttsText.isBlank() || ttsLanguage == null) {
             return false;
         }
@@ -192,7 +193,7 @@ public final class PrebuiltAudioContext {
             return false;
         }
         PrebuiltAudioStore.registerPending(server, fingerprint, source, entry,
-                customRelPath, voiceKey, ttsLanguage, ttsText, synthesizedBytes, format);
+                customRelPath, voiceDirs, ttsLanguage, ttsText, synthesizedBytes, format);
         settled = true;
         return true;
     }
