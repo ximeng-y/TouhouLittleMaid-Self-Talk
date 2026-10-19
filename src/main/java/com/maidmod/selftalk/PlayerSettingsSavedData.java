@@ -109,6 +109,9 @@ public final class PlayerSettingsSavedData extends SavedData {
     private int prebuiltReuseServerHitChance = PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT;
     /** 是否允许玩家自定义预制复用参数（缺失 = false 不允许，玩家一律跟随服务器） */
     private boolean prebuiltReusePlayerParametersAllowed = false;
+
+    /** 「保存并复用预制语音」世界开关（缺省 false = 关闭） */
+    private boolean prebuiltAudioEnabled = false;
     /**
      * 玩家「跟随服务器默认参数」状态：玩家 UUID -> false（仅存<b>取消跟随</b>项，缺失 = true 跟随）。
      * <p>
@@ -161,6 +164,7 @@ public final class PlayerSettingsSavedData extends SavedData {
                 PrebuiltReuseParameters.DEFAULT_HIT_CHANCE_PERCENT, PrebuiltReuseParameters.HIT_CHANCE_MIN,
                 PrebuiltReuseParameters.HIT_CHANCE_MAX);
         data.prebuiltReusePlayerParametersAllowed = readBoolean(tag, "prebuiltReusePlayerParametersAllowed", false);
+        data.prebuiltAudioEnabled = readBoolean(tag, "prebuiltAudioEnabled", false);
         readBooleanMap(tag, "prebuiltReuseFollowServer", data.prebuiltReuseFollowServer);
         readIntMap(tag, "prebuiltReusePlayerMinEligible", data.prebuiltReusePlayerMinEligible,
                 PrebuiltReuseParameters.MIN_ELIGIBLE_MIN, PrebuiltReuseParameters.MIN_ELIGIBLE_MAX);
@@ -193,6 +197,7 @@ public final class PlayerSettingsSavedData extends SavedData {
         tag.putInt("prebuiltReuseServerMinEligible", prebuiltReuseServerMinEligible);
         tag.putInt("prebuiltReuseServerHitChance", prebuiltReuseServerHitChance);
         tag.putBoolean("prebuiltReusePlayerParametersAllowed", prebuiltReusePlayerParametersAllowed);
+        tag.putBoolean("prebuiltAudioEnabled", prebuiltAudioEnabled);
         writeBooleanGlobal(tag, "prebuiltReuseFollowServer", prebuiltReuseFollowServer);
         writeIntGlobal(tag, "prebuiltReusePlayerMinEligible", prebuiltReusePlayerMinEligible);
         writeIntGlobal(tag, "prebuiltReusePlayerHitChance", prebuiltReusePlayerHitChance);
@@ -454,6 +459,20 @@ public final class PlayerSettingsSavedData extends SavedData {
         if (!allowed) {
             prebuiltReuseFollowServer.clear();
         }
+        setDirty();
+    }
+
+    /** 「保存并复用预制语音」世界开关（缺省 false = 关闭；关闭不清空已有音频缓存文件） */
+    public boolean isPrebuiltAudioEnabled() {
+        return prebuiltAudioEnabled;
+    }
+
+    /** 写「保存并复用预制语音」世界开关（实际变更才置脏） */
+    public void setPrebuiltAudioEnabled(boolean enabled) {
+        if (prebuiltAudioEnabled == enabled) {
+            return;
+        }
+        prebuiltAudioEnabled = enabled;
         setDirty();
     }
 

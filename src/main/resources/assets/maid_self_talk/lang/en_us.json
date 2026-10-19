@@ -140,6 +140,8 @@
   "config.maid_self_talk.screen.player_settings.reuse.server_hit_chance": "Server reuse chance",
   "config.maid_self_talk.screen.player_settings.reuse.allow_player": "Allow players to customize reuse parameters",
   "config.maid_self_talk.screen.player_settings.reuse.allow_player.tooltip": "When off, every player uses the server parameters and personal fields become read-only. Saved personal values are kept, but players must uncheck follow again after you re-enable this.",
+  "config.maid_self_talk.screen.player_settings.reuse.prebuilt_audio": "Save & reuse prebuilt voice lines",
+  "config.maid_self_talk.screen.player_settings.reuse.prebuilt_audio.tooltip": "When enabled, reuse hits for self-talk and welcome lines play a cached audio clip directly, and real syntheses are stored into the cache. Only compressed MP3/Ogg audio is saved; the same maid persona, voice and language no longer call the provider.",
   "config.maid_self_talk.screen.player_settings.reuse.personal_hint": "These parameters apply to both self-talk and welcome messages.",
   "config.maid_self_talk.screen.player_settings.reuse.min_eligible.tooltip": "Below this many eligible candidates nothing is reused and a real request is made.",
   "config.maid_self_talk.screen.player_settings.reuse.hit_chance.tooltip": "With enough candidates, this is the chance of reusing one; misses go through normal generation.",

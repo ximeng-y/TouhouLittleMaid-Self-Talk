@@ -18,14 +18,15 @@ import java.util.function.Supplier;
  * <p>
  * 包内不携带 player UUID：服务端一律用连接上的 {@link ServerPlayer} 身份读写。
  * <p>
- * 操作码（0~4 为原有复用开关，5~10 为 issue #108 新增匹配参数）：
+ * 操作码（0~4 为原有复用开关，5~10 为 issue #108 新增匹配参数，11 为预制语音缓存世界开关）：
  * <ul>
  *   <li>0 全局关、1 全局开：女仆维度必须为空（防歧义包，携带即拒写）；</li>
  *   <li>2 恢复继承（删除覆盖条目）、3 单只关、4 单只开：女仆 UUID 必须非空，
  *       且须通过归属校验（仅允许操作自己拥有的女仆）；</li>
  *   <li>5 设置跟随服务器（{@code value} 仅 0／1）、6 个人最低条数、7 个人概率：
  *       女仆维度必须为空；个人数值还要求玩家当前已取消跟随；</li>
- *   <li>8 服务器默认最低条数、9 服务器默认概率、10 是否允许个人参数（{@code value} 仅 0／1）：
+ *   <li>8 服务器默认最低条数、9 服务器默认概率、10 是否允许个人参数、
+ *       11 保存并复用预制语音（{@code value} 仅 0／1）：
  *       女仆维度必须为空，且每次重新校验管理员身份。</li>
  * </ul>
  * 新增操作按<b>单字段</b>发送绝对目标值，避免失焦提交时顺带覆盖其他字段，
@@ -56,6 +57,8 @@ public class ReuseConfigSetMessage {
     public static final int OP_SERVER_HIT_CHANCE = 9;
     /** 设置是否允许玩家自定义参数（仅管理员；value 0／1） */
     public static final int OP_PLAYER_PARAMETERS_ALLOWED = 10;
+    /** 设置「保存并复用预制语音」世界开关（仅管理员；value 0／1） */
+    public static final int OP_PREBUILT_AUDIO = 11;
 
     private final UUID sessionId;
     private final long seq;
@@ -211,7 +214,7 @@ public class ReuseConfigSetMessage {
             return;
         }
         if (opcode == OP_SERVER_MIN_ELIGIBLE || opcode == OP_SERVER_HIT_CHANCE
-                || opcode == OP_PLAYER_PARAMETERS_ALLOWED) {
+                || opcode == OP_PLAYER_PARAMETERS_ALLOWED || opcode == OP_PREBUILT_AUDIO) {
             if (maidUuid != null) {
                 return;
             }
@@ -228,8 +231,12 @@ public class ReuseConfigSetMessage {
                     PlayerSettingsStore.setPrebuiltReuseServerHitChance(serverPlayer.server, msg.value);
                 }
             } else if (msg.value == 0 || msg.value == 1) {
-                PlayerSettingsStore.setPrebuiltReusePlayerParametersAllowed(
-                        serverPlayer.server, msg.value == 1);
+                if (opcode == OP_PLAYER_PARAMETERS_ALLOWED) {
+                    PlayerSettingsStore.setPrebuiltReusePlayerParametersAllowed(
+                            serverPlayer.server, msg.value == 1);
+                } else {
+                    PlayerSettingsStore.setPrebuiltAudioEnabled(serverPlayer.server, msg.value == 1);
+                }
             }
         }
     }

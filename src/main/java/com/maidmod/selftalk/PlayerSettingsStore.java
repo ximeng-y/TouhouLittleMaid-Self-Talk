@@ -544,6 +544,18 @@ public final class PlayerSettingsStore {
         return playerUuid == null || data(server).isPrebuiltReuseFollowServer(playerUuid);
     }
 
+    // ===== 预制语音缓存世界开关（默认关闭，随预制复用生效） =====
+
+    /** 「保存并复用预制语音」世界开关（缺省 false = 关闭；真实合成入库与复用命中播缓存共用） */
+    public static boolean isPrebuiltAudioEnabled(MinecraftServer server) {
+        return data(server).isPrebuiltAudioEnabled();
+    }
+
+    /** 写「保存并复用预制语音」世界开关（调用方负责管理员校验；关闭不清空已有音频缓存） */
+    public static void setPrebuiltAudioEnabled(MinecraftServer server, boolean enabled) {
+        data(server).setPrebuiltAudioEnabled(enabled);
+    }
+
     /** 写跟随状态（跟随 = 删键，取消跟随 = 存 false） */
     public static void setPrebuiltReuseFollowingServer(MinecraftServer server, UUID playerUuid, boolean follow) {
         if (playerUuid == null) {

@@ -3,6 +3,7 @@ package com.maidmod.selftalk;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.storage.LevelResource;
 
+import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -153,6 +154,10 @@ public final class SelfTalkReuseStore {
             for (UUID id : entries.removedIds) {
                 if (!deleteEntry(entries.dir, id)) {
                     allDeleted = false;
+                } else {
+                    // 文件删除成功才清理该条目的自动音频缓存（找不到或删失败都静默，
+                    // 绝不扩大清扫范围；PrebuiltAudioStore 内部自行判定挂载）
+                    PrebuiltAudioStore.purgeMachineEntryAudio(entries.dir, id);
                 }
             }
         }
@@ -175,28 +180,32 @@ public final class SelfTalkReuseStore {
      * 向匹配指纹 + 来源的子目录追加一条，并把条目数修剪到容量内（每指纹每来源独立计数）。
      * <p>
      * 追加前先在本来源目录内确认 {@code entryId} 可用：首个候选是传入条目本身的 UUID，
-     * 冲突时最多重新随机两次（共三次尝试），三次尝试耗尽则无变更返回——不淘汰、不追加、
+     * 冲突时最多重新随机两次（共三次尝试），三次尝试耗尽则无变更返回 null——不淘汰、不追加、
      * 不改任何标记，只记一条警告（见 {@link #resolveAvailableEntry}）。
      * <p>
      * 超出容量按入库时间最早优先淘汰；时间相同按 {@code entryId} 稳定决胜，淘汰顺序确定。
      * 淘汰只从内存移除并登记待删清单，实际删除文件推迟到下一次落盘（见 {@link #saveDirty}），
-     * 不触碰旧版扁平 JSON。指纹/来源非法或目录被锁为只读时丢弃本次追加
+     * 不触碰旧版扁平 JSON。指纹/来源非法或目录被锁为只读时丢弃本次追加返回 null
      * （正常生成流程继续，不影响玩家可见行为）。
+     *
+     * @return 实际接收入库的条目（UUID 冲突重随机后的最终身份，供预制语音缓存按其归属落盘）；
+     *         入库被拒时为 null
      */
-    public void append(String fingerprint, String source, PrebuiltEntry entry, int maxEntries) {
+    @Nullable
+    public PrebuiltEntry append(String fingerprint, String source, PrebuiltEntry entry, int maxEntries) {
         SourceEntries entries = ensureLoaded(fingerprint, source);
         if (entries == null) {
-            return;
+            return null;
         }
         // 目录锁只读：读取都失败时放弃入库，不改任何内存标记（正常生成与回复交付不受影响）
         if (entries.unreadable) {
-            return;
+            return null;
         }
         // 先确定 UUID 在本来源目录内可用，再淘汰追加；三次尝试耗尽则无变更返回，
         // 不淘汰、不追加、不触碰脏标记与待删除集合（容量淘汰只发生在已有可用候选之后）
         PrebuiltEntry available = resolveAvailableEntry(entries, entry);
         if (available == null) {
-            return;
+            return null;
         }
         // 先删最旧腾出空位再追加；maxEntries 由调用方按配置现读
         while (entries.entries.size() >= maxEntries) {
@@ -206,6 +215,7 @@ public final class SelfTalkReuseStore {
         }
         entries.entries.put(available.entryId, available);
         entries.dirtyIds.add(available.entryId);
+        return available;
     }
 
     /**
