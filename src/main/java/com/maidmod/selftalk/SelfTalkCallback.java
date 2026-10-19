@@ -14,6 +14,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.MinecraftForge;
 
+import javax.annotation.Nullable;
 import java.net.http.HttpRequest;
 import java.util.List;
 import java.util.UUID;
@@ -58,6 +59,14 @@ public class SelfTalkCallback extends LLMCallback {
     /** 本回调是否为「复用投放」（只影响入库豁免，展示/广播/档案照常） */
     private final boolean reusedSource;
     /**
+     * 预制语音缓存上下文（世界开关开启时携带，否则 null）：复用命中为「命中播放」上下文
+     * （携带缓存音频，TTS 入口直接改播缓存），真实生成与复用投放的未命中为「捕获」上下文
+     * （条目身份待回填，真实合成的字节经 TTS 回调捕获后按最终身份入库）。
+     * 经 {@link SelfTalkTtsGate#runWith} 的重载登记进 TTS 发起区间。
+     */
+    @Nullable
+    private final PrebuiltAudioContext prebuiltAudio;
+    /**
      * 翻译失败后的纯文本投放标记：仅作用于本次 {@code super.onSuccess}，
      * 令 TLM 的 getTTSSite() 判空（经 {@code SelfTalkLateDisplayMixin} 的窄重定向），
      * 让缓存的上屏文本走原生文字分支、不发错误语言的 TTS。
@@ -67,13 +76,14 @@ public class SelfTalkCallback extends LLMCallback {
     public SelfTalkCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
                             boolean welcome, int keepSelfTalkCount, double broadcastRange, boolean toolEnabled,
                             SelfTalkRequestToken token) {
-        this(chatManager, messages, welcome, keepSelfTalkCount, broadcastRange, toolEnabled, token, null, false);
+        this(chatManager, messages, welcome, keepSelfTalkCount, broadcastRange, toolEnabled, token,
+                null, false, null);
     }
 
     public SelfTalkCallback(MaidAIChatManager chatManager, List<LLMMessage> messages,
                             boolean welcome, int keepSelfTalkCount, double broadcastRange, boolean toolEnabled,
                             SelfTalkRequestToken token, SelfTalkReuseService.ArchiveData archiveData,
-                            boolean reusedSource) {
+                            boolean reusedSource, @Nullable PrebuiltAudioContext prebuiltAudio) {
         super(chatManager, messages);
         this.welcome = welcome;
         this.keepSelfTalkCount = keepSelfTalkCount;
@@ -81,6 +91,7 @@ public class SelfTalkCallback extends LLMCallback {
         this.token = token;
         this.archiveData = archiveData;
         this.reusedSource = reusedSource;
+        this.prebuiltAudio = prebuiltAudio;
         // Tool 关闭时模型看不到工具定义；开启时由 TLM 工具循环接管
         this.needAddTools = toolEnabled;
         // 父构造器已创建等待气泡，这里在 welcome 等字段赋值后标记来源（欢迎语不标记，
@@ -183,7 +194,8 @@ public class SelfTalkCallback extends LLMCallback {
             // 真正交付都在接下来这段时间之后。用本请求的令牌把这段同步区间登记起来，
             // 让 TLM 在该区间内构造的 TTS 回调也带上清空判定，
             // 否则「回复已返回并开始合成 → 玩家清空 → 合成结果到达」仍会把旧内容送到主人眼前。
-            SelfTalkTtsGate.runWith(token, () -> super.onSuccess(responseChat));
+            // 音频上下文随令牌一并登记：TTS 入口据此冻结交付身份或改播缓存音频。
+            SelfTalkTtsGate.runWith(token, prebuiltAudio, () -> super.onSuccess(responseChat));
             // 父类对空白回复内部转调 onFailure（本类重写已复位 pending 并沉默），此处直接收敛
             if (responseChat.getChatText() == null || responseChat.getChatText().isBlank()) {
                 return;
@@ -218,8 +230,14 @@ public class SelfTalkCallback extends LLMCallback {
         if (!PlayerSettingsStore.isPrebuiltReuseEnabledForMaid(maid.level().getServer(), maid)) {
             return;
         }
-        SelfTalkReuseService.appendEntry(maid.level().getServer(), archiveData,
-                responseChat.getChatText(), responseChat.getTtsText(), chatManager.getTTSLanguage());
+        SelfTalkReuseStore.PrebuiltEntry accepted = SelfTalkReuseService.appendEntry(maid.level().getServer(),
+                archiveData, responseChat.getChatText(), responseChat.getTtsText(), chatManager.getTTSLanguage());
+        if (prebuiltAudio != null) {
+            // 音频缓存结算：入库被拒（accepted 为 null）时上下文直接作废，绝不登记孤立音频；
+            // 接收成功则按最终条目身份结算（此前的合成字节捕获与身份冻结均已就位时）
+            prebuiltAudio.onEntryAccepted(accepted);
+            prebuiltAudio.trySettle(maid.level().getServer());
+        }
     }
 
     /**

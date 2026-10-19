@@ -63,6 +63,8 @@ final class PrebuiltCustomEntries {
     /** 作用域（null = 全局，其他 = 女仆显示名）→ 来源 → 条目列表 */
     private final Map<String, Map<String, List<SelfTalkReuseStore.PrebuiltEntry>>> byScope =
             new LinkedHashMap<>();
+    /** 条目 UUID（由相对路径派生）→ 源 Markdown 相对路径（/ 分隔）：自动音频镜像目录定位用 */
+    private final Map<UUID, String> audioSourceRelPaths = new LinkedHashMap<>();
     /** 有告警的具名目录 → 告警文件数（主人上线通知用；_global 不进这里，不点名主人） */
     private final Map<String, Integer> warnedNamedDirs = new LinkedHashMap<>();
     /** 本会话已收到告警私信的玩家：登出不重置，停服随实例释放 */
@@ -251,6 +253,7 @@ final class PrebuiltCustomEntries {
             }
             if (read.entry() != null) {
                 result.add(scope, source, read.entry());
+                result.audioSourceRelPaths.put(derivedId, relPath);
                 hasContent = true;
             }
         }
@@ -295,5 +298,14 @@ final class PrebuiltCustomEntries {
             sb.append(part.getFileName().toString());
         }
         return sb.toString();
+    }
+
+    /**
+     * custom 条目源 Markdown 相对路径（{@code /} 分隔，如 {@code <scope>/<source>/<file>.md}），
+     * 预制音频缓存定位同目录人工音频与自动音频镜像目录用；非 custom 条目或本会话未扫描到
+     * 该条目返回 null。惰性触发扫描，与匹配入口同一实例。
+     */
+    static String customSourceRelPath(MinecraftServer server, UUID entryId) {
+        return of(server).audioSourceRelPaths.get(entryId);
     }
 }

@@ -3,6 +3,7 @@ package com.maidmod.selftalk;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import net.minecraft.server.level.ServerLevel;
 
+import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -32,6 +33,13 @@ public final class SelfTalkTtsGate {
     private static final ThreadLocal<SelfTalkRequestToken> CURRENT = new ThreadLocal<>();
 
     /**
+     * 与令牌并行的预制音频上下文中转：同一同步区间内由 {@code SelfTalkTtsMixin} 取走，
+     * 用于在 {@code tts} 入口冻结交付身份、在 TTS 回调入口捕获合成字节、在缓存命中时
+     * 改走缓存播放。null = 本次请求不参与预制语音缓存（功能关闭、供应商被排除或无命中）。
+     */
+    private static final ThreadLocal<PrebuiltAudioContext> CURRENT_AUDIO = new ThreadLocal<>();
+
+    /**
      * 系统 TTS 延迟任务的令牌中转：键为（女仆实体 id + 等待气泡 id），值为发起请求的令牌。
      * <p>
      * 系统 TTS（{@code TTSSystemServices} 分支）不新建 {@code TTSCallback}，而是在
@@ -53,17 +61,27 @@ public final class SelfTalkTtsGate {
     }
 
     /**
-     * 在发起 TTS 的同步区间内登记本次请求的令牌，区间结束后恢复原值（可重入嵌套）。
+     * 在发起 TTS 的同步区间内登记本次请求的令牌与音频上下文，区间结束后恢复原值（可重入嵌套）。
      * <p>
-     * 令牌为 null（普通玩家聊天等）时直接执行，不建立登记。
+     * 令牌为 null（普通玩家聊天等）时直接执行，不建立登记；令牌非 null 而音频上下文为 null
+     * （本次请求不参与预制语音缓存）时只登记令牌。
      */
     public static void runWith(SelfTalkRequestToken token, Runnable action) {
+        runWith(token, null, action);
+    }
+
+    /** 带音频上下文的登记重载：{@code SelfTalkCallback.onSuccess} 的 TTS 发起区间使用 */
+    public static void runWith(SelfTalkRequestToken token, @Nullable PrebuiltAudioContext audio, Runnable action) {
         if (token == null) {
             action.run();
             return;
         }
         SelfTalkRequestToken previous = CURRENT.get();
+        PrebuiltAudioContext previousAudio = CURRENT_AUDIO.get();
         CURRENT.set(token);
+        if (audio != null) {
+            CURRENT_AUDIO.set(audio);
+        }
         try {
             action.run();
         } finally {
@@ -72,12 +90,25 @@ public final class SelfTalkTtsGate {
             } else {
                 CURRENT.set(previous);
             }
+            if (audio != null) {
+                if (previousAudio == null) {
+                    CURRENT_AUDIO.remove();
+                } else {
+                    CURRENT_AUDIO.set(previousAudio);
+                }
+            }
         }
     }
 
     /** 当前线程上正在发起 TTS 的请求令牌；不在登记区间内（玩家聊天等）返回 null */
     public static SelfTalkRequestToken currentToken() {
         return CURRENT.get();
+    }
+
+    /** 当前线程登记区间内的预制音频上下文；未登记或本次请求不参与缓存时返回 null */
+    @Nullable
+    public static PrebuiltAudioContext currentAudio() {
+        return CURRENT_AUDIO.get();
     }
 
     /**

@@ -140,6 +140,8 @@
   "config.maid_self_talk.screen.player_settings.reuse.server_hit_chance": "服务器默认使用概率",
   "config.maid_self_talk.screen.player_settings.reuse.allow_player": "允许玩家自定义预制复用参数",
   "config.maid_self_talk.screen.player_settings.reuse.allow_player.tooltip": "关闭后所有玩家一律使用服务器参数，个人设置界面只读；玩家已保存的个人数值会保留，但重新开放后仍需重新取消跟随。",
+  "config.maid_self_talk.screen.player_settings.reuse.prebuilt_audio": "保存并复用预制语音",
+  "config.maid_self_talk.screen.player_settings.reuse.prebuilt_audio.tooltip": "开启后复用命中的自话与欢迎语按缓存音频直接播放，真实合成的结果也会存为缓存；仅保存 MP3/Ogg 压缩音频，同一女仆人设、同一声音与语言命中不再调用供应商。",
   "config.maid_self_talk.screen.player_settings.reuse.personal_hint": "以上参数对自话与欢迎语同时生效",
   "config.maid_self_talk.screen.player_settings.reuse.min_eligible.tooltip": "合格候选条数低于该值时不会复用，直接真实生成。",
   "config.maid_self_talk.screen.player_settings.reuse.hit_chance.tooltip": "候选充足时按此概率决定是否复用，未命中照常真实生成。",

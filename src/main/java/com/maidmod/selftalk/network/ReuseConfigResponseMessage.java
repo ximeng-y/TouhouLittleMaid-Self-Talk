@@ -37,6 +37,7 @@ import java.util.function.Supplier;
  * @param followingServer            服务端归一后的跟随状态（未开放权限时恒为 true）
  * @param playerMinEligible          玩家已存个人最低可用条数（不代表当前有效值）
  * @param playerHitChance            玩家已存个人使用概率（不代表当前有效值）
+ * @param prebuiltAudioEnabled       「保存并复用预制语音」世界开关（缺省 false，仅管理员可改）
  */
 public class ReuseConfigResponseMessage {
 
@@ -65,12 +66,14 @@ public class ReuseConfigResponseMessage {
     private final boolean followingServer;
     private final int playerMinEligible;
     private final int playerHitChance;
+    private final boolean prebuiltAudioEnabled;
 
     public ReuseConfigResponseMessage(UUID sessionId, long seq, boolean adminEnabled,
                                       boolean globalEnabled, UUID maidUuid, String maidStateId,
                                       boolean serverAdmin, int serverMinEligible, int serverHitChance,
                                       boolean playerParametersAllowed, boolean followingServer,
-                                      int playerMinEligible, int playerHitChance) {
+                                      int playerMinEligible, int playerHitChance,
+                                      boolean prebuiltAudioEnabled) {
         this.sessionId = sessionId;
         this.seq = seq;
         this.adminEnabled = adminEnabled;
@@ -84,6 +87,7 @@ public class ReuseConfigResponseMessage {
         this.followingServer = followingServer;
         this.playerMinEligible = playerMinEligible;
         this.playerHitChance = playerHitChance;
+        this.prebuiltAudioEnabled = prebuiltAudioEnabled;
     }
 
     /**
@@ -113,7 +117,8 @@ public class ReuseConfigResponseMessage {
                 PlayerSettingsStore.getPrebuiltReuseServerHitChance(player.server),
                 allowed, follows,
                 PlayerSettingsStore.getPrebuiltReusePlayerMinEligible(player.server, playerUuid),
-                PlayerSettingsStore.getPrebuiltReusePlayerHitChance(player.server, playerUuid));
+                PlayerSettingsStore.getPrebuiltReusePlayerHitChance(player.server, playerUuid),
+                PlayerSettingsStore.isPrebuiltAudioEnabled(player.server));
     }
 
     public UUID sessionId() {
@@ -168,6 +173,10 @@ public class ReuseConfigResponseMessage {
         return playerHitChance;
     }
 
+    public boolean prebuiltAudioEnabled() {
+        return prebuiltAudioEnabled;
+    }
+
     public static void encode(ReuseConfigResponseMessage msg, FriendlyByteBuf buf) {
         ReuseConfigRequestMessage.writeNullableUuid(buf, msg.sessionId);
         buf.writeVarLong(msg.seq);
@@ -182,6 +191,7 @@ public class ReuseConfigResponseMessage {
         buf.writeBoolean(msg.followingServer);
         buf.writeVarInt(msg.playerMinEligible);
         buf.writeVarInt(msg.playerHitChance);
+        buf.writeBoolean(msg.prebuiltAudioEnabled);
     }
 
     public static ReuseConfigResponseMessage decode(FriendlyByteBuf buf) {
@@ -189,7 +199,8 @@ public class ReuseConfigResponseMessage {
                 buf.readBoolean(), buf.readBoolean(), ReuseConfigRequestMessage.readNullableUuid(buf),
                 buf.readUtf(MAX_STATE_LENGTH),
                 buf.readBoolean(), buf.readVarInt(), buf.readVarInt(),
-                buf.readBoolean(), buf.readBoolean(), buf.readVarInt(), buf.readVarInt());
+                buf.readBoolean(), buf.readBoolean(), buf.readVarInt(), buf.readVarInt(),
+                buf.readBoolean());
     }
 
     /** 客户端：收到预制复用设置响应（会话/序号校验在客户端浮层内完成） */

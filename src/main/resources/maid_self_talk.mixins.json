@@ -11,6 +11,7 @@
     "LLMOpenAIClientMixin",
     "CharacterSettingAccessor",
     "SelfTalkTtsMixin",
+    "SelfTalkPrebuiltTtsMixin",
     "SelfTalkSystemTtsMixin",
     "SelfTalkLateDisplayMixin",
     "EntityMaidProvenanceMixin",

@@ -36,8 +36,10 @@ public final class SelfTalkPackets {
     // 服务器默认参数、个人参数权限、跟随状态与已存个人值字段（issue #108）；
     // 人设保存请求新增 confirmMode 标记（显式保存确认模式 / 仅内容保存由服务端保留当前实际模式），
     // 页面「保存」「保存并退出」接管为本 mod 显式保存入口，离页自动保存不再改变实际模式；
+    // v16：预制复用 Set 新增 11 号操作码（「保存并复用预制语音」世界开关，仅管理员，value 0／1），
+    // Response 新增 prebuiltAudioEnabled 布尔字段；
     // 不做向后兼容（既定决策），升版让不匹配版本在协商期被拒绝（服务端与旧版客户端互不兼容）
-    private static final String PROTOCOL_VERSION = "15";
+    private static final String PROTOCOL_VERSION = "16";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(MaidSelfTalkMod.MODID, "main"),
