@@ -1,6 +1,7 @@
 package com.maidmod.selftalk;
 
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.SupportModelSelect;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.tts.TTSSite;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.tts.gptsovits.TTSGptSovitsSite;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.tts.minimax.TTSMiniMaxSite;
@@ -39,15 +40,20 @@ import java.util.WeakHashMap;
  *   generated/&lt;source&gt;/v1-&lt;指纹&gt;/entry-&lt;UUID&gt;.md              # 既有机器条目（本类只读其定位）
  *   custom/&lt;scope&gt;/&lt;source&gt;/greeting.md                       # 既有 custom 条目
  *   custom/&lt;scope&gt;/&lt;source&gt;/greeting.mp3|.ogg                  # 人工音频（同目录同主名，无语言后缀，只读）
- *   generated-audio/generated/&lt;source&gt;/v1-&lt;指纹&gt;/&lt;voice-key&gt;/  # 机器条目自动音频
+ *   generated-audio/generated/&lt;source&gt;/v1-&lt;指纹&gt;/&lt;voice-dir&gt;/  # 机器条目自动音频
  *     entry-&lt;UUID&gt;.&lt;zh-CN&gt;.mp3|.ogg + 同名 .json
- *   generated-audio/custom/&lt;scope&gt;/&lt;source&gt;/&lt;voice-key&gt;/       # custom 条目自动音频
+ *   generated-audio/custom/&lt;scope&gt;/&lt;source&gt;/&lt;voice-dir&gt;/       # custom 条目自动音频
  *     greeting.&lt;zh-CN&gt;.mp3|.ogg + 同名 .json
  * </pre>
  * <p>
- * 声音标识键（&lt;voice-key&gt;）：供应商 api_type + 站点 ID + 端点身份（url）+ 有效音色 ID 的
- * SHA-256；MiniMax 额外混入 siteModel，GPT-SoVITS 额外混入参考音频路径、辅助路径、
- * 提示文本／语言与切分方式。密钥与 headers 绝不参与摘要、不落盘。
+ * 声音目录名（&lt;voice-dir&gt;）由 {@link VoiceDirNames} 生成：{@code <api_type>-<显示音色>-<hash12>}，
+ * 显示音色优先取 {@code SupportModelSelect.models()} 的显示名，缺失或不可读时回退音色 ID，
+ * 再回退 {@code voice}；非法字符、控制/格式字符自动替换，过长按码点截断。哈希是完整声音标识键
+ * 的前 12 位，因此清洗、截断或大小写差异不会把不同声音混到同一目录。完整声音标识键：
+ * 供应商 api_type + 站点 ID + 端点身份（url）+ 有效音色 ID 的 SHA-256；MiniMax 额外混入
+ * siteModel，GPT-SoVITS 额外混入参考音频路径、辅助路径、提示文本／语言与切分方式。
+ * 密钥与 headers 绝不参与摘要、不落盘。可读名连父目录都无法创建时，登记阶段会退到
+ * {@code tts-voice-<hash12>} 这个全安全字符目录；两者都失败则只放弃本次缓存。
  * 语言用完整目标 TTS 语言标签后缀（zh_cn → zh-CN，不只保留 zh）。
  * <p>
  * 生命周期与 {@link SelfTalkReuseStore} 同节奏：待保存先入内存队列（同路径幂等覆盖），
@@ -185,6 +191,32 @@ public final class PrebuiltAudioStore {
         }
     }
 
+    /**
+     * 当前站点的声音目录候选名：可读名优先，{@code tts-voice-<hash12>} 兜底。
+     * 显示音色取自 {@link SupportModelSelect#models()}（仅用于显示，不参与身份哈希）；
+     * 完整键失败或名称生成失败返回 null，调用方放弃本次缓存。
+     */
+    @Nullable
+    static VoiceDirNames.Names voiceDirsOf(TTSSite site, String modelId) {
+        String voiceKey = voiceKeyOf(site, modelId);
+        if (voiceKey == null) {
+            return null;
+        }
+        String displayName = null;
+        if (site instanceof SupportModelSelect select) {
+            try {
+                Map<String, String> models = select.models();
+                if (models != null) {
+                    displayName = models.get(modelId);
+                }
+            } catch (RuntimeException e) {
+                // 第三方站点的模型表可能由外部配置懒加载；显示名失败不应阻断缓存身份
+                displayName = null;
+            }
+        }
+        return VoiceDirNames.of(site.getApiType(), displayName, modelId, voiceKey);
+    }
+
     /** 供应商是否被排除：系统 TTS 与 Player2 没有服务端音频回传，不查音频、不建缓存（mixin 也读） */
     public static boolean isExcludedProvider(TTSSite site) {
         return TTSSystemSite.API_TYPE.equals(site.getApiType())
@@ -232,8 +264,9 @@ public final class PrebuiltAudioStore {
 
     /**
      * 复用命中条目的音频查找（服务端主线程，在 {@code deliverReused} 的翻译分流之前）：
-     * 供应商被排除或声音键失败时返回 null（该次投放照常实时合成，不建音频上下文）；
-     * 否则按「人工通用音频 → 当前声音与完整目标语言的自动音频」固定顺序查找——
+     * 供应商被排除或声音目录名失败时返回 null（该次投放照常实时合成，不建音频上下文）；
+     * 否则按「人工通用音频 → 当前声音目录（可读名优先，hash-only 兜底）与完整目标语言的
+     * 自动音频」固定顺序查找——
      * 人工音频只认源 Markdown 同目录、同主名、无语言后缀的 .mp3/.ogg（同时存在优先 MP3），
      * 自动音频必须有配套 JSON（ttsText 非空白且 ttsLanguage 与当前目标语言严格相等），
      * 其他语言文件不能顶替当前语言。查得即返回携带命中字节的上下文（直接缓存播放）；
@@ -249,8 +282,8 @@ public final class PrebuiltAudioStore {
         if (site == null || isExcludedProvider(site)) {
             return null;
         }
-        String voiceKey = voiceKeyOf(site, chatManager.getTTSModel());
-        if (voiceKey == null) {
+        VoiceDirNames.Names voiceDirs = voiceDirsOf(site, chatManager.getTTSModel());
+        if (voiceDirs == null) {
             return null;
         }
         Path prebuiltDir = server.getWorldPath(LevelResource.ROOT)
@@ -268,14 +301,22 @@ public final class PrebuiltAudioStore {
                 audio = readManualAudio(sourceMd);
             }
         }
-        // 2) 自动音频：当前声音 + 完整目标语言，JSON 必须齐备
+        // 2) 自动音频：当前声音目录 + 完整目标语言，JSON 必须齐备；
+        // 可读名目录可能因平台限制未创建成功，登记阶段会改住 hash-only 目录
         if (audio == null) {
-            AutoTarget target = autoTargetOf(prebuiltDir, fingerprint, source, entry, voiceKey, customRelPath);
-            if (target != null) {
+            List<String> candidates = voiceDirs.primary().equals(voiceDirs.fallback())
+                    ? List.of(voiceDirs.primary())
+                    : List.of(voiceDirs.primary(), voiceDirs.fallback());
+            for (String voiceDir : candidates) {
+                AutoTarget target = autoTargetOf(prebuiltDir, fingerprint, source, entry, voiceDir, customRelPath);
+                if (target == null) {
+                    continue;
+                }
                 AutoHit hit = readAutoAudio(of(server), target, langTag, targetLanguage);
                 if (hit != null) {
                     audio = hit.bytes();
                     deliveryTtsText = hit.ttsText();
+                    break;
                 }
             }
         }
@@ -291,14 +332,14 @@ public final class PrebuiltAudioStore {
 
     @Nullable
     private static AutoTarget autoTargetOf(Path prebuiltDir, String fingerprint, String source,
-                                           SelfTalkReuseStore.PrebuiltEntry entry, String voiceKey,
+                                           SelfTalkReuseStore.PrebuiltEntry entry, String voiceDir,
                                            @Nullable String customRelPath) {
         if (entry.origin == SelfTalkReuseStore.Origin.MACHINE) {
             if (!isStorableFingerprint(fingerprint)) {
                 return null;
             }
             String relDir = AUDIO_DIR_NAME + '/' + SelfTalkReuseStore.GENERATED_DIR + '/' + source
-                    + '/' + FINGERPRINT_DIR_PREFIX + fingerprint + '/' + voiceKey;
+                    + '/' + FINGERPRINT_DIR_PREFIX + fingerprint + '/' + voiceDir;
             return new AutoTarget(relDir, prebuiltDir.resolve(relDirPartsOf(relDir)),
                     "entry-" + entry.entryId);
         }
@@ -311,14 +352,14 @@ public final class PrebuiltAudioStore {
             return null;
         }
         String relDir = AUDIO_DIR_NAME + '/' + SelfTalkReuseStore.CUSTOM_DIR_NAME + '/'
-                + parts[0] + '/' + parts[1] + '/' + voiceKey;
+                + parts[0] + '/' + parts[1] + '/' + voiceDir;
         String stem = parts[2].substring(0, parts[2].length() - 3);
         return new AutoTarget(relDir, prebuiltDir.resolve(relDirPartsOf(relDir)), stem);
     }
 
     /**
      * 相对目录（/ 分隔）→ 平台路径，调用方再拼到 prebuilt 根上。
-     * 段内已由上游结构保证（scope/来源/指纹/voice-key），不接收自由输入；
+     * 段内已由上游结构保证（scope/来源/指纹/已清洗的声音目录名），不接收自由输入；
      * 首段只解析一次——重复解析会让落盘与查找都多出一层同名目录，
      * 与 {@link #purgeMachineEntryAudio} 的清理路径对不上。
      */
@@ -334,25 +375,26 @@ public final class PrebuiltAudioStore {
     // ===== 待保存登记与落盘 =====
 
     /**
-     * 登记一条待保存音频（服务端主线程，来自 {@link PrebuiltAudioContext#trySettle}）；
+     * 登记一条待保存音频（服务端主线程，来自 {@link PrebuiltAudioContext#trySettle}）：
+     * 先尝试创建可读名目录，平台拒绝时退到 hash-only 目录；两者都失败则放弃本次缓存。
      * 同路径幂等覆盖。任何路径推导失败都静默放弃，绝不抛出阻断正常交付链。
      */
     static void registerPending(MinecraftServer server, String fingerprint, String source,
                                 SelfTalkReuseStore.PrebuiltEntry entry, @Nullable String customRelPath,
-                                String voiceKey, String ttsLanguage, String ttsText,
+                                VoiceDirNames.Names voiceDirs, String ttsLanguage, String ttsText,
                                 byte[] bytes, AudioFormat format) {
         try {
             PrebuiltAudioStore store = of(server);
             String langTag = languageTagOf(ttsLanguage);
             String ext = format == AudioFormat.MP3 ? MP3_EXT : OGG_EXT;
-            String relDir;
+            String parentRelDir;
             String baseName;
             if (entry.origin == SelfTalkReuseStore.Origin.MACHINE) {
                 if (!isStorableFingerprint(fingerprint)) {
                     return;
                 }
-                relDir = AUDIO_DIR_NAME + '/' + SelfTalkReuseStore.GENERATED_DIR + '/' + source
-                        + '/' + FINGERPRINT_DIR_PREFIX + fingerprint + '/' + voiceKey;
+                parentRelDir = AUDIO_DIR_NAME + '/' + SelfTalkReuseStore.GENERATED_DIR + '/' + source
+                        + '/' + FINGERPRINT_DIR_PREFIX + fingerprint;
                 baseName = "entry-" + entry.entryId;
             } else {
                 if (customRelPath == null) {
@@ -362,9 +404,13 @@ public final class PrebuiltAudioStore {
                 if (parts.length != 3 || !parts[2].toLowerCase(Locale.ROOT).endsWith(".md")) {
                     return;
                 }
-                relDir = AUDIO_DIR_NAME + '/' + SelfTalkReuseStore.CUSTOM_DIR_NAME + '/'
-                        + parts[0] + '/' + parts[1] + '/' + voiceKey;
+                parentRelDir = AUDIO_DIR_NAME + '/' + SelfTalkReuseStore.CUSTOM_DIR_NAME + '/'
+                        + parts[0] + '/' + parts[1];
                 baseName = parts[2].substring(0, parts[2].length() - 3);
+            }
+            String relDir = ensureVoiceDir(store, parentRelDir, voiceDirs);
+            if (relDir == null) {
+                return;
             }
             String audioName = baseName + '.' + langTag + ext;
             String jsonName = baseName + '.' + langTag + JSON_EXT;
@@ -374,6 +420,41 @@ public final class PrebuiltAudioStore {
         } catch (RuntimeException e) {
             MaidSelfTalkMod.LOGGER.warn("Prebuilt audio cache registration dropped: {}", e.toString());
         }
+    }
+
+    /**
+     * 选定并创建声音目录：优先可读名，失败再试 hash-only 兜底名。目录创建放在登记阶段，
+     * 是为了让后续查找能确定本次音频实际会落在哪个候选目录；两个都失败则返回 null。
+     */
+    @Nullable
+    private static String ensureVoiceDir(PrebuiltAudioStore store, String parentRelDir,
+                                         VoiceDirNames.Names voiceDirs) {
+        if (voiceDirs == null) {
+            return null;
+        }
+        String[] names = voiceDirs.primary().equals(voiceDirs.fallback())
+                ? new String[]{voiceDirs.primary()}
+                : new String[]{voiceDirs.primary(), voiceDirs.fallback()};
+        String lastFailure = null;
+        for (String name : names) {
+            if (name == null || name.isBlank()) {
+                continue;
+            }
+            String relDir = parentRelDir + '/' + name;
+            try {
+                Files.createDirectories(store.prebuiltDir.resolve(relDirPartsOf(relDir)));
+                if (!name.equals(voiceDirs.primary())) {
+                    MaidSelfTalkMod.LOGGER.warn("Prebuilt audio voice directory fallback to '{}' for {}",
+                            name, relDir);
+                }
+                return relDir;
+            } catch (IOException | RuntimeException e) {
+                lastFailure = e.toString();
+            }
+        }
+        MaidSelfTalkMod.LOGGER.warn("Prebuilt audio cache skipped: no usable voice directory under {} ({})",
+                parentRelDir, lastFailure);
+        return null;
     }
 
     /**
