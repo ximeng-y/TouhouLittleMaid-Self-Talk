@@ -158,6 +158,8 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     private Button modeButton;
     private Button splitButton;
     private final GuardedPersonaEditBox[] boxes = new GuardedPersonaEditBox[MaidPersonaDraft.CATEGORY_COUNT];
+    /** 矮窗口紧凑布局：四行放不下时改 2×2 网格并收起底部两行提示 */
+    private boolean compactLayout;
 
     public MaidPersonaEditScreen(@Nullable Screen parent, EntityMaid maid) {
         super(parent, maid);
@@ -190,10 +192,13 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         locateVanillaWidgets();
 
         int columnX = this.vanillaBoxX + COLUMN_OFFSET;
-        // 每栏至少容纳：标签 12 + 输入框 20 + 计数带 13（MultiLineEditBox 在框底 +4 画 9px 计数）
-        int contentHeight = Math.max(4 * (LABEL_HEIGHT + 33),
+        // 四栏完整显示所需高度：每栏标签 12 + 输入框 20 + 框底计数带 13
+        int fullContentHeight = 4 * (LABEL_HEIGHT + 33);
+        int availableHeight = Math.max(4 * (LABEL_HEIGHT + 20),
                 this.height - CONTENT_BOTTOM_MARGIN - this.vanillaBoxY);
-        int groupHeight = contentHeight / MaidPersonaDraft.CATEGORY_COUNT;
+        // 矮窗口（高 GUI scale）四行放不下：改 2×2 网格并收起底部提示，
+        // 避免第四栏压到提示行、240 高度时计数带越出屏幕
+        this.compactLayout = availableHeight < fullContentHeight;
 
         this.modeButton = this.addRenderableWidget(Button.builder(modeLabel(), b -> toggleMode())
                 .bounds(columnX, MODE_BUTTON_Y, COLUMN_WIDTH, BUTTON_HEIGHT)
@@ -219,25 +224,42 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
             this.exportButton.setY(EXPORT_BUTTON_Y);
         }
 
-        for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
-            int index = i;
-            int boxY = this.vanillaBoxY + i * groupHeight + LABEL_HEIGHT;
-            // 13px 给框底计数带留位，避免压到下一栏标签
-            int boxHeight = Math.max(20, groupHeight - LABEL_HEIGHT - 15);
-            GuardedPersonaEditBox box = new GuardedPersonaEditBox(this.font, this.vanillaBoxX, boxY,
-                    this.vanillaBoxWidth, boxHeight,
-                    Component.translatable("config.maid_self_talk.screen.persona_draft.placeholder"));
-            box.setCharacterLimit(MaidPersonaDraft.MAX_FIELD_LENGTH);
-            box.setValueListener(value -> {
-                if (!this.loadingBox) {
-                    this.draft[index] = value;
-                }
-            });
-            box.setValue(this.draft[index]);
-            this.boxes[i] = box;
+        if (this.compactLayout) {
+            // 2×2 网格：每行都放得下标签与计数带，宽度减半换取纵向空间
+            int gap = 8;
+            int columnWidth = Math.max(40, (this.vanillaBoxWidth - gap) / 2);
+            int rowHeight = Math.max(LABEL_HEIGHT + 33, availableHeight / 2);
+            for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
+                int boxX = this.vanillaBoxX + (i % 2) * (columnWidth + gap);
+                int boxY = this.vanillaBoxY + (i / 2) * rowHeight + LABEL_HEIGHT;
+                int boxHeight = Math.max(20, rowHeight - LABEL_HEIGHT - 15);
+                addPersonaBox(i, boxX, boxY, columnWidth, boxHeight);
+            }
+        } else {
+            int groupHeight = availableHeight / MaidPersonaDraft.CATEGORY_COUNT;
+            for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
+                int boxY = this.vanillaBoxY + i * groupHeight + LABEL_HEIGHT;
+                // 13px 给框底计数带留位，避免压到下一栏标签
+                int boxHeight = Math.max(20, groupHeight - LABEL_HEIGHT - 15);
+                addPersonaBox(i, this.vanillaBoxX, boxY, this.vanillaBoxWidth, boxHeight);
+            }
         }
 
         applyModeVisibility();
+    }
+
+    /** 创建单栏输入框并接入草稿数组（四行与 2×2 布局共用） */
+    private void addPersonaBox(int index, int x, int y, int width, int height) {
+        GuardedPersonaEditBox box = new GuardedPersonaEditBox(this.font, x, y, width, height,
+                Component.translatable("config.maid_self_talk.screen.persona_draft.placeholder"));
+        box.setCharacterLimit(MaidPersonaDraft.MAX_FIELD_LENGTH);
+        box.setValueListener(value -> {
+            if (!this.loadingBox) {
+                this.draft[index] = value;
+            }
+        });
+        box.setValue(this.draft[index]);
+        this.boxes[index] = box;
     }
 
     /** 从原版 init 建立的控件中找回整段人设框与导出按钮，并记录输入框的原版布局位置；同时接管两个原版保存按钮 */
@@ -880,13 +902,16 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
                             this.boxes[i].getX() + 2, this.boxes[i].getY() - 10, 0xFFFFFF);
                 }
             }
-            // 两行常驻提示：第一行说明固定注入、第二行说明动态召回，逐行绘制（drawCenteredString 不处理换行）
-            graphics.drawCenteredString(this.font, Component.translatable(
-                    "config.maid_self_talk.screen.persona_draft.notice.line1"), this.width / 2,
-                    this.height - 36, 0xFFAA55);
-            graphics.drawCenteredString(this.font, Component.translatable(
-                    "config.maid_self_talk.screen.persona_draft.notice.line2"), this.width / 2,
-                    this.height - 24, 0xFFAA55);
+            // 两行常驻提示：第一行说明固定注入、第二行说明动态召回，逐行绘制（drawCenteredString 不处理换行）；
+            // 紧凑布局下收起，把纵向空间留给四栏
+            if (!this.compactLayout) {
+                graphics.drawCenteredString(this.font, Component.translatable(
+                        "config.maid_self_talk.screen.persona_draft.notice.line1"), this.width / 2,
+                        this.height - 36, 0xFFAA55);
+                graphics.drawCenteredString(this.font, Component.translatable(
+                        "config.maid_self_talk.screen.persona_draft.notice.line2"), this.width / 2,
+                        this.height - 24, 0xFFAA55);
+            }
         }
 
         if (splitRunning) {
