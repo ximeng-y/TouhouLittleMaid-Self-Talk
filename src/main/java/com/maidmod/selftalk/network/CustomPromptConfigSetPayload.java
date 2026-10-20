@@ -32,8 +32,8 @@ public record CustomPromptConfigSetPayload(Optional<UUID> maidUuid, Optional<Str
             (buf, uuid) -> buf.writeUUID(uuid),
             buf -> buf.readUUID());
 
-    /** 流侧限长 600；服务端再做 500 字符截断 + 控制字符清洗 */
-    private static final StreamCodec<ByteBuf, String> PROMPT_CODEC = ByteBufCodecs.stringUtf8(600);
+    /** 流侧限长 2200；服务端再做 2048 字符截断 + 控制字符清洗 */
+    private static final StreamCodec<ByteBuf, String> PROMPT_CODEC = ByteBufCodecs.stringUtf8(2200);
 
     public static final StreamCodec<FriendlyByteBuf, CustomPromptConfigSetPayload> STREAM_CODEC =
             StreamCodec.composite(

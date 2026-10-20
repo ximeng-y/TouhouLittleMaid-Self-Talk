@@ -43,8 +43,8 @@ import java.util.Optional;
 @OnlyIn(Dist.CLIENT)
 public class SelfTalkPlayerSettingsScreen extends Screen {
 
-    /** 自定义 Prompt 输入框字符上限（与服务端 sanitizePromptText 一致） */
-    private static final int PROMPT_MAX_LENGTH = 500;
+    /** 自定义 Prompt 输入框字符上限（与服务端 sanitizePromptText 一致；流侧上限见响应消息） */
+    private static final int PROMPT_MAX_LENGTH = 2048;
     /** 左侧按钮列宽度 */
     private static final int BUTTON_WIDTH = 150;
     /** 左右两块之间的间隔 */

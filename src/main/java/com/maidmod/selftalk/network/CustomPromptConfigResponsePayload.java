@@ -22,8 +22,8 @@ public record CustomPromptConfigResponsePayload(boolean adminEnabled, String glo
     public static final Type<CustomPromptConfigResponsePayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(MaidSelfTalkMod.MODID, "custom_prompt_config_response"));
 
-    /** 服务端存档上限 500，流上限放宽到 600 兜底（防超大包：超限直接断连由 netty 层处理） */
-    private static final StreamCodec<ByteBuf, String> PROMPT_CODEC = ByteBufCodecs.stringUtf8(600);
+    /** 服务端存档上限 2048，流上限放宽到 2200 兜底（防超大包：超限直接断连由 netty 层处理） */
+    private static final StreamCodec<ByteBuf, String> PROMPT_CODEC = ByteBufCodecs.stringUtf8(2200);
 
     public static final StreamCodec<ByteBuf, CustomPromptConfigResponsePayload> STREAM_CODEC =
             StreamCodec.composite(

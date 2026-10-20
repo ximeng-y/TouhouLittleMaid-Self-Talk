@@ -20,8 +20,8 @@ import java.util.UUID;
  * <p>
  * 四个栏位按平台原生有界编解码直传原文：不做截断、控制字符过滤与段标签清洗
  * （与自定义 Prompt 的写入清洗策略刻意不同——人设内容原样保留，界面与存档保留玩家输入）。
- * 合计长度校验在服务端做（超限回 {@code too_long}，不写入），流侧上限按单栏放宽，
- * 让「单栏合法但合计超限」的请求能正常解码并被业务拒绝，而不是在解码期直接断开。
+ * 每栏长度校验在服务端做（超限回 {@code too_long}，不写入），流侧上限按单栏上限设置，
+ * 单栏超限的请求仍可在流侧解码并被业务拒绝，而不是在解码期直接断开。
  * <p>
  * 同时携带女仆 UUID：实体 id 只在单个连接内、且只在发送时刻的维度内有效，
  * 服务端必须同时核对 id 与 UUID 才能确认「收到请求的这只，就是玩家当初编辑的那只」。
@@ -37,8 +37,8 @@ public record MaidPersonaSavePayload(UUID requestId, int entityId, UUID maidUuid
                                      String hobbies)
         implements CustomPacketPayload {
 
-    /** 单栏流侧上限：等于四栏合计上限（四栏各占满也仍可解码，由服务端按合计判定超限） */
-    public static final int MAX_WIRE_FIELD_LENGTH = MaidPersonaDraft.MAX_TOTAL_LENGTH;
+    /** 单栏流侧上限：等于单栏上限（四栏各自独立，合计最多 16384，由服务端按每栏判定超限） */
+    public static final int MAX_WIRE_FIELD_LENGTH = MaidPersonaDraft.MAX_FIELD_LENGTH;
 
     /** 模式字段流侧上限：固定短标签，留出余量 */
     public static final int MAX_MODE_LENGTH = 32;

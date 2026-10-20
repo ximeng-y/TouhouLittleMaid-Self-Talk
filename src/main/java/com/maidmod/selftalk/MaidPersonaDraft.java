@@ -6,9 +6,9 @@ import net.minecraft.nbt.Tag;
 /**
  * 结构化女仆人设草稿：身份／性格／背景／爱好四栏，按每只女仆独立保存。
  * <p>
- * 首版固定四类，不支持自定义分类；四栏合计上限 {@link #MAX_TOTAL_LENGTH} 字符（按
+ * 首版固定四类，不支持自定义分类；每栏各自上限 {@link #MAX_FIELD_LENGTH} 字符（按
  * {@link String#length()} 计），该上限由本类统一定义，客户端（界面校验）与服务端（保存校验）
- * 共用同一份口径。
+ * 共用同一份口径，四栏之间不共享额度。
  * <p>
  * 本类只承载草稿文本，<b>不</b>参与任何聊天请求，也不与原版整段人设（{@code customSetting}）
  * 互相复制或拼接。文本一律原样保留：读写都不做 {@code trim}、截断或提示词清洗
@@ -19,8 +19,8 @@ import net.minecraft.nbt.Tag;
  */
 public record MaidPersonaDraft(String identity, String personality, String background, String hobbies) {
 
-    /** 四栏合计字符上限（客户端阻断保存、服务端拒绝写入用同一常量） */
-    public static final int MAX_TOTAL_LENGTH = 4096;
+    /** 单栏字符上限（客户端阻断保存、服务端拒绝写入用同一常量；四栏各自独立计量） */
+    public static final int MAX_FIELD_LENGTH = 4096;
 
     /** 固定分类数量：身份、性格、背景、爱好 */
     public static final int CATEGORY_COUNT = 4;
@@ -69,14 +69,12 @@ public record MaidPersonaDraft(String identity, String personality, String backg
         };
     }
 
-    /** 四栏合计字符数（与上限同一口径） */
-    public int totalLength() {
-        return identity.length() + personality.length() + background.length() + hobbies.length();
-    }
-
-    /** 合计是否在上限内（保存请求的前置校验） */
+    /** 四栏是否都在单栏上限内（保存请求的前置校验） */
     public boolean withinLimit() {
-        return totalLength() <= MAX_TOTAL_LENGTH;
+        return identity.length() <= MAX_FIELD_LENGTH
+                && personality.length() <= MAX_FIELD_LENGTH
+                && background.length() <= MAX_FIELD_LENGTH
+                && hobbies.length() <= MAX_FIELD_LENGTH;
     }
 
     /**

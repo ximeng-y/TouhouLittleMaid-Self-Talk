@@ -65,10 +65,10 @@ public record MaidPersonaSaveResponsePayload(UUID requestId, int entityId, UUID 
                         buf.writeBoolean(payload.success());
                         buf.writeUtf(payload.resultCode(), MAX_CODE_LENGTH);
                         buf.writeUtf(payload.confirmed().mode().tag(), MAX_CODE_LENGTH);
-                        buf.writeUtf(payload.confirmed().draft().identity(), MaidPersonaDraft.MAX_TOTAL_LENGTH);
-                        buf.writeUtf(payload.confirmed().draft().personality(), MaidPersonaDraft.MAX_TOTAL_LENGTH);
-                        buf.writeUtf(payload.confirmed().draft().background(), MaidPersonaDraft.MAX_TOTAL_LENGTH);
-                        buf.writeUtf(payload.confirmed().draft().hobbies(), MaidPersonaDraft.MAX_TOTAL_LENGTH);
+                        buf.writeUtf(payload.confirmed().draft().identity(), MaidPersonaDraft.MAX_FIELD_LENGTH);
+                        buf.writeUtf(payload.confirmed().draft().personality(), MaidPersonaDraft.MAX_FIELD_LENGTH);
+                        buf.writeUtf(payload.confirmed().draft().background(), MaidPersonaDraft.MAX_FIELD_LENGTH);
+                        buf.writeUtf(payload.confirmed().draft().hobbies(), MaidPersonaDraft.MAX_FIELD_LENGTH);
                     },
                     buf -> {
                         UUID requestId = buf.readUUID();
@@ -78,10 +78,10 @@ public record MaidPersonaSaveResponsePayload(UUID requestId, int entityId, UUID 
                         String resultCode = buf.readUtf(MAX_CODE_LENGTH);
                         String mode = buf.readUtf(MAX_CODE_LENGTH);
                         MaidPersonaDraft draft = new MaidPersonaDraft(
-                                buf.readUtf(MaidPersonaDraft.MAX_TOTAL_LENGTH),
-                                buf.readUtf(MaidPersonaDraft.MAX_TOTAL_LENGTH),
-                                buf.readUtf(MaidPersonaDraft.MAX_TOTAL_LENGTH),
-                                buf.readUtf(MaidPersonaDraft.MAX_TOTAL_LENGTH));
+                                buf.readUtf(MaidPersonaDraft.MAX_FIELD_LENGTH),
+                                buf.readUtf(MaidPersonaDraft.MAX_FIELD_LENGTH),
+                                buf.readUtf(MaidPersonaDraft.MAX_FIELD_LENGTH),
+                                buf.readUtf(MaidPersonaDraft.MAX_FIELD_LENGTH));
                         return new MaidPersonaSaveResponsePayload(requestId, entityId, maidUuid, success,
                                 resultCode, new MaidPersonaConfig(MaidPersonaMode.fromTag(mode), draft));
                     });
