@@ -2,6 +2,8 @@ package com.maidmod.selftalk.client;
 
 import com.github.tartaricacid.touhoulittlemaid.client.gui.entity.maid.ai.SettingEditScreen;
 import com.github.tartaricacid.touhoulittlemaid.client.gui.widget.button.FlatColorButton;
+import com.github.tartaricacid.touhoulittlemaid.client.resource.CustomPackLoader;
+import com.github.tartaricacid.touhoulittlemaid.client.resource.pojo.MaidModelInfo;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.github.tartaricacid.touhoulittlemaid.network.NetworkHandler;
 import com.github.tartaricacid.touhoulittlemaid.network.message.ai.SaveMaidAIDataMessage;
@@ -93,10 +95,11 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     /** 结构化模式下原版输入框的藏匿 y：原版 render 按其位置直接绘制标签与保存提示，挪出屏幕后一并隐藏 */
     private static final int VANILLA_BOX_HIDDEN_Y = -10000;
     /**
-     * 布娃娃预览 y 相对原版输入框 y 的偏移：向上留出保存按钮空间，
-     * 配合 SettingEditScreenMixin 缩小预览模型，避免模型下缘遮挡按钮。
+     * 布娃娃预览下缘与保存按钮顶边之间保留的间距（GUI 像素）。
+     * 预览的 y 由该间距和模型的 render_item_scale 反算，使不同模型的脚底都停在按钮上方；
+     * 80% 缩放只改变模型整体大小，不改变这个下缘位置。
      */
-    private static final int MAID_PREVIEW_Y_OFFSET = -48;
+    private static final int MAID_PREVIEW_BUTTON_GAP = 4;
 
     private final EntityMaid maid;
 
@@ -404,7 +407,11 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
 
     /**
      * 布娃娃预览位置（mixin 改写 drawMaid 参数用）：原版参数从输入框位置推导，
-     * 而输入框在结构化模式下已被挪出屏幕，这里改用定位到的原版布局坐标。
+     * 而输入框在结构化模式下已被挪出屏幕，这里改用定位到的原版布局与保存按钮位置。
+     * <p>
+     * TLM 的 {@code drawMaid} 会把传入 y 再下移 {@code (int)(45 * render_item_scale)}
+     * 作为模型脚底（也就是 renderEntityInInventory 的缩放原点），所以这里按当前模型的
+     * render_item_scale 反算 y：脚底固定在保存按钮上方的间距处，不随模型缩放漂移。
      * 未定位到输入框时返回 null（mixin 不改参数，保持原版位置）。
      */
     @Nullable
@@ -412,7 +419,17 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         if (this.customSetting == null) {
             return null;
         }
-        return new int[]{this.vanillaBoxX + this.vanillaBoxWidth + 73, this.vanillaBoxY + MAID_PREVIEW_Y_OFFSET};
+        int buttonTop = this.saveButton != null ? this.saveButton.getY() : this.vanillaBoxY;
+        int feetY = buttonTop - MAID_PREVIEW_BUTTON_GAP;
+        return new int[]{this.vanillaBoxX + this.vanillaBoxWidth + 73, feetY - previewFeetOffset()};
+    }
+
+    /** 当前模型在 GUI 中的脚底偏移（与 TLM drawMaid 内部使用的 render_item_scale 同源） */
+    private int previewFeetOffset() {
+        float renderItemScale = CustomPackLoader.MAID_MODELS.getInfo(this.maid.getModelId())
+                .map(MaidModelInfo::getRenderItemScale)
+                .orElse(1.0F);
+        return (int) (45 * renderItemScale);
     }
 
     /**
