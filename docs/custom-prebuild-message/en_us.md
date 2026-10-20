@@ -237,28 +237,28 @@ You can also provide **custom voice recordings** for `custom` entries:
 
 ## FAQ
 
-**Q: Once prebuilt content is enabled, will maids stop saying anything new?**
+**Q: Once prebuilt content is enabled, will maids stop saying anything new?**<br>
 A: No. The number of candidates must reach the "minimum eligible entries" threshold and then pass the "reuse chance" roll. With the default 60% chance, 40% of triggers still generate new content in real time (and continue enriching the library). Set the chance to 100% only if you want to reuse old content as much as possible.
 
-**Q: Why is my custom entry not working?**
+**Q: Why is my custom entry not working?**<br>
 A: First open `custom/_diagnostics.md` and check the warnings; they usually point directly to the cause. You can also check the following in order:
-① Whether the file is at the top level of `custom/_global|<maid name>/{welcome,self-talk}/`;
-② Whether the YAML header is complete and contains `bodyFormat: "fenced-v1"`;
-③ Whether the body is inside triple-backtick fences under `## Chat` / `## TTS`;
-④ Whether the env conditions match the current environment;
+① Whether the file is at the top level of `custom/_global|<maid name>/{welcome,self-talk}/`;<br>
+② Whether the YAML header is complete and contains `bodyFormat: "fenced-v1"`;<br>
+③ Whether the body is inside triple-backtick fences under `## Chat` / `## TTS`;<br>
+④ Whether the env conditions match the current environment;<br>
 ⑤ Whether you restarted the server after making the change.
 
-**Q: After I change a maid's persona, is the content library accumulated earlier still there?**
+**Q: After I change a maid's persona, is the content library accumulated earlier still there?**<br>
 A: It remains on disk, but it no longer participates in matching (after the persona changes, it belongs to a different "her"). Changing the persona back restores the old library. You can also copy old library files, but it is difficult to tell by eye which maid a particular file corresponds to.
 
-**Q: Will custom entries be deleted automatically when the storage limit is reached? Will the mod rewrite them?**
+**Q: Will custom entries be deleted automatically when the storage limit is reached? Will the mod rewrite them?**<br>
 A: Neither. The mod treats hand-written entries as read-only.
 
-**Q: Does this feature affect normal chat or inter-maid chat?**
+**Q: Does this feature affect normal chat or inter-maid chat?**<br>
 A: Not at all. It only applies to self-talk and login welcome messages, and it can be disabled.
 
-**Q: Will TTS still be used after a prebuilt entry is matched?**
+**Q: Will TTS still be used after a prebuilt entry is matched?**<br>
 A: Yes. Each entry includes a TTS section. If its language differs from the current target TTS language, the mod performs a short translation before synthesis. If translation fails, only the text is displayed and no audio in the wrong language is played. If prebuilt audio is enabled and a prebuilt audio file is matched, that audio is played directly.
 
-**Q: If the server changes its TTS voice, can cached audio still be used?**
+**Q: If the server changes its TTS voice, can cached audio still be used?**<br>
 A: Automatic cache is separated by "provider + voice + endpoint + language". Changing the voice creates a new cache directory; the old cache remains but is no longer matched. Manually placed audio is not affected by voice changes and can always be matched.
