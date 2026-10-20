@@ -30,7 +30,7 @@
   - neoforge 线另有 `SelfTalkAttachments`（Level 附件注册）；forge 线另有 `PlayerSettingsSavedData`（overworld SavedData）、`SelfTalkProvenanceHost`（无附件，经 mixin 挂接口）。forge 线迁移另有损坏名单保留（原始 NBT 原样透传、阻断该组迁移直到显式写入替换）与「显式接管」持久标记（防止显式清空后被旧值回灌），`PlayerSettingsMigrationTest` 覆盖
 - `client/`：仅客户端 —— `SelfTalkClothConfig`（管理员配置界面，反射注册）、`SelfTalkPlayerSettingsClient`（客户端设置缓存与保存确认）、`SelfTalkPlayerSettingsScreen`（玩家开关/Prompt 界面）、`EnvironmentContextPanel` / `SelfTalkReusePanel`（互斥浮层）、`MaidPersonaEditScreen` / `MaidPersonaSplitClient`（人设编辑与拆分候选）
 - `mixin/`：TLM 钩子（玩家 chat 入口标记、AIChatScreen 加 💬 按钮、LLMCallback、历史摘要、女仆 AI 数据；forge 线另有女仆指纹挂载）；`SelfTalkPrebuiltTtsMixin` 在 `MaidAIChatManager.tts` HEAD 做预制语音缓存分流（命中改播缓存、未命中冻结交付身份），`SelfTalkTtsMixin` 另捕获合成字节并做 TTS 现势重判
-- `network/`：双线协议版本串均为 `16`；NeoForge 使用 payload，Forge 使用 message；Forge 人设保存序号 20/21、AI 拆分 22/23、预制复用 Request/Set/Response 24/25/26。v16 复用 Set 新增 11 号操作码 `OP_PREBUILT_AUDIO`（「保存并复用预制语音」世界开关，仅管理员，value 0／1），Response 新增 `prebuiltAudioEnabled` 布尔字段。版本演进见各分支 `SelfTalkPackets` 注册处注释（不向后兼容，版本串即协商拒连依据）
+- `network/`：双线协议版本串均为 `17`；NeoForge 使用 payload，Forge 使用 message；Forge 人设保存序号 20/21、AI 拆分 22/23、预制复用 Request/Set/Response 24/25/26。v16 复用 Set 新增 11 号操作码 `OP_PREBUILT_AUDIO`（「保存并复用预制语音」世界开关，仅管理员，value 0／1），Response 新增 `prebuiltAudioEnabled` 布尔字段。v17 将自定义 Prompt 存储上限提升到 2048、流上限提升到 2200，并将四栏人设由合计 4096 改为每栏各自 4096。版本演进见各分支 `SelfTalkPackets` 注册处注释（不向后兼容，版本串即协商拒连依据）
 - 代码注释与 git 提交信息使用中文；避免引入非必要依赖
 
 ## 关键约定与陷阱
