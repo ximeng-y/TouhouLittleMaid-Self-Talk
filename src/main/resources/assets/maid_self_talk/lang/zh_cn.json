@@ -243,7 +243,7 @@
   "config.maid_self_talk.screen.persona_draft.category.hobbies": "爱好",
   "config.maid_self_talk.screen.persona_draft.status.saving": "正在保存……",
   "config.maid_self_talk.screen.persona_draft.status.saved": "已保存",
-  "config.maid_self_talk.screen.persona_draft.error.too_long": "四栏合计已超过 4096 字符，结构化人设未保存，请精简后再保存。",
+  "config.maid_self_talk.screen.persona_draft.error.too_long": "某一栏已超过 4096 字符，结构化人设未保存，请精简后再保存。",
   "config.maid_self_talk.screen.persona_draft.error.rate_limited": "操作过于频繁，请稍后再试。",
   "config.maid_self_talk.screen.persona_draft.error.busy": "人设整理正在进行，暂时无法保存，请稍后重试。",
   "config.maid_self_talk.screen.persona_draft.error.not_loaded": "女仆不在当前维度，未能保存。",

@@ -102,10 +102,10 @@ public class MaidPersonaSaveResponseMessage {
         buf.writeBoolean(msg.success);
         buf.writeUtf(msg.resultCode, MAX_CODE_LENGTH);
         buf.writeUtf(msg.confirmed.mode().tag(), MAX_CODE_LENGTH);
-        buf.writeUtf(msg.confirmed.draft().identity(), MaidPersonaDraft.MAX_TOTAL_LENGTH);
-        buf.writeUtf(msg.confirmed.draft().personality(), MaidPersonaDraft.MAX_TOTAL_LENGTH);
-        buf.writeUtf(msg.confirmed.draft().background(), MaidPersonaDraft.MAX_TOTAL_LENGTH);
-        buf.writeUtf(msg.confirmed.draft().hobbies(), MaidPersonaDraft.MAX_TOTAL_LENGTH);
+        buf.writeUtf(msg.confirmed.draft().identity(), MaidPersonaDraft.MAX_FIELD_LENGTH);
+        buf.writeUtf(msg.confirmed.draft().personality(), MaidPersonaDraft.MAX_FIELD_LENGTH);
+        buf.writeUtf(msg.confirmed.draft().background(), MaidPersonaDraft.MAX_FIELD_LENGTH);
+        buf.writeUtf(msg.confirmed.draft().hobbies(), MaidPersonaDraft.MAX_FIELD_LENGTH);
     }
 
     public static MaidPersonaSaveResponseMessage decode(FriendlyByteBuf buf) {
@@ -116,10 +116,10 @@ public class MaidPersonaSaveResponseMessage {
         String resultCode = buf.readUtf(MAX_CODE_LENGTH);
         String mode = buf.readUtf(MAX_CODE_LENGTH);
         MaidPersonaDraft draft = new MaidPersonaDraft(
-                buf.readUtf(MaidPersonaDraft.MAX_TOTAL_LENGTH),
-                buf.readUtf(MaidPersonaDraft.MAX_TOTAL_LENGTH),
-                buf.readUtf(MaidPersonaDraft.MAX_TOTAL_LENGTH),
-                buf.readUtf(MaidPersonaDraft.MAX_TOTAL_LENGTH));
+                buf.readUtf(MaidPersonaDraft.MAX_FIELD_LENGTH),
+                buf.readUtf(MaidPersonaDraft.MAX_FIELD_LENGTH),
+                buf.readUtf(MaidPersonaDraft.MAX_FIELD_LENGTH),
+                buf.readUtf(MaidPersonaDraft.MAX_FIELD_LENGTH));
         return new MaidPersonaSaveResponseMessage(requestId, entityId, maidUuid, success, resultCode,
                 new MaidPersonaConfig(MaidPersonaMode.fromTag(mode), draft));
     }
