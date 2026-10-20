@@ -93,10 +93,10 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
     /** 结构化模式下原版输入框的藏匿 y：原版 render 按其位置直接绘制标签与保存提示，挪出屏幕后一并隐藏 */
     private static final int VANILLA_BOX_HIDDEN_Y = -10000;
     /**
-     * 布娃娃预览 y 相对原版输入框 y 的偏移：原版 drawMaid 渲染框为 90×100（posY-45..posY+55），
-     * 负值把预览顶到按钮列顶部空位；模型实际占框中间，最终观感需实机微调
+     * 布娃娃预览 y 相对原版输入框 y 的偏移：向上留出保存按钮空间，
+     * 配合 SettingEditScreenMixin 缩小预览模型，避免模型下缘遮挡按钮。
      */
-    private static final int MAID_PREVIEW_Y_OFFSET = -36;
+    private static final int MAID_PREVIEW_Y_OFFSET = -48;
 
     private final EntityMaid maid;
 
