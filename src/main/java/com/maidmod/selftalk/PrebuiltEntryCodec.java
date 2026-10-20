@@ -87,8 +87,18 @@ final class PrebuiltEntryCodec {
         return LocalDateTime.ofInstant(instant, ZoneId.systemDefault()).format(CREATED_AT_FORMAT);
     }
 
-    /** 单条解析告警：line 为 1 起的行号，定位不到时为 -1 */
-    record Issue(int line, String message) {
+    /**
+     * 单条解析告警：line 为 1 起的行号，定位不到时为 -1。
+     * <p>
+     * zh/en 是同一条告警的中英文文案，由诊断报告按配置语言选择；两套文案内容必须一致，
+     * 只允许措辞与标点不同。
+     */
+    record Issue(int line, String zh, String en) {
+
+        /** 按语言取文案：chinese 为 true 取中文，否则取英文 */
+        String message(boolean chinese) {
+            return chinese ? zh : en;
+        }
     }
 
     /** 单文件解析结果：entry 为 null 表示该文件没有可用条目；issues 是该文件全部告警（可为空） */
@@ -203,7 +213,9 @@ final class PrebuiltEntryCodec {
         Object schema = meta.get("schemaVersion");
         if (!(schema instanceof Number schemaNumber) || schemaNumber.intValue() != SCHEMA_VERSION) {
             issues.add(new Issue(locateLine(p.fmLines(), "schemaVersion"),
-                    "schemaVersion 不是 " + SCHEMA_VERSION + "（旧格式条目不读取不迁移，原件保留），拒绝入池"));
+                    "schemaVersion 不是 " + SCHEMA_VERSION + "（旧格式条目不读取不迁移，原件保留），拒绝入池",
+                    "schemaVersion is not " + SCHEMA_VERSION + " (old-format entries are neither read nor "
+                            + "migrated and the original file is kept), so the entry is not added to the pool"));
             return new ReadResult(null, issues);
         }
         if (!requireBodyFormat(meta, issues, p.fmLines())) {
@@ -215,7 +227,9 @@ final class PrebuiltEntryCodec {
         }
         if (!("entry-" + entryId + ".md").equals(fileName)) {
             issues.add(new Issue(locateLine(p.fmLines(), "entryId"),
-                    "entryId 与文件名不一致（应为 entry-" + entryId + ".md），拒绝该文件"));
+                    "entryId 与文件名不一致（应为 entry-" + entryId + ".md），拒绝该文件",
+                    "entryId does not match the file name (expected entry-" + entryId
+                            + ".md); the file is rejected"));
             return new ReadResult(null, issues);
         }
         String createdAt = resolveCreatedAt(meta, issues, p.fmLines(), lastModifiedTime);
@@ -251,7 +265,10 @@ final class PrebuiltEntryCodec {
         Parse p = parse(content, issues);
         if (p.meta() == null) {
             issues.add(new Issue(1, "custom 条目必须有 YAML 头并声明 bodyFormat: \"" + BODY_FORMAT
-                    + "\"；无头或解析失败整条拒绝（原文件保留不变）"));
+                    + "\"；无头或解析失败整条拒绝（原文件保留不变）",
+                    "Custom entries must have a YAML header declaring bodyFormat: \"" + BODY_FORMAT
+                            + "\"; entries without a header or with an unparsable header are rejected as "
+                            + "a whole (the original file is kept unchanged)"));
             return new ReadResult(null, issues);
         }
         if (!requireBodyFormat(p.meta(), issues, p.fmLines())) {
@@ -303,7 +320,9 @@ final class PrebuiltEntryCodec {
                 }
             }
             if (close < 0) {
-                issues.add(new Issue(1, "YAML 头以 --- 开头但没有结束的 --- 行，整篇按正文处理"));
+                issues.add(new Issue(1, "YAML 头以 --- 开头但没有结束的 --- 行，整篇按正文处理",
+                        "The YAML header starts with --- but has no closing --- line; the whole file is "
+                                + "treated as body text"));
             } else {
                 fmLines = List.copyOf(lines.subList(1, close));
                 bodyStart = close + 1;
@@ -318,11 +337,12 @@ final class PrebuiltEntryCodec {
         try {
             Object root = new Yaml(new FencedEnvConstructor(new LoaderOptions())).load(fmText);
             if (root == null) {
-                issues.add(new Issue(1, "YAML 头为空"));
+                issues.add(new Issue(1, "YAML 头为空", "The YAML header is empty"));
                 return Map.of();
             }
             if (!(root instanceof Map<?, ?> map)) {
-                issues.add(new Issue(1, "YAML 头必须是键值映射，实际是 " + typeName(root)));
+                issues.add(new Issue(1, "YAML 头必须是键值映射，实际是 " + typeNameZh(root),
+                        "The YAML header must be a key-value mapping, but it is " + typeName(root)));
                 return null;
             }
             Map<String, Object> out = new LinkedHashMap<>();
@@ -331,7 +351,8 @@ final class PrebuiltEntryCodec {
             }
             return out;
         } catch (Exception e) {
-            issues.add(new Issue(1, "YAML 头解析失败：" + e.getMessage()));
+            issues.add(new Issue(1, "YAML 头解析失败：" + e.getMessage(),
+                    "Failed to parse the YAML header: " + e.getMessage()));
             return null;
         }
     }
@@ -427,12 +448,16 @@ final class PrebuiltEntryCodec {
                 boolean isTts = "tts".equals(lower);
                 if (!isChat && !isTts) {
                     issues.add(new Issue(absStart + i, "未识别的二级标题：## " + title
-                            + "，整条拒绝（可用标题：## Chat / ## TTS，大小写不敏感）"));
+                            + "，整条拒绝（可用标题：## Chat / ## TTS，大小写不敏感）",
+                            "Unrecognized level-2 heading: ## " + title + "; the whole entry is rejected "
+                                    + "(allowed headings: ## Chat / ## TTS, case-insensitive)"));
                     return null;
                 }
                 if (isChat ? chatSeen : ttsSeen) {
                     issues.add(new Issue(absStart + i, "重复的 " + (isChat ? "## Chat" : "## TTS")
-                            + " 段（每种段最多一个），整条拒绝"));
+                            + " 段（每种段最多一个），整条拒绝",
+                            "Duplicate " + (isChat ? "## Chat" : "## TTS")
+                                    + " section (at most one section per kind); the whole entry is rejected"));
                     return null;
                 }
                 if (isChat) {
@@ -458,11 +483,15 @@ final class PrebuiltEntryCodec {
                     state = 2;
                 } else if (openLen < 0) {
                     issues.add(new Issue(absStart + i,
-                            "围栏标注只支持空或 text（如 ``` 或 ```text），整条拒绝"));
+                            "围栏标注只支持空或 text（如 ``` 或 ```text），整条拒绝",
+                            "The fence info string may only be empty or text (e.g. ``` or ```text); "
+                                    + "the whole entry is rejected"));
                     return null;
                 } else {
                     issues.add(new Issue(absStart + i,
-                            "段正文必须放在反引号围栏内（fenced-v1 格式），整条拒绝"));
+                            "段正文必须放在反引号围栏内（fenced-v1 格式），整条拒绝",
+                            "The section body must be inside a backtick fence (fenced-v1 format); "
+                                    + "the whole entry is rejected"));
                     return null;
                 }
                 continue;
@@ -471,12 +500,17 @@ final class PrebuiltEntryCodec {
             if (!trimmed.isEmpty()) {
                 issues.add(new Issue(absStart + i,
                         "标题外的散文本（fenced-v1 只允许 ## Chat / ## TTS 两个围栏段），整条拒绝："
+                                + StringUtils.abbreviate(trimmed, 24),
+                        "Text outside the headings (fenced-v1 only allows the two fenced sections "
+                                + "## Chat / ## TTS); the whole entry is rejected: "
                                 + StringUtils.abbreviate(trimmed, 24)));
                 return null;
             }
         }
         if (state == 2) {
-            issues.add(new Issue(fenceOpenLine, "围栏未闭合（缺少与开启围栏等长的反引号行），整条拒绝"));
+            issues.add(new Issue(fenceOpenLine, "围栏未闭合（缺少与开启围栏等长的反引号行），整条拒绝",
+                    "Unclosed fence (missing a backtick line as long as the opening fence); "
+                            + "the whole entry is rejected"));
             return null;
         }
         String chatRaw = sectionText(chat);
@@ -487,7 +521,9 @@ final class PrebuiltEntryCodec {
         String chatText = chatUsable ? chatRaw : ttsRaw;
         String ttsText = ttsUsable ? ttsRaw : chatText;
         if (chatText == null || chatText.isBlank()) {
-            issues.add(new Issue(-1, "缺少可用的上屏文本（## Chat / ## TTS 均缺失或全空白），拒绝入池"));
+            issues.add(new Issue(-1, "缺少可用的上屏文本（## Chat / ## TTS 均缺失或全空白），拒绝入池",
+                    "No usable on-screen text (both ## Chat and ## TTS are missing or blank); "
+                            + "the entry is not added to the pool"));
             return null;
         }
         return new BodyResult(chatText, ttsText);
@@ -537,12 +573,16 @@ final class PrebuiltEntryCodec {
         Object raw = meta.get("env");
         if (raw == null) {
             issues.add(new Issue(locateLine(fmLines, "env"),
-                    "env 显式为空（YAML null）——无环境约束请删除该行或写成 env: {}，整条拒绝"));
+                    "env 显式为空（YAML null）——无环境约束请删除该行或写成 env: {}，整条拒绝",
+                    "env is explicitly empty (YAML null) — remove the line or write env: {} when there is "
+                            + "no environment constraint; the whole entry is rejected"));
             return null;
         }
         if (!(raw instanceof Map<?, ?> map)) {
             issues.add(new Issue(locateLine(fmLines, "env"),
-                    "env 必须是扁平的键值映射，实际是 " + typeName(raw) + "，整条拒绝"));
+                    "env 必须是扁平的键值映射，实际是 " + typeNameZh(raw) + "，整条拒绝",
+                    "env must be a flat key-value mapping, but it is " + typeName(raw)
+                            + "; the whole entry is rejected"));
             return null;
         }
         Map<String, String> env = new LinkedHashMap<>();
@@ -551,18 +591,24 @@ final class PrebuiltEntryCodec {
             Object value = e.getValue();
             if (!(keyObj instanceof String key)) {
                 issues.add(new Issue(locateLine(fmLines, "env"),
-                        "env 的 key 必须是标量文本，出现复合 key，整条拒绝"));
+                        "env 的 key 必须是标量文本，出现复合 key，整条拒绝",
+                        "env keys must be scalar text; a compound key was found and the whole entry "
+                                + "is rejected"));
                 return null;
             }
             if (!(value instanceof String valueText)) {
                 issues.add(new Issue(locateLine(fmLines, key),
                         "env 值必须是标量（字符串/数字/布尔字面值），key " + key
-                                + " 的值是复合结构或空值，整条拒绝"));
+                                + " 的值是复合结构或空值，整条拒绝",
+                        "env values must be scalars (string/number/boolean literals); the value of key "
+                                + key + " is a compound structure or empty, so the whole entry is rejected"));
                 return null;
             }
             if (EnvironmentContextOption.byKey(key) == null) {
                 issues.add(new Issue(locateLine(fmLines, key),
-                        "未知环境 key：" + key + "（该 key 不参与匹配，请对照报告中的环境 key 目录检查拼写）"));
+                        "未知环境 key：" + key + "（该 key 不参与匹配，请对照报告中的环境 key 目录检查拼写）",
+                        "Unknown environment key: " + key + " (it does not participate in matching; "
+                                + "check the spelling against the environment key catalog in this report)"));
             }
             env.put(key, valueText);
         }
@@ -578,12 +624,22 @@ final class PrebuiltEntryCodec {
         }
         issues.add(new Issue(locateLine(fmLines, "bodyFormat"),
                 "bodyFormat 必须是 \"" + BODY_FORMAT + "\"，实际为 " + (value == null ? "缺失" : value)
-                        + "；旧格式条目保留原件、停止使用，拒绝入池"));
+                        + "；旧格式条目保留原件、停止使用，拒绝入池",
+                "bodyFormat must be \"" + BODY_FORMAT + "\" but is "
+                        + (value == null ? "missing" : value)
+                        + "; old-format entries keep the original file and stop being used, so the entry "
+                        + "is not added to the pool"));
         return false;
     }
 
+    /** 值类型名（英文报告用）：null 记为 null，其余为 Java 简单类名 */
     private static String typeName(Object value) {
-        return value == null ? "空值" : value.getClass().getSimpleName();
+        return value == null ? "null" : value.getClass().getSimpleName();
+    }
+
+    /** 值类型名（中文报告用）：null 记为「空值」 */
+    private static String typeNameZh(Object value) {
+        return value == null ? "空值" : typeName(value);
     }
 
     /** 可选字符串字段：缺失/空白返回 null；非标量记告警后按缺失处理 */
@@ -594,7 +650,8 @@ final class PrebuiltEntryCodec {
             return null;
         }
         if (!isScalar(value)) {
-            issues.add(new Issue(locateLine(fmLines, key), key + " 必须是标量，已按缺失处理"));
+            issues.add(new Issue(locateLine(fmLines, key), key + " 必须是标量，已按缺失处理",
+                    key + " must be a scalar; it is treated as missing"));
             return null;
         }
         String s = String.valueOf(value);
@@ -617,30 +674,38 @@ final class PrebuiltEntryCodec {
                                            List<String> fmLines, Supplier<Instant> lastModifiedTime) {
         Object raw = meta.get("createdAt");
         if (raw != null && !isScalar(raw)) {
-            issues.add(new Issue(locateLine(fmLines, "createdAt"), "createdAt 必须是标量，拒绝该文件"));
+            issues.add(new Issue(locateLine(fmLines, "createdAt"), "createdAt 必须是标量，拒绝该文件",
+                    "createdAt must be a scalar; the file is rejected"));
             return null;
         }
         if (raw != null && !String.valueOf(raw).isBlank()) {
             return String.valueOf(raw);
         }
         if (lastModifiedTime == null) {
-            issues.add(new Issue(locateLine(fmLines, "createdAt"), "机器条目缺少必填字段 createdAt，拒绝该文件"));
+            issues.add(new Issue(locateLine(fmLines, "createdAt"), "机器条目缺少必填字段 createdAt，拒绝该文件",
+                    "Machine entry is missing the required field createdAt; the file is rejected"));
             return null;
         }
         try {
             Instant fileTime = lastModifiedTime.get();
             if (fileTime == null) {
                 issues.add(new Issue(locateLine(fmLines, "createdAt"),
-                        "createdAt 缺失或空白，无可用文件最后修改时间，拒绝该文件"));
+                        "createdAt 缺失或空白，无可用文件最后修改时间，拒绝该文件",
+                        "createdAt is missing or blank and no file last-modified time is available; "
+                                + "the file is rejected"));
                 return null;
             }
             String backfilled = formatCreatedAt(fileTime);
             issues.add(new Issue(locateLine(fmLines, "createdAt"),
-                    "createdAt 缺失或空白，已使用文件最后修改时间补足：" + backfilled));
+                    "createdAt 缺失或空白，已使用文件最后修改时间补足：" + backfilled,
+                    "createdAt is missing or blank; it was filled from the file last-modified time: "
+                            + backfilled));
             return backfilled;
         } catch (RuntimeException e) {
             issues.add(new Issue(locateLine(fmLines, "createdAt"),
-                    "createdAt 缺失或空白，文件最后修改时间不可用：" + e + "，拒绝该文件"));
+                    "createdAt 缺失或空白，文件最后修改时间不可用：" + e + "，拒绝该文件",
+                    "createdAt is missing or blank and the file last-modified time is unavailable: "
+                            + e + "; the file is rejected"));
             return null;
         }
     }
@@ -650,7 +715,8 @@ final class PrebuiltEntryCodec {
                                         List<String> fmLines) {
         String s = optionalString(meta, key, issues, fmLines);
         if (s == null) {
-            issues.add(new Issue(locateLine(fmLines, key), "机器条目缺少必填字段 " + key + "，拒绝该文件"));
+            issues.add(new Issue(locateLine(fmLines, key), "机器条目缺少必填字段 " + key + "，拒绝该文件",
+                    "Machine entry is missing the required field " + key + "; the file is rejected"));
         }
         return s;
     }
@@ -659,13 +725,15 @@ final class PrebuiltEntryCodec {
     private static UUID parseEntryId(Map<String, Object> meta, List<Issue> issues, List<String> fmLines) {
         String raw = optionalString(meta, "entryId", issues, fmLines);
         if (raw == null) {
-            issues.add(new Issue(locateLine(fmLines, "entryId"), "机器条目缺少合法 entryId，拒绝该文件"));
+            issues.add(new Issue(locateLine(fmLines, "entryId"), "机器条目缺少合法 entryId，拒绝该文件",
+                    "Machine entry has no valid entryId; the file is rejected"));
             return null;
         }
         try {
             return UUID.fromString(raw);
         } catch (IllegalArgumentException e) {
-            issues.add(new Issue(locateLine(fmLines, "entryId"), "entryId 不是合法 UUID：" + raw + "，拒绝该文件"));
+            issues.add(new Issue(locateLine(fmLines, "entryId"), "entryId 不是合法 UUID：" + raw + "，拒绝该文件",
+                    "entryId is not a valid UUID: " + raw + "; the file is rejected"));
             return null;
         }
     }

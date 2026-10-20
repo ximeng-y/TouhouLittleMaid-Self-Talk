@@ -483,7 +483,7 @@ public final class SelfTalkReuseStore {
             return;
         }
         for (PrebuiltEntryCodec.Issue issue : read.issues()) {
-            MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse entry file {}: {}", file, issue.message());
+            MaidSelfTalkMod.LOGGER.warn("Prebuilt reuse entry file {}: {}", file, issue.zh());
         }
         if (read.entry() != null) {
             result.entries.put(read.entry().entryId, read.entry());
