@@ -18,8 +18,8 @@ import java.util.function.Supplier;
  */
 public class CustomPromptConfigResponseMessage {
 
-    /** 服务端存档上限 500，流上限放宽到 600 兜底（防超大包） */
-    public static final int MAX_WIRE_LENGTH = 600;
+    /** 服务端存档上限 2048，流上限放宽到 2200 兜底（防超大包） */
+    public static final int MAX_WIRE_LENGTH = 2200;
 
     private final boolean adminEnabled;
     private final String globalPrompt;

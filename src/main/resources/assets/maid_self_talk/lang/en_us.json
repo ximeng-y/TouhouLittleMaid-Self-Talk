@@ -243,7 +243,7 @@
   "config.maid_self_talk.screen.persona_draft.category.hobbies": "Hobbies",
   "config.maid_self_talk.screen.persona_draft.status.saving": "Saving...",
   "config.maid_self_talk.screen.persona_draft.status.saved": "Saved",
-  "config.maid_self_talk.screen.persona_draft.error.too_long": "The four sections total more than 4096 characters; the structured persona was not saved. Shorten it and save again.",
+  "config.maid_self_talk.screen.persona_draft.error.too_long": "One of the four sections exceeds 4096 characters; the structured persona was not saved. Shorten it and save again.",
   "config.maid_self_talk.screen.persona_draft.error.rate_limited": "Too many requests. Please try again later.",
   "config.maid_self_talk.screen.persona_draft.error.busy": "Persona organization is in progress. Please wait before saving.",
   "config.maid_self_talk.screen.persona_draft.error.not_loaded": "The maid is not in your current dimension, so it was not saved.",

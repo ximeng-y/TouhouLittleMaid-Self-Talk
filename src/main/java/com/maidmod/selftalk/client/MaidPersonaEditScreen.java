@@ -190,7 +190,8 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         locateVanillaWidgets();
 
         int columnX = this.vanillaBoxX + COLUMN_OFFSET;
-        int contentHeight = Math.max(4 * (LABEL_HEIGHT + 20),
+        // 每栏至少容纳：标签 12 + 输入框 20 + 计数带 13（MultiLineEditBox 在框底 +4 画 9px 计数）
+        int contentHeight = Math.max(4 * (LABEL_HEIGHT + 33),
                 this.height - CONTENT_BOTTOM_MARGIN - this.vanillaBoxY);
         int groupHeight = contentHeight / MaidPersonaDraft.CATEGORY_COUNT;
 
@@ -221,10 +222,12 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         for (int i = 0; i < MaidPersonaDraft.CATEGORY_COUNT; i++) {
             int index = i;
             int boxY = this.vanillaBoxY + i * groupHeight + LABEL_HEIGHT;
-            int boxHeight = Math.max(20, groupHeight - LABEL_HEIGHT - 2);
+            // 13px 给框底计数带留位，避免压到下一栏标签
+            int boxHeight = Math.max(20, groupHeight - LABEL_HEIGHT - 15);
             GuardedPersonaEditBox box = new GuardedPersonaEditBox(this.font, this.vanillaBoxX, boxY,
                     this.vanillaBoxWidth, boxHeight,
                     Component.translatable("config.maid_self_talk.screen.persona_draft.placeholder"));
+            box.setCharacterLimit(MaidPersonaDraft.MAX_FIELD_LENGTH);
             box.setValueListener(value -> {
                 if (!this.loadingBox) {
                     this.draft[index] = value;
@@ -846,8 +849,6 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
         // 离开页面不取消任务，整理中允许查看与离开
         boolean splitRunning = MaidPersonaSplitClient.isRunningFor(this.maid.getUUID());
         boolean locked = pending || this.awaitingConfirmation || splitRunning;
-        int total = currentDraft().totalLength();
-        boolean withinLimit = total <= MaidPersonaDraft.MAX_TOTAL_LENGTH;
         if (this.modeButton != null) {
             this.modeButton.active = !locked;
         }
@@ -871,7 +872,6 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
 
         super.render(graphics, mouseX, mouseY, partialTick);
 
-        int columnX = this.vanillaBoxX + COLUMN_OFFSET;
         if (this.editingMode.isStructured()) {
             // 四栏标签：画在各自文本框上方
             for (int i = 0; i < this.boxes.length; i++) {
@@ -889,16 +889,7 @@ public class MaidPersonaEditScreen extends SettingEditScreen {
                     this.height - 24, 0xFFAA55);
         }
 
-        // 四栏合计字符数：按钮列底部，超限转红（此时状态行同时给出说明）
-        String counter = total + " / " + MaidPersonaDraft.MAX_TOTAL_LENGTH;
-        graphics.drawString(this.font, counter, columnX, SPLIT_BUTTON_Y + 28,
-                withinLimit ? 0xAAAAAA : 0xFF5555);
-
-        if (!withinLimit) {
-            graphics.drawCenteredString(this.font, Component.translatable(
-                    "config.maid_self_talk.screen.persona_draft.error.too_long"),
-                    this.width / 2, this.height - 12, 0xFF5555);
-        } else if (splitRunning) {
+        if (splitRunning) {
             // 整理中（含重开页面的同女仆任务）：显示等待提示，允许离开页面
             graphics.drawCenteredString(this.font, Component.translatable(
                     "config.maid_self_talk.screen.persona_draft.split.status.running"),
