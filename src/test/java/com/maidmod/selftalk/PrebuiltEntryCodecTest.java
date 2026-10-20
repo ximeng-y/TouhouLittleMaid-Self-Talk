@@ -371,7 +371,7 @@ public final class PrebuiltEntryCodecTest {
     }
 
     private static boolean hasIssue(List<PrebuiltEntryCodec.Issue> issues, String keyword) {
-        return issues.stream().anyMatch(issue -> issue.message().contains(keyword));
+        return issues.stream().anyMatch(issue -> issue.message(true).contains(keyword));
     }
 
     private static void check(boolean condition, String message) {

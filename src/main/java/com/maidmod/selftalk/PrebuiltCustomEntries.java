@@ -229,7 +229,9 @@ final class PrebuiltCustomEntries {
             String prior = seenByLowerName.putIfAbsent(name.toLowerCase(Locale.ROOT), name);
             if (prior != null) {
                 diagnostics.recordFile(relPath, List.of(new PrebuiltEntryCodec.Issue(-1,
-                        "与文件 " + prior + " 仅大小写不同（Windows 下二者是同一文件），本文件跳过")));
+                        "与文件 " + prior + " 仅大小写不同（Windows 下二者是同一文件），本文件跳过",
+                        "Differs from file " + prior + " only by letter case (on Windows they are the same "
+                                + "file); this file is skipped")));
                 hasContent = true;
                 warnedFiles++;
                 continue;
@@ -239,7 +241,8 @@ final class PrebuiltCustomEntries {
                 content = Files.readString(file, StandardCharsets.UTF_8);
             } catch (IOException | UncheckedIOException e) {
                 diagnostics.recordFile(relPath, List.of(new PrebuiltEntryCodec.Issue(-1,
-                        "文件读取失败：" + e)));
+                        "文件读取失败：" + e,
+                        "Failed to read the file: " + e)));
                 hasContent = true;
                 warnedFiles++;
                 continue;
