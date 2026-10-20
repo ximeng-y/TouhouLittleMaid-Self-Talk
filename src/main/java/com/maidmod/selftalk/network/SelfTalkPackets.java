@@ -36,8 +36,8 @@ public final class SelfTalkPackets {
 
     /** 单只关闭名单容量上限：防恶意客户端用任意 UUID 无限撑大附件与存档（每次写入还有全量拷贝放大） */
     private static final int MAX_MAID_OVERRIDES = 256;
-    /** 自定义 Prompt 服务端存储上限（字符）：界面输入框同步限长，流侧另有 600 兜底 */
-    private static final int MAX_CUSTOM_PROMPT_LENGTH = 500;
+    /** 自定义 Prompt 服务端存储上限（字符）：界面输入框同步限长，流侧另有 2200 兜底 */
+    private static final int MAX_CUSTOM_PROMPT_LENGTH = 2048;
     /** 每玩家每秒最多处理的设置包数（正常 UI 操作远低于此，仅防包风暴） */
     private static final int MAX_CONFIG_PACKETS_PER_SECOND = 20;
     /** 玩家 UUID -> [上次处理的秒, 该秒内处理数]（仅服务端主线程访问；玩家登出时随 removeRateEntry 清理） */
@@ -64,8 +64,10 @@ public final class SelfTalkPackets {
         // 页面「保存」「保存并退出」接管为本 mod 显式保存入口，离页自动保存不再改变实际模式；
         // v16：预制复用 Set 新增 11 号操作码（「保存并复用预制语音」世界开关，仅管理员，value 0／1），
         // Response 新增 prebuiltAudioEnabled 布尔字段；
+        // v17：自定义 Prompt 存储上限 500 → 2048、流上限 600 → 2200；结构化人设由「四栏合计 4096」
+        // 改为「每栏各自 4096」，单栏流上限不变，保存校验改为逐栏；
         // 同样不做向后兼容：NeoForge 按版本串强制协商，不匹配版本互相拒绝进服，升级需客户端与服务端同步
-        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("16");
+        PayloadRegistrar registrar = event.registrar(MaidSelfTalkMod.MODID).versioned("17");
         registrar.playToServer(SelfTalkConfigRequestPayload.TYPE, SelfTalkConfigRequestPayload.STREAM_CODEC,
                 SelfTalkPackets::handleConfigRequest);
         registrar.playToServer(SelfTalkConfigSetPayload.TYPE, SelfTalkConfigSetPayload.STREAM_CODEC,
@@ -484,7 +486,7 @@ public final class SelfTalkPackets {
     }
 
     /**
-     * Prompt 写入清洗：长度截断 500、去除 NUL 与 CR（防超大包与控制字符污染存档）。
+     * Prompt 写入清洗：长度截断 2048、去除 NUL 与 CR（防超大包与控制字符污染存档）。
      * 段标签/零宽字符的剥除不在此处——那是请求注入时的职责（SegmentTags.stripTagsFromPlayerInput），
      * 界面与存档保留玩家原文。
      */
@@ -615,7 +617,7 @@ public final class SelfTalkPackets {
                 ? payload.toConfig()
                 : MaidPersonaHost.configOf(maid).withDraft(payload.toDraft());
         if (!config.draft().withinLimit()) {
-            // 长度只按四栏合计判定（模式标签是固定短值）
+            // 长度按四栏各自上限判定（模式标签是固定短值）
             return MaidPersonaSaveResponsePayload.failure(requestId, entityId, maidUuid,
                     MaidPersonaSaveResponsePayload.RESULT_TOO_LONG);
         }

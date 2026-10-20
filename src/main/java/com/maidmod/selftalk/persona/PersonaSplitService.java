@@ -5,6 +5,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMSite;
 import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.maidmod.selftalk.MaidPersonaDraft;
 import com.maidmod.selftalk.MaidSelfTalkMod;
 import com.maidmod.selftalk.network.MaidPersonaSplitRequestPayload;
 import com.maidmod.selftalk.network.MaidPersonaSplitResponsePayload;
@@ -46,8 +47,12 @@ public final class PersonaSplitService {
     /** 单次整理超时（服务器 tick）：6000 tick = 5 分钟 */
     private static final long TIMEOUT_TICKS = 6000;
 
-    /** 候选四栏合计传输上限：超过则明确失败，不返回截断结果（保存仍按 4096 上限另行校验） */
-    public static final int MAX_CANDIDATE_TOTAL = 16384;
+    /**
+     * 候选单栏流侧解码上限（wire 兜底，不用于保存判定）：取四栏上限之和，
+     * 让「单栏超过 4096」的候选能正常解码并在交付时按每栏上限明确失败，
+     * 而不是在解码期直接断开。
+     */
+    public static final int MAX_CANDIDATE_WIRE_LENGTH = 16384;
 
     /** 玩家 UUID -> 在途整理任务（每名玩家同时最多一个） */
     private static final Map<UUID, Task> TASKS = new HashMap<>();
@@ -229,8 +234,8 @@ public final class PersonaSplitService {
             outcome = PersonaSplitCallback.Outcome.failure(
                     MaidPersonaSplitResponsePayload.RESULT_NOT_LOADED);
         }
-        // 候选合计超过传输上限：明确失败，不返回截断结果
-        if (outcome.ok() && outcome.draft().totalLength() > MAX_CANDIDATE_TOTAL) {
+        // 候选任一栏超过保存上限：明确失败，不返回截断结果
+        if (outcome.ok() && !outcome.draft().withinLimit()) {
             outcome = PersonaSplitCallback.Outcome.failure(
                     MaidPersonaSplitResponsePayload.RESULT_TOO_LONG);
         }

@@ -102,7 +102,7 @@ public final class MaidPersonaRuntime {
      * 「清缓存」约定，下一次取用自然拿到新索引。缓存存在女仆运行时状态里（不持久化，
      * 状态条目移除即释放）。
      * <p>
-     * 四栏合计上限 4096 字符，切句与分词都是毫秒级，因此<b>直接在主线程构建</b>：
+     * 每栏上限 4096 字符（四栏合计最多 16384），切句与分词仍在主线程构建：
      * 不新建线程池，也不像历史索引那样需要「先算后回主线程」的异步握手。
      */
     public static PersonaRetrievalIndex indexOf(EntityMaid maid, MaidPersonaConfig config) {

@@ -16,8 +16,8 @@ import java.util.UUID;
  * 每个被受理的拆分任务在终态（成功/失败/超时）都会收到一条回包；校验失败的请求
  * 也在处理当场回包。客户端只处理本连接登记过且 requestId + 女仆 UUID 匹配的响应。
  * <p>
- * 成功时四栏为拆分结果（合计不超过 {@link #MAX_WIRE_FIELD_LENGTH}）；失败时四栏为
- * 空占位，客户端不得使用。候选只用于页面填入，保存仍走既有保存链并受 4096 上限约束。
+ * 成功时四栏为拆分结果（单栏不超过 {@link #MAX_WIRE_FIELD_LENGTH}）；失败时四栏为
+ * 空占位，客户端不得使用。候选只用于页面填入，保存仍走既有保存链并受每栏 4096 上限约束。
  *
  * @param requestId  对应请求的 id
  * @param maidUuid   女仆 UUID（客户端核对条目身份）
@@ -40,8 +40,8 @@ public record MaidPersonaSplitResponsePayload(UUID requestId, UUID maidUuid, Str
     public static final String RESULT_NETWORK = "network";
     public static final String RESULT_TIMEOUT = "timeout";
 
-    /** 单栏流侧上限：等于四栏合计传输上限（合计校验在服务端，超限明确失败不截断） */
-    public static final int MAX_WIRE_FIELD_LENGTH = PersonaSplitService.MAX_CANDIDATE_TOTAL;
+    /** 单栏流侧上限：取四栏上限之和，仅作解码兜底（每栏 4096 校验在服务端，超限明确失败不截断） */
+    public static final int MAX_WIRE_FIELD_LENGTH = PersonaSplitService.MAX_CANDIDATE_WIRE_LENGTH;
 
     /** 结果码流侧上限：固定短码，留出余量即可 */
     public static final int MAX_CODE_LENGTH = 32;
