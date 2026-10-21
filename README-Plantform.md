@@ -18,6 +18,7 @@
 - **触发冷却**：可配置的随机触发间隔区间
 - **睡觉时安静**：允许让女仆睡觉时保持安静，不触发自言自语/互聊
 - **聊天可见**：自话与互聊对附近玩家可见
+- **预制内容（实验性）**：见 [预制内容使用文档](https://github.com/ximeng-y/TouhouLittleMaid-Self-Talk/blob/neoforge-1.21.1/docs/custom-prebuild-message/zh_cn.md)
 
 ## 环境要求
 
@@ -57,7 +58,7 @@
 - **Tool调用**：全局与单只开关，开启后这只女仆的自言自语/互聊可以调用工具
 - **上下文设置**：可逐项选择环境信息进入随机池、必定进入或必定不进入；历史上下文可选全量、精简或检索模式
 - **思考气泡**：只控制你看到的自话/互聊等待、工具提示与思考气泡，不影响最终回答、欢迎语与普通聊天
-- **预制复用（实验性）**：默认关闭，符合条件时复用过往真实回复；自定义预制内容见 [文档](https://github.com/ximeng-y/TouhouLittleMaid-Self-Talk/blob/neoforge-1.21.1/docs/custom-prebuild-message/zh_cn.md)
+- **预制内容（实验性）**：默认关闭，开启后，会自动保存内容作为预制来源，符合条件时会尝试使用预制回复；自定义预制内容见 [预制内容使用文档](https://github.com/ximeng-y/TouhouLittleMaid-Self-Talk/blob/neoforge-1.21.1/docs/custom-prebuild-message/zh_cn.md)
 
 ## 许可
 
@@ -85,6 +86,7 @@ A mod that adds **self-talk / welcome greetings / maid-to-maid chats** to Touhou
 - **Trigger cooldown**: A configurable random interval range between triggers
 - **Quiet while sleeping**: Allows maids to stay quiet while sleeping — self-talk and inter-chat won't trigger while they sleep
 - **Visible in chat**: Self-talk and maid-to-maid chats are visible to nearby players
+- **Prebuilt content (experimental)**: see the [prebuilt content guide](https://github.com/ximeng-y/TouhouLittleMaid-Self-Talk/blob/neoforge-1.21.1/docs/custom-prebuild-message/en_us.md)
 
 ## Requirements
 
@@ -124,7 +126,7 @@ Open the maid's AI chat input screen (usually by pressing T) and click the 💬 
 - **Tool**: global and per-maid switches; when enabled, this maid's self-talk / inter-chat can call tools
 - **Context Settings**: choose per entry whether environment info enters the random pool, is always included, or is never included; history context can be full, compact, or retrieval mode
 - **Thinking Bubbles**: controls only the waiting, tool-status and reasoning bubbles you see during self-talk / inter-chat; final replies, welcome messages and normal chat are unaffected
-- **Prebuilt Reuse (experimental)**: off by default; reuses past real replies when conditions match; see the [custom prebuilt guide](https://github.com/ximeng-y/TouhouLittleMaid-Self-Talk/blob/neoforge-1.21.1/docs/custom-prebuild-message/en_us.md)
+- **Prebuilt content (experimental)**: off by default; when on, generated content is automatically saved as a prebuilt source and reused when conditions match; see the [prebuilt content guide](https://github.com/ximeng-y/TouhouLittleMaid-Self-Talk/blob/neoforge-1.21.1/docs/custom-prebuild-message/en_us.md) for custom prebuilt content
 
 ## License
 
