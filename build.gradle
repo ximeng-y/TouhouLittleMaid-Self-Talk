@@ -45,9 +45,16 @@ dependencies {
     compileOnly 'top.theillusivec4.curios:curios-neoforge:9.5.1+1.21.1:api'
     // SnakeYAML：预制复用 YAML 头解析（本项目第一个打包依赖）。implementation 供编译与自检运行时；
     // jarJar 配置把它嵌套进产物 jar（META-INF/jarjar 元数据，ModLauncher 自动加载），
-    // 运行者照旧只装本 mod 一个 jar，无新增前置
+    // 运行者照旧只装本 mod 一个 jar，无新增前置。元数据区间声明为 [2.2,) 不封顶：其他 mod
+    // 要求更高版本时由 JiJ 协商选高版本，本 mod 用到的 API 在 2.2~2.7 一致。strictly 只声明
+    // 区间、prefer 固定嵌套 2.2：直接写区间会让 Gradle 解析到当时最新版，构建结果随仓库漂移
     implementation 'org.yaml:snakeyaml:2.2'
-    jarJar 'org.yaml:snakeyaml:2.2'
+    jarJar('org.yaml:snakeyaml:2.2') {
+        version {
+            strictly '[2.2,)'
+            prefer '2.2'
+        }
+    }
 }
 
 neoForge {
