@@ -18,6 +18,7 @@
 - **触发冷却**：可配置的随机触发间隔区间
 - **睡觉时安静**：允许让女仆睡觉时保持安静，不触发自言自语/互聊
 - **聊天可见**：女仆的自言自语与互聊对附近玩家可见（即使此玩家不是女仆的主人）
+- **预制内容（实验性）**：见 [预制内容使用文档](docs/custom-prebuild-message/zh_cn.md)
 
 ## 环境要求
 
@@ -57,14 +58,7 @@
 - **Tool调用**：全局与单只开关，开启后这只女仆的自言自语/互聊可以调用工具
 - **上下文设置**：可逐项选择环境信息进入随机池、必定进入或必定不进入；历史上下文可选全量、精简或检索模式
 - **思考气泡**：只控制你看到的自话/互聊等待、工具提示与思考气泡，不影响最终回答、欢迎语与普通聊天
-- **预制复用（实验性）**：默认关闭，符合条件时复用过往真实回复；自定义预制内容见 [文档](docs/custom-prebuild-message/zh_cn.md)
-
-### 可选：AgentTweaks 集成（Forge 1.20.1）
-
-- 不需要安装 AgentTweaks：在 AI 聊天输入界面点 💬 即可打开女仆设置，关闭后返回聊天界面。
-- 本版本提供设置导航桥；安装并接入该桥的 Forge 版 AgentTweaks 后，可由其提供统一导航入口，关闭女仆设置时返回父界面。
-- 切换设置页前会保存自定义 Prompt；环境上下文浮层打开时不允许切页。
-- 不新增网络协议或强制依赖。仅提供本侧接口，不代表 AgentTweaks 的 Forge 接入已完成。
+- **预制内容（实验性）**：默认关闭，开启后，会自动保存内容作为预制来源，符合条件时会尝试使用预制回复；自定义预制内容见 [预制内容使用文档](docs/custom-prebuild-message/zh_cn.md)
 
 ## 许可
 
@@ -92,6 +86,7 @@ A mod that adds **self-talk / welcome greetings / maid-to-maid chats** to [Touho
 - **Trigger cooldown**: A configurable random interval range between triggers
 - **Quiet while sleeping**: Allows maids to stay quiet while sleeping — self-talk and inter-chat won't trigger while they sleep
 - **Visible in chat**: Self-talk and maid-to-maid chats are visible to nearby players (even if they are not the maid's owner)
+- **Prebuilt content (experimental)**: see the [prebuilt content guide](docs/custom-prebuild-message/en_us.md)
 
 ## Requirements
 
@@ -131,14 +126,7 @@ Open the maid's AI chat input screen (usually by pressing T) and click the 💬 
 - **Tool**: global and per-maid switches; when enabled, this maid's self-talk / inter-chat can call tools
 - **Context Settings**: choose per entry whether environment info enters the random pool, is always included, or is never included; history context can be full, compact, or retrieval mode
 - **Thinking Bubbles**: controls only the waiting, tool-status and reasoning bubbles you see during self-talk / inter-chat; final replies, welcome messages and normal chat are unaffected
-- **Prebuilt Reuse (experimental)**: off by default; reuses past real replies when conditions match; see the [custom prebuilt guide](docs/custom-prebuild-message/en_us.md)
-
-### Optional: AgentTweaks integration (Forge 1.20.1)
-
-- AgentTweaks is not required: click 💬 in the AI chat screen to open Maid Settings, then close it to return to chat.
-- This version provides a settings-navigation bridge. A Forge version of AgentTweaks that integrates with this bridge can provide unified navigation; closing Maid Settings returns to its parent screen.
-- Custom Prompt edits are saved before switching pages; navigation is blocked while the environment-context overlay is open.
-- No new network protocol or mandatory dependency is introduced. This provides the Self-Talk side only and does not imply that the Forge integration in AgentTweaks is complete.
+- **Prebuilt content (experimental)**: off by default; when on, generated content is automatically saved as a prebuilt source and reused when conditions match; see the [prebuilt content guide](docs/custom-prebuild-message/en_us.md) for custom prebuilt content
 
 ## License
 
