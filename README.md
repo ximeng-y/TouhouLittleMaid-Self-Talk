@@ -8,14 +8,17 @@
 - **欢迎语**：主人上线时女仆主动打招呼，不限距离，已加载区块中的女仆都能触发
 - **女仆互相对话**：女仆会随机地与其附近的女仆聊天
 - **无人设不说话**：未配置人设的女仆不触发，避免出戏/不可预计的 Token 消耗
+- **结构化人设**：人设页支持整段与结构化两种模式；结构化模式分为身份、性格、背景、爱好四栏，支持按情景需要选择性注入人设
 - **上下文控制**：自言自语保留条数可配置，当超过条数上限时会自动丢弃前面的自言自语内容，仅保留最后一条。玩家与女仆的主动聊天记录不受影响
 - **随机注入游戏情境**：触发自言自语时，会从女仆当前位置、附近实体、装备等情境信息中随机注入几种信息，使自言自语具有随机性
+- **环境感知**：女仆会留意附近的死亡、玩家受伤、自身受伤/着火/缺氧，以及自己的神龛复活与击杀，并带入下一次自言自语或互聊
 - **自定义 Prompt**：可为自己的女仆自定义触发自言自语/互聊时的提示词，支持全部女仆设置与单只女仆独立设置
 - **Tool 调用**：默认关闭，开启后，女仆可能在自言自语/互聊中自行切换状态、获取环境信息等。**会带来额外的token消耗**
 - **单独开关**：每位玩家可单独关闭某只女仆的自言自语；房主可控制总开关（服务器则需要修改配置文件）
 - **触发冷却**：可配置的随机触发间隔区间
 - **睡觉时安静**：允许让女仆睡觉时保持安静，不触发自言自语/互聊
 - **聊天可见**：女仆的自言自语与互聊对附近玩家可见（即使此玩家不是女仆的主人）
+- **预制内容（实验性）**：见 [预制内容使用文档](docs/custom-prebuild-message/zh_cn.md)
 
 ## 环境要求
 
@@ -26,7 +29,7 @@
 
 ## 安装
 
-1. 安装 mod：下载对应版本的 jar
+1. 安装 mod：下载对应版本的 jar（客户端与服务端均需安装，且使用同一平台、同一版本）
 2. 启动游戏，打开总开关：女仆 AI 设置 → AI 全局设置 →「女仆自言自语」→ 启用；「女仆互聊」需在其子页单独启用
 
 ## 使用
@@ -37,6 +40,8 @@
 
 - **状态 1 / 状态 2**：主人在线 / 离线时的开关、最小与最大触发间隔（秒，填入式、带范围校验）、玩家半径、自话保留条数
 - **欢迎语**：主人上线后的打招呼触发窗口
+- **Tool 调用**：默认关闭，开启后允许女仆在自话/互聊中调用工具
+- **环境感知**：控制女仆是否留意附近的死亡、玩家受伤、自身受伤/着火/缺氧，以及自己击杀的生物
 
 女仆 AI 聊天设置 → AI 全局设置 →「女仆互聊」：
 
@@ -51,6 +56,9 @@
 - **睡觉安静**：开启后，女仆睡觉时不再触发自言自语/互聊
 - **自定义 Prompt**：支持为「全部女仆」和「这只女仆」分别填写提示词
 - **Tool调用**：全局与单只开关，开启后这只女仆的自言自语/互聊可以调用工具
+- **上下文设置**：可逐项选择环境信息进入随机池、必定进入或必定不进入；历史上下文可选全量、精简或检索模式
+- **思考气泡**：只控制你看到的自话/互聊等待、工具提示与思考气泡，不影响最终回答、欢迎语与普通聊天
+- **预制内容（实验性）**：默认关闭，开启后，会自动保存内容作为预制来源，符合条件时会尝试使用预制回复；自定义预制内容见 [预制内容使用文档](docs/custom-prebuild-message/zh_cn.md)
 
 ### 可选：AgentTweaks 集成（NeoForge 1.21.1）
 
@@ -77,14 +85,17 @@ A mod that adds **self-talk / welcome greetings / maid-to-maid chats** to [Touho
 - **Welcome greetings**: The maid greets her owner when they log in — no distance limit; any maid in loaded chunks can trigger
 - **Maid-to-maid chat**: A maid will randomly strike up a conversation with maids near her
 - **No persona, no talking**: Maids without a persona never trigger, avoiding out-of-character replies and unpredictable token cost
+- **Structured persona**: The persona page supports whole persona and structured persona modes; the structured mode has four sections (identity, personality, background, hobbies) and can selectively inject persona sections as the situation requires
 - **Context control**: The number of self-talk entries kept in context is configurable; once the limit is exceeded, earlier self-talk entries are dropped and only the latest one remains. Player-initiated chat history with the maid is unaffected
 - **Random in-game context**: When triggering self-talk, a few pieces of context such as current position, nearby entities, and equipment are randomly injected to keep self-talk varied
+- **Environment awareness**: Maids notice nearby deaths, player injuries, their own injuries / burning / drowning, and their own shrine revivals and kills, and bring them into the next self-talk or inter-chat
 - **Custom Prompt**: Customize the prompts used for self-talk / maid-to-maid chats for your own maids; supports both an all-maids setting and independent per-maid settings
 - **Tool calls**: Off by default. When enabled, maids may switch states, fetch environment info, etc. on their own during self-talk / maid-to-maid chats. **Incurs extra token cost**
 - **Per-player switch**: Each player can turn off self-talk for an individual maid; the host controls the master switch (on a dedicated server this requires editing the config file)
 - **Trigger cooldown**: A configurable random interval range between triggers
 - **Quiet while sleeping**: Allows maids to stay quiet while sleeping — self-talk and inter-chat won't trigger while they sleep
 - **Visible in chat**: Self-talk and maid-to-maid chats are visible to nearby players (even if they are not the maid's owner)
+- **Prebuilt content (experimental)**: see the [prebuilt content guide](docs/custom-prebuild-message/en_us.md)
 
 ## Requirements
 
@@ -95,7 +106,7 @@ A mod that adds **self-talk / welcome greetings / maid-to-maid chats** to [Touho
 
 ## Installation
 
-1. Install the mod: download the jar for your version
+1. Install the mod: download the jar for your version (both client and server must install it, using the same platform and version)
 2. Launch the game and enable the master switch: Maid AI settings → Global AI settings → "Maid Self-Talk" → Enable; Maid Inter-Chat needs to be enabled separately in its own sub-page
 
 ## Usage
@@ -106,6 +117,8 @@ Maid AI chat settings → Global AI settings → "Maid Self-Talk":
 
 - **State 1 / State 2**: enable switch, min/max trigger interval (seconds, typed input with range validation), player radius, and self-talk keep count for owner online / offline
 - **Welcome**: the greeting trigger window after the owner logs in
+- **Tool Calls**: off by default; when on, maids may call tools during self-talk / inter-chat
+- **Environment Awareness**: controls whether maids notice nearby deaths, player injuries, their own injuries / burning / drowning, and creatures they kill themselves
 
 Maid AI chat settings → Global AI settings → "Maid Inter-Chat":
 
@@ -120,6 +133,9 @@ Open the maid's AI chat input screen (usually by pressing T) and click the 💬 
 - **Sleep Quiet**: when on, self-talk / inter-chat no longer trigger while the maid is sleeping
 - **Custom Prompt**: fill in separate prompts for all maids and for this maid
 - **Tool**: global and per-maid switches; when enabled, this maid's self-talk / inter-chat can call tools
+- **Context Settings**: choose per entry whether environment info enters the random pool, is always included, or is never included; history context can be full, compact, or retrieval mode
+- **Thinking Bubbles**: controls only the waiting, tool-status and reasoning bubbles you see during self-talk / inter-chat; final replies, welcome messages and normal chat are unaffected
+- **Prebuilt content (experimental)**: off by default; when on, generated content is automatically saved as a prebuilt source and reused when conditions match; see the [prebuilt content guide](docs/custom-prebuild-message/en_us.md) for custom prebuilt content
 
 ### Optional: AgentTweaks integration (NeoForge 1.21.1)
 
