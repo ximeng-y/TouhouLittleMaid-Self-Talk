@@ -60,15 +60,6 @@
 - **思考气泡**：只控制你看到的自话/互聊等待、工具提示与思考气泡，不影响最终回答、欢迎语与普通聊天
 - **预制内容（实验性）**：默认关闭，开启后，会自动保存内容作为预制来源，符合条件时会尝试使用预制回复；自定义预制内容见 [预制内容使用文档](docs/custom-prebuild-message/zh_cn.md)
 
-### 可选：AgentTweaks 集成（NeoForge 1.21.1）
-
-本模组通过 `com.maidmod.selftalk.client.SelfTalkSettingsBridge` 对外提供可选设置导航桥（仅 NeoForge 1.21.1 线）：
-
-- 未安装 AgentTweaks 时，独立安装与原有行为完全一致：在 AI 聊天输入界面点 💬 打开女仆设置，关闭后返回聊天界面
-- AgentTweaks 接入后，💬 的打开权交给 AgentTweaks，由其提供左上角导航入口；从女仆设置返回时回到其父界面
-- 桥只提供打开/创建/导航协商等固定公开方法，不修改任何网络协议与业务行为，也不要求外部模组存在
-- **Forge 1.20.1 线尚未适配该桥**
-
 ## 许可
 
 [MIT](LICENSE)
@@ -136,15 +127,6 @@ Open the maid's AI chat input screen (usually by pressing T) and click the 💬 
 - **Context Settings**: choose per entry whether environment info enters the random pool, is always included, or is never included; history context can be full, compact, or retrieval mode
 - **Thinking Bubbles**: controls only the waiting, tool-status and reasoning bubbles you see during self-talk / inter-chat; final replies, welcome messages and normal chat are unaffected
 - **Prebuilt content (experimental)**: off by default; when on, generated content is automatically saved as a prebuilt source and reused when conditions match; see the [prebuilt content guide](docs/custom-prebuild-message/en_us.md) for custom prebuilt content
-
-### Optional: AgentTweaks integration (NeoForge 1.21.1)
-
-This mod exposes an optional settings-navigation bridge via `com.maidmod.selftalk.client.SelfTalkSettingsBridge` (NeoForge 1.21.1 line only):
-
-- Without AgentTweaks, standalone installation behaves exactly as before: open the Maid Settings with 💬 in the AI chat screen and return to the chat screen on close
-- With AgentTweaks, opening the 💬 entry is delegated to AgentTweaks, which provides a top-left navigation entry; closing the Maid Settings returns to its parent screen
-- The bridge only provides fixed public methods for opening / creating / navigation coordination — no network protocol or business behavior changes, and no hard dependency on the external mod
-- **The Forge 1.20.1 line does not include this bridge yet**
 
 ## License
 
