@@ -31,7 +31,7 @@ import java.util.UUID;
  *       从而占用上下文压缩额度——但压缩只在玩家 chat 时触发（tryCompressBeforeChat 仅由 chat() 调用），
  *       因此自话即使撑大上下文也不会立即触发压缩；</li>
  *   <li><b>历史归属</b>：本轮回合与工具过程都不写入 TLM 历史（由 {@code LLMCallbackMixin} 与
- *       {@code InterChatToolLifecycleMixin} 的窄范围重定向跳过写入），有效回复在服务端主线程
+ *       {@code InterChatToolLifecycleMixin} 的窄范围注入跳过写入），有效回复在服务端主线程
  *       直接构造独立记录进档案；TLM 的空白判定、TTS、气泡、主人聊天栏输出与错误处理全部保留；</li>
  *   <li>onSuccess 后广播 {@link MaidChatReplyEvent} 并执行遗忘检查。</li>
  * </ul>
