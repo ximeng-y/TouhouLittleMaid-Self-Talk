@@ -78,6 +78,14 @@ dependencies {
     def snakeyaml = dependencies.create('org.yaml:snakeyaml:2.2')
     jarJar snakeyaml
     project.extensions.getByName('jarJar').ranged(snakeyaml, '[2.2,)')
+    // MixinExtras：历史写入调用点包装；common 仅用于编译与注解处理，
+    // Forge 平台包通过 jarJar 内嵌，运行者不需要额外安装前置
+    compileOnly 'io.github.llamalad7:mixinextras-common:0.5.5'
+    annotationProcessor 'io.github.llamalad7:mixinextras-common:0.5.5'
+    implementation 'io.github.llamalad7:mixinextras-forge:0.5.5'
+    def mixinextras = dependencies.create('io.github.llamalad7:mixinextras-forge:0.5.5')
+    jarJar mixinextras
+    project.extensions.getByName('jarJar').ranged(mixinextras, '[0.5.5,)')
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 }
 
