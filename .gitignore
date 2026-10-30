@@ -3,6 +3,7 @@ HANDOFF.md
 .XMTEMP/
 .XMagent-docs/
 XM_ideas/
+logs/
 
 # Agent 配置目录（本地维护，不纳入版本管理）
 .claude/
