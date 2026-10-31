@@ -147,11 +147,10 @@ public final class SelfTalkHandler {
             state.interChatPending = false;
             state.interChatPendingSinceTick = -1;
         }
-        if (state.playerChatCount > 0 && state.playerChatSinceTick >= 0
-                && serverTick - state.playerChatSinceTick > PENDING_TIMEOUT_TICKS) {
+        if (state.playerChats.count() > 0 && state.playerChats.sinceTick() >= 0
+                && serverTick - state.playerChats.sinceTick() > PENDING_TIMEOUT_TICKS) {
             MaidSelfTalkMod.LOGGER.warn("Player chat pending timed out for maid {}, force reset", maid.getId());
-            state.playerChatCount = 0;
-            state.playerChatSinceTick = -1;
+            state.playerChats.reset();
         }
         // 规划超时兜底：规划请求同样可能永不返回。必须真正取消那次规划（结束在途回调、摘除登记），
         // 只清忙标记会让迟到的规划结果继续导出正式消息（见 SelfTalkState.PendingPlan）

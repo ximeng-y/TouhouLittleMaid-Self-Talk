@@ -37,6 +37,12 @@ public final class RequestLifecycleTest {
         bridgeAbsentWithoutIntegrationError();
         bridgeLinkageErrorIsDiagnosedOnce();
         bridgeRepeatedCallsAreNoOps();
+        playerRequestsReleaseOnlyTheirOwnMembership();
+        playerEndIsIdempotent();
+        earlyEndAndSynchronousFailureDoNotHang();
+        playerTimeoutKeepsNewRequests();
+        retiredPlayerRegistryCannotReactivate();
+        playerSourceSurvivesCopyAndRebuild();
         System.out.println("RequestLifecycleTest: all " + checks + " checks passed");
     }
 
@@ -183,6 +189,99 @@ public final class RequestLifecycleTest {
         AgentTweaksLifecycleBridge.complete(null);
         AgentTweaksLifecycleBridge.cancel(null);
         check("重复空调用保持不可用", !AgentTweaksLifecycleBridge.bridgeAvailableForSelfCheck());
+    }
+
+    // ===== 玩家请求归属 =====
+
+    private static void playerRequestsReleaseOnlyTheirOwnMembership() {
+        PlayerChatRequest.Registry registry = new PlayerChatRequest.Registry();
+        PlayerChatRequest a = new PlayerChatRequest(registry);
+        PlayerChatRequest b = new PlayerChatRequest(registry);
+        a.dispatchReturned(10);
+        // 未派发的辅助请求先结束，不能解除 A。
+        b.signalEnd();
+        check("未登记请求不释放 A", !b.release() && registry.count() == 1);
+        b = new PlayerChatRequest(registry);
+        b.dispatchReturned(20);
+        check("两条玩家请求各自登记", registry.count() == 2 && registry.sinceTick() == 20);
+        b.signalEnd();
+        b.release();
+        check("乱序完成后 A 仍在途", registry.count() == 1 && registry.sinceTick() == 20);
+        a.signalEnd();
+        a.release();
+        check("最后一条完成才判闲", registry.count() == 0 && registry.sinceTick() == -1);
+    }
+
+    private static void playerEndIsIdempotent() {
+        PlayerChatRequest.Registry registry = new PlayerChatRequest.Registry();
+        PlayerChatRequest a = new PlayerChatRequest(registry);
+        PlayerChatRequest b = new PlayerChatRequest(registry);
+        a.dispatchReturned(1);
+        b.dispatchReturned(2);
+        check("成功第一次结束有效", a.signalEnd());
+        check("成功转失败不二次结算", !a.signalEnd());
+        a.release();
+        check("重复释放不影响 B", !a.release() && registry.count() == 1);
+        registry.reset();
+    }
+
+    private static void earlyEndAndSynchronousFailureDoNotHang() {
+        PlayerChatRequest.Registry registry = new PlayerChatRequest.Registry();
+        PlayerChatRequest synchronousFailure = new PlayerChatRequest(registry);
+        check("同步异常只准备不计数", registry.count() == 0 && !synchronousFailure.dispatched());
+        PlayerChatRequest fast = new PlayerChatRequest(registry);
+        fast.signalEnd();
+        check("提前结束仍执行一次派发副作用", fast.dispatchReturned(3));
+        check("提前结束不留下计数", registry.count() == 0 && registry.sinceTick() == -1);
+        check("派发副作用不可重复", !fast.dispatchReturned(4));
+    }
+
+    private static void playerTimeoutKeepsNewRequests() {
+        PlayerChatRequest.Registry registry = new PlayerChatRequest.Registry();
+        PlayerChatRequest old = new PlayerChatRequest(registry);
+        old.dispatchReturned(10);
+        // 模拟结束信号已投递主线程，但主线程超时复位先发生。
+        old.signalEnd();
+        registry.reset();
+        PlayerChatRequest current = new PlayerChatRequest(registry);
+        current.dispatchReturned(100);
+        check("超时后旧释放不扣新请求", !old.release() && registry.count() == 1);
+        check("超时后旧结束不能重复投递", !old.signalEnd());
+        check("新请求沿用最近激活计时", registry.sinceTick() == 100);
+        registry.reset();
+    }
+
+    private static void retiredPlayerRegistryCannotReactivate() {
+        PlayerChatRequest.Registry oldRegistry = new PlayerChatRequest.Registry();
+        PlayerChatRequest active = new PlayerChatRequest(oldRegistry);
+        PlayerChatRequest prepared = new PlayerChatRequest(oldRegistry);
+        active.dispatchReturned(1);
+        oldRegistry.retire();
+        PlayerChatRequest.Registry rebuilt = new PlayerChatRequest.Registry();
+        PlayerChatRequest current = new PlayerChatRequest(rebuilt);
+        current.dispatchReturned(2);
+        check("退役清空活动登记", oldRegistry.count() == 0);
+        check("移除后准备中的登记不能激活", !prepared.dispatchReturned(3));
+        check("旧释放不改变重建状态", !active.release() && rebuilt.count() == 1);
+        check("重建状态身份独立", current.owner() != active.owner());
+        rebuilt.retire();
+    }
+
+    private static void playerSourceSurvivesCopyAndRebuild() {
+        java.util.List<String> first = PlayerChatContext.fromPlayer(java.util.List.of("history"));
+        java.util.List<String> second = PlayerChatContext.fromPlayer(java.util.List.of("history"));
+        java.util.List<String> copied = PlayerChatContext.rebuild(first, first);
+        java.util.List<String> rebuilt = PlayerChatContext.rebuild(copied, java.util.List.of("new persona"));
+        PlayerChatContext.Source source = PlayerChatContext.sourceOf(first);
+        check("连续输入来源不串", source != PlayerChatContext.sourceOf(second));
+        check("人设推迟与重建保留来源", source == PlayerChatContext.sourceOf(rebuilt));
+        check("复制保持 List 独立行为", copied != first && copied.equals(first));
+        source.setPersonaBlock("persona");
+        check("本轮人设块随载体恢复", "persona".equals(PlayerChatContext.sourceOf(rebuilt).personaBlock()));
+        java.util.List<String> internal = PlayerChatContext.rebuild(
+                java.util.List.of("internal"), java.util.List.of("rebuilt"));
+        check("内部请求重建不冒充玩家", PlayerChatContext.sourceOf(internal) == null);
+        check("人设规划期间不登记正式请求", source.request() == null);
     }
 
     // ===== 断言工具 =====
