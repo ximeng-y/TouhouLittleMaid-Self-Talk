@@ -134,10 +134,12 @@ Please note:
 
 - This mod only uses `.md` files at the **top level** of the `welcome/` and `self-talk/` directories. Files in subdirectories are ignored.
 - Directories whose names start with `_` (such as `_global`) are reserved names. **Do not use such a name as a maid's name.**
+- **How `_global/` works**: prebuilt content inside the `_global/` folder applies to all maids.
 - `_diagnostics.md` is a diagnostics report generated automatically by the mod. **It warns users about format errors and other problems in custom content. Treat it as read-only; manual edits have no effect.**
+- **Format warnings for the `_global/` directory are never sent as in-game private messages to anyone.** They are only written to the diagnostics report.
 - If a folder named after a maid **does not match any loaded maid**, it is listed in the `_diagnostics.md` diagnostics report, which helps catch misspelled names.
 - Maid-name folders resolve names in the order "name tag name → built-in model preset name".
-- When using a custom YSM model, **if the maid has no name tag name**, the maid's name in the chat box is displayed as the model name. **That name is not treated as the maid's name and cannot be resolved.**
+- When using a custom YSM model, **if the maid has no name tag name**, the maid's name in the chat box is displayed as the model name. **That name is not treated as the maid's name and cannot be resolved.** Therefore, such maids can only use prebuilt content under `_global/` until they have a name tag name.
 - **Restart the server for changes or newly added files to take effect.** The `custom/` folder is read-only to the mod: the mod never modifies, deletes, or writes content into these files. It only creates `_diagnostics.md` as a diagnostics report.
 - Make sure that your maid's name and the folder name containing its prebuilt content are **character-for-character identical**; otherwise they cannot be matched.
 
