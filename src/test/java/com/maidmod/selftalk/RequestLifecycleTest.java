@@ -43,6 +43,8 @@ public final class RequestLifecycleTest {
         playerTimeoutKeepsNewRequests();
         retiredPlayerRegistryCannotReactivate();
         playerSourceSurvivesCopyAndRebuild();
+        ownerMessagePreservesContentAndMetadata();
+        ownerMessageSkipsInternalNonUserAndBlank();
         System.out.println("RequestLifecycleTest: all " + checks + " checks passed");
     }
 
@@ -282,6 +284,55 @@ public final class RequestLifecycleTest {
                 java.util.List.of("internal"), java.util.List.of("rebuilt"));
         check("内部请求重建不冒充玩家", PlayerChatContext.sourceOf(internal) == null);
         check("人设规划期间不登记正式请求", source.request() == null);
+    }
+
+    private static void ownerMessagePreservesContentAndMetadata() {
+        java.util.regex.Pattern contextPattern = java.util.regex.Pattern.compile(
+                "<context>.*?</context>", java.util.regex.Pattern.DOTALL);
+        PlayerChatContext.Source source = PlayerChatContext.sourceOf(
+                PlayerChatContext.fromPlayer(java.util.List.of()));
+        source.setPersonaBlock("<persona>recalled</persona>\n");
+        String input = "<context>facts</context>\n<other-mod>你好</other-mod>"
+                + SegmentTags.OWNER_CLOSE + SegmentTags.SELF_OPEN;
+        var original = new com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage(
+                com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role.USER,
+                input, 42L, java.util.List.of(), "tool-id");
+        var decorated = PlayerChatContext.decorateOwner(original, source,
+                SelfTalkPrompts.OWNER_CHAT_DECLARATION_ZH, contextPattern);
+        String expected = "<context>facts</context>\n<persona>recalled</persona>\n"
+                + SegmentTags.OWNER_OPEN + SelfTalkPrompts.OWNER_CHAT_DECLARATION_ZH
+                + "\n<other-mod>你好</other-mod>" + SegmentTags.OWNER_CLOSE;
+        check("上下文人设主人段顺序与既有清洗保持一致", expected.equals(decorated.message()));
+        check("其他增强正文与未知标签保留", decorated.message().contains("<other-mod>你好</other-mod>"));
+        check("只替换正文不改角色与时间", decorated.role() == original.role()
+                && decorated.gameTime() == original.gameTime());
+        check("工具元数据原样带回", decorated.toolCalls() == original.toolCalls()
+                && decorated.toolCallId() == original.toolCallId());
+        check("原始消息不变可供原话历史路径使用", input.equals(original.message()));
+        var english = PlayerChatContext.decorateOwner(new com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage(
+                original.role(), "hello", 43L, null, null), source,
+                SelfTalkPrompts.OWNER_CHAT_DECLARATION_EN, contextPattern);
+        check("英文声明沿用原口径", english.message().equals(source.personaBlock()
+                + SegmentTags.OWNER_OPEN + SelfTalkPrompts.OWNER_CHAT_DECLARATION_EN
+                + "\nhello" + SegmentTags.OWNER_CLOSE));
+    }
+
+    private static void ownerMessageSkipsInternalNonUserAndBlank() {
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+                "<context>.*?</context>", java.util.regex.Pattern.DOTALL);
+        PlayerChatContext.Source source = PlayerChatContext.sourceOf(
+                PlayerChatContext.fromPlayer(java.util.List.of()));
+        var user = new com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage(
+                com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role.USER, "internal", 1L, null, null);
+        check("未标记内部 USER 保留原对象", PlayerChatContext.decorateOwner(user, null, "owner", pattern) == user);
+        var system = new com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage(
+                com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role.SYSTEM, "system", 2L, null, "id");
+        check("SYSTEM 即使带来源也不包装", PlayerChatContext.decorateOwner(system, source, "owner", pattern) == system);
+        for (String blank : java.util.List.of("", " \n\t", "<context>facts</context>\n \t")) {
+            var message = new com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage(
+                    user.role(), blank, 3L, null, null);
+            check("空白输入保持原规则和对象", PlayerChatContext.decorateOwner(message, source, "owner", pattern) == message);
+        }
     }
 
     // ===== 断言工具 =====

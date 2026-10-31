@@ -32,14 +32,12 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyArgs;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import org.spongepowered.asm.mixin.injection.invoke.arg.Args;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
 
 /**
  * 钩玩家 chat 真实派发入口（MaidAIChatManager.normalChat，private 方法、服务端主线程调用）。
@@ -49,8 +47,8 @@ import java.util.regex.Matcher;
  *   <li>HEAD：把互聊窗口内容拼接进本次请求的 messages（此刻 TLM 刚构建完 [system 设定, 摘要, ...历史]，
  *       尚未 append 玩家新消息），并就地包裹段标签（历史+窗口）；
  *       使玩家 chat 上下文 = 对话历史（含自话）+ 互聊记录 + 玩家的话；</li>
- *   <li>@Redirect {@code LLMMessage.userChat}：拦截玩家消息构造，
- *       把「这是主人在与你聊天」声明与主人段标签注入消息内容（前端无感：TLM 仍以原始话写历史）；</li>
+ *   <li>@ModifyArgs {@code List.add}：保留其他增强已经构造好的消息，仅修饰真实玩家 USER 正文，
+ *       注入主人声明与段标签（前端无感：TLM 仍以原始话写历史）；</li>
  *   <li>派发前绑定实际回调，TAIL 激活本轮玩家登记；自话/互聊触发时若有登记则跳过；
  *       清空自话/互聊计数窗口（打断连续、计数重新开始。自话记录已写入 TLM 历史、
  *       互聊记录已随 HEAD 注入本次请求，清空不丢已注入内容）。</li>
@@ -222,7 +220,7 @@ public abstract class MaidAIChatManagerMixin {
     }
 
     /**
-     * 拦截玩家消息的构造，注入主人段标签与"这是主人在与你聊天"声明。
+     * 在消息入列前修饰实际 USER 对象，不争抢 userChat 构造指令，不覆盖其他增强的内容。
      * <p>
      * 无感保证：TLM 的 {@code addUserHistory(message)} 仍写原始玩家话——
      * 历史 UI 与 NBT 持久化不含声明与标签；标签只在请求体中生效。
@@ -235,41 +233,24 @@ public abstract class MaidAIChatManagerMixin {
      * 保持双线同构；NeoForge 线的 sponge-mixin fork（0.15.2+mixin.0.8.7）校验为单向
      * （仅禁止非 static handler 注入 static 目标），static 写法不致崩，但约定统一。
      */
-    @Redirect(method = "normalChat",
+    @ModifyArgs(method = "normalChat",
             at = @At(value = "INVOKE",
-                    target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/service/llm/LLMMessage;userChat(Lcom/github/tartaricacid/touhoulittlemaid/entity/passive/EntityMaid;Ljava/lang/String;)Lcom/github/tartaricacid/touhoulittlemaid/ai/service/llm/LLMMessage;"))
-    private LLMMessage maid_self_talk$wrapOwnerChat(EntityMaid maid, String messageWithContext) {
-        // 拆出 <context> 前缀与玩家原话（addContext 的输出结构固定：前缀 + "\n" + 原话）
-        String contextPrefix = StringUtils.EMPTY;
-        String raw = messageWithContext;
-        Matcher matcher = UserPromptContexts.CONTEXT_REG.matcher(messageWithContext);
-        if (matcher.find() && matcher.start() == 0) {
-            // contextPrefix 不含 addContext 追加的分隔换行，此处补齐，保持 </context>\n<maid-owner-chat> 分行形态
-            contextPrefix = messageWithContext.substring(0, matcher.end()) + "\n";
-            // raw 仅剥掉 addContext 的格式换行，玩家原话本身原样保留
-            raw = messageWithContext.substring(matcher.end());
-            if (raw.startsWith(StringUtils.LF)) {
-                raw = raw.substring(1);
-            }
+                    target = "Ljava/util/List;add(Ljava/lang/Object;)Z"))
+    private void maid_self_talk$wrapOwnerChat(Args args, String message,
+                                             List<LLMMessage> messages, LLMClient chatClient) {
+        PlayerChatContext.Source source = PlayerChatContext.sourceOf(messages);
+        LLMMessage original = args.get(0);
+        if (source == null || original.role() != Role.USER) {
+            return;
         }
-        // 玩家原话保留原文（仅用于判空），与 addUserHistory 持久化的内容一致，避免前后不一致
-        if (StringUtils.isBlank(raw)) {
-            return LLMMessage.userChat(maid, messageWithContext);
-        }
-        // 原话中的本 mod 段标签会提前闭合主人段（标签逃逸），请求侧剥除；历史仍写原文
-        String sanitizedRaw = SegmentTags.stripTagsFromPlayerInput(raw);
+        EntityMaid maid = ((MaidAIChatManager) (Object) this).getMaid();
         // 声明语言与背景模板同一判定口径：sanitizeLanguage 校验、ContextLanguage 分类（大小写不敏感）
         String chatLanguage = StringUtils.isBlank(maid.getAiChatManager().chatLanguage)
                 ? "en_us" : maid.getAiChatManager().chatLanguage;
         boolean chinese = ContextLanguage.of(SelfTalkContexts.sanitizeLanguage(chatLanguage)).isZh();
         String declaration = chinese ? SelfTalkPrompts.OWNER_CHAT_DECLARATION_ZH : SelfTalkPrompts.OWNER_CHAT_DECLARATION_EN;
-        // 本轮人设召回块：插在动态上下文区（</context> 之后、主人段之前）。
-        // 它是这一轮的资料而不是主人说的话，因此不进主人段、也不改写原话；
-        // 只有推迟派发后恢复过来的那次调用才有值（见 PlayerPersonaChatSession.currentPersonaBlock）
-        String personaBlock = PlayerPersonaChatSession.currentPersonaBlock();
-        String content = contextPrefix + personaBlock + SegmentTags.OWNER_OPEN + declaration
-                + StringUtils.LF + sanitizedRaw + SegmentTags.OWNER_CLOSE;
-        return LLMMessage.userChat(maid, content);
+        args.set(0, PlayerChatContext.decorateOwner(original, source, declaration,
+                UserPromptContexts.CONTEXT_REG));
     }
 
     /** 读取实际派发回调，只准备登记；不替换回调，也不提前增加在途数量。 */
