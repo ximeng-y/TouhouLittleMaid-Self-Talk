@@ -264,6 +264,9 @@ public final class SelfTalkHandler {
                             state.nextInterChatTriggerTick = serverTick + RESPONDER_RETRY_TICKS;
                         }
                     }
+                } else {
+                    // 附近无玩家：同样短退避，避免每 tick 重复查询附近玩家
+                    state.nextInterChatTriggerTick = serverTick + RESPONDER_RETRY_TICKS;
                 }
             }
         }
