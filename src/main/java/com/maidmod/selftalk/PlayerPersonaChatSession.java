@@ -77,7 +77,7 @@ public final class PlayerPersonaChatSession {
 
     /** 在途静默规划（本会话只跑人设目标） */
     private KeywordPlanningSession planning;
-    /** 本轮人设召回块（恢复时由 Redirect 插进玩家消息的动态上下文；空串表示不注入） */
+    /** 本轮人设召回块（恢复时写入来源载体，供消息入列前修饰；空串表示不注入） */
     private String personaBlock = StringUtils.EMPTY;
     private boolean cancelled;
     /** 是否已恢复原生派发（终态标记，防重复恢复） */
@@ -132,7 +132,7 @@ public final class PlayerPersonaChatSession {
         String language = SelfTalkContexts.sanitizeLanguage(StringUtils.isBlank(chatManager.chatLanguage)
                 ? Config.SELF_TALK_LANGUAGE.get() : chatManager.chatLanguage);
         PlayerPersonaChatSession session = new PlayerPersonaChatSession(maid, chatManager, message,
-                new ArrayList<>(messages), chatClient, language, personaConfig);
+                PlayerChatContext.rebuild(messages, messages), chatClient, language, personaConfig);
         session.register();
         session.startPlanning();
         return true;
@@ -156,9 +156,9 @@ public final class PlayerPersonaChatSession {
     }
 
     /**
-     * 本轮人设召回块（供 {@code LLMMessage.userChat} 的 Redirect 读取）。
+     * 本轮人设召回块（仅在本次同步恢复窗口有效）。
      * <p>
-     * 只在同步恢复调用期间有值：不处于恢复窗口时返回空串，Redirect 照旧只包段标签。
+     * 消息修饰从请求载体读取；此方法不为内部请求提供玩家来源证明。
      */
     public static String currentPersonaBlock() {
         PlayerPersonaChatSession session = resuming;
@@ -229,6 +229,10 @@ public final class PlayerPersonaChatSession {
         }
         resuming = this;
         try {
+            PlayerChatContext.Source source = PlayerChatContext.sourceOf(messages);
+            if (source != null) {
+                source.setPersonaBlock(personaBlock);
+            }
             ((MaidAIChatManagerAccessor) (Object) chatManager).invokeNormalChat(message, messages, chatClient);
         } catch (Throwable t) {
             MaidSelfTalkMod.LOGGER.warn("Failed to resume player chat for maid {}", maid.getId(), t);
@@ -307,7 +311,7 @@ public final class PlayerPersonaChatSession {
                     maid.getId(), t);
             return false;
         }
-        messages = rebuilt;
+        messages = PlayerChatContext.rebuild(messages, rebuilt);
         return true;
     }
 

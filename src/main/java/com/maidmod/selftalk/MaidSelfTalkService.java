@@ -374,10 +374,13 @@ public final class MaidSelfTalkService {
      * （见 {@link com.maidmod.selftalk.mixin.MaidAIChatManagerMixin}），
      * 这里清空的只是运行时计数窗口，不丢已注入内容、也不动已建立的有效自话。
      */
-    public static void onPlayerChatStart(EntityMaid maid) {
-        SelfTalkState.State state = SelfTalkState.get(maid.getId());
-        state.playerChatCount++;
-        state.playerChatSinceTick = maid.level().getServer().getTickCount();
+    public static void onPlayerChatStart(EntityMaid maid, PlayerChatRequest request) {
+        SelfTalkState.State state = SelfTalkState.peek(maid.getId());
+        if (state == null || state.playerChats != request.owner()
+                || !request.dispatchReturned(maid.level().getServer().getTickCount())) {
+            return;
+        }
+        // 即使回调先于派发返回结束，也必须执行一次真实主人派发的窗口与冷却副作用。
         state.windowSelfTalkMsgs.clear();
         state.windowInterChatMsgs.clear();
         // 玩家 chat 会写入新的玩家对话：检索索引可能变化，只做失效标记，下次检索时再比对来源序列
@@ -412,15 +415,14 @@ public final class MaidSelfTalkService {
                 Config.INTER_CHAT_MIN_INTERVAL.get(), Config.INTER_CHAT_MAX_INTERVAL.get());
     }
 
-    /** 玩家 chat 结束（成功或失败）：解除一条在途计数 */
-    public static void onPlayerChatEnd(EntityMaid maid) {
-        SelfTalkState.State state = SelfTalkState.get(maid.getId());
-        if (state.playerChatCount > 0) {
-            state.playerChatCount--;
+    /** 玩家 chat 结束：只释放本轮登记，不创建状态，也不触碰卸载后重建的新 State。 */
+    public static void onPlayerChatEnd(EntityMaid maid, PlayerChatRequest request) {
+        SelfTalkState.State state = SelfTalkState.peek(maid.getId());
+        if (state == null || state.playerChats != request.owner()) {
+            return;
         }
-        // 仅当全部在途 chat 结束时清零计时，连发场景下保留最后一条的置位时刻供超时兜底
-        if (state.playerChatCount == 0) {
-            state.playerChatSinceTick = -1;
+        if (request.release()) {
+            HistoryRetrievalCache.invalidate(maid);
         }
     }
 
