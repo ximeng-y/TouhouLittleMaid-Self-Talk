@@ -1,6 +1,7 @@
 package com.maidmod.selftalk.mixin;
 
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.ChatClientInfo;
+import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.UserPromptContexts;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.setting.papi.PapiReplacer;
@@ -17,6 +18,9 @@ import com.maidmod.selftalk.MaidPersonaConfig;
 import com.maidmod.selftalk.MaidPersonaRuntime;
 import com.maidmod.selftalk.MaidSelfTalkService;
 import com.maidmod.selftalk.PlayerPersonaChatSession;
+import com.maidmod.selftalk.PlayerChatContext;
+import com.maidmod.selftalk.PlayerChatRequest;
+import com.maidmod.selftalk.PlayerChatRequestHost;
 import com.maidmod.selftalk.SelfTalkContexts;
 import com.maidmod.selftalk.SelfTalkDispatcher;
 import com.maidmod.selftalk.SelfTalkHistoryAssembler;
@@ -27,9 +31,11 @@ import org.apache.commons.lang3.StringUtils;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyArgs;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import org.spongepowered.asm.mixin.injection.invoke.arg.Args;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -45,20 +51,28 @@ import java.util.regex.Matcher;
  *       使玩家 chat 上下文 = 对话历史（含自话）+ 互聊记录 + 玩家的话；</li>
  *   <li>@Redirect {@code LLMMessage.userChat}：拦截玩家消息构造，
  *       把「这是主人在与你聊天」声明与主人段标签注入消息内容（前端无感：TLM 仍以原始话写历史）；</li>
- *   <li>TAIL：标记该女仆"玩家 chat 进行中"（计数），自话/互聊触发时若命中则跳过（防交错写历史）；
+ *   <li>派发前绑定实际回调，TAIL 激活本轮玩家登记；自话/互聊触发时若有登记则跳过；
  *       清空自话/互聊计数窗口（打断连续、计数重新开始。自话记录已写入 TLM 历史、
  *       互聊记录已随 HEAD 注入本次请求，清空不丢已注入内容）。</li>
  * </ul>
  * TAIL 注入点选在请求已提交之后：TLM {@code chat()} 有大量提前返回路径
  * （LLM 关闭/token 超限/site 缺失/密钥缺失/无人设/历史压缩）不产生任何回调，
  * 若在 chat 入口标记则标记可能永不清除、该女仆自话永久停摆；
- * {@code normalChat} 是唯一创建玩家 chat 回调（LLMCallback）的路径，
- * 且 client.chat 同步抛异常时 TAIL 同样不会执行——标记与回调生命周期严格绑定。
+ * 来源由原生 tryToChat 调用边界标记；直接进入 normalChat 的内部请求不参与玩家登记。
+ * client.chat 同步抛异常时 TAIL 不执行，提前完成的回调也不会留下在途登记。
  * HEAD 注入只向 messages 尾部追加互聊 assistant 消息（不破坏 tool 配对），
  * 且同步发生于 client.chat 之前，异步请求线程必然读到注入后的列表。
  */
 @Mixin(MaidAIChatManager.class)
 public abstract class MaidAIChatManagerMixin {
+
+    /** 正常聊天及历史压缩后的恢复都经过这一边界；每次输入获得独立来源载体。 */
+    @ModifyArgs(method = "tryToChat",
+            at = @At(value = "INVOKE",
+                    target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/manager/entity/MaidAIChatManager;normalChat(Ljava/lang/String;Ljava/util/List;Lcom/github/tartaricacid/touhoulittlemaid/ai/service/llm/LLMClient;)V"))
+    private void maid_self_talk$markPlayerSource(Args args) {
+        args.set(1, PlayerChatContext.fromPlayer(args.<List<LLMMessage>>get(1)));
+    }
 
     /**
      * 旧数据迁移：必须在 TLM <b>第一次读取历史并构造副本之前</b>执行。
@@ -128,6 +142,9 @@ public abstract class MaidAIChatManagerMixin {
     @Inject(method = "normalChat", at = @At("HEAD"), cancellable = true)
     private void maid_self_talk$injectInterChatContext(String message, List<LLMMessage> messages,
                                                        LLMClient chatClient, CallbackInfo ci) {
+        if (PlayerChatContext.sourceOf(messages) == null) {
+            return;
+        }
         MaidAIChatManager self = (MaidAIChatManager) (Object) this;
         EntityMaid maid = self.getMaid();
         // 迁移已由 getMessages 的 HEAD 完成（早于历史副本构造）；此处只做兜底，
@@ -255,10 +272,30 @@ public abstract class MaidAIChatManagerMixin {
         return LLMMessage.userChat(maid, content);
     }
 
+    /** 读取实际派发回调，只准备登记；不替换回调，也不提前增加在途数量。 */
+    @ModifyArgs(method = "normalChat",
+            at = @At(value = "INVOKE",
+                    target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/service/llm/LLMClient;chat(Lcom/github/tartaricacid/touhoulittlemaid/ai/manager/entity/LLMCallback;)V"))
+    private void maid_self_talk$preparePlayerRequest(Args args, String message,
+                                                    List<LLMMessage> messages, LLMClient chatClient) {
+        PlayerChatContext.Source source = PlayerChatContext.sourceOf(messages);
+        if (source == null) {
+            return;
+        }
+        EntityMaid maid = ((MaidAIChatManager) (Object) this).getMaid();
+        PlayerChatRequest request = new PlayerChatRequest(SelfTalkState.get(maid.getId()).playerChats);
+        source.prepare(request);
+        LLMCallback callback = args.get(0);
+        ((PlayerChatRequestHost) callback).maid_self_talk$setPlayerChatRequest(request);
+    }
+
     @Inject(method = "normalChat", at = @At("TAIL"))
     private void maid_self_talk$onPlayerChatStart(String message, List<LLMMessage> messages,
                                                   LLMClient chatClient, CallbackInfo ci) {
-        MaidAIChatManager self = (MaidAIChatManager) (Object) this;
-        MaidSelfTalkService.onPlayerChatStart(self.getMaid());
+        PlayerChatContext.Source source = PlayerChatContext.sourceOf(messages);
+        if (source != null && source.request() != null) {
+            MaidAIChatManager self = (MaidAIChatManager) (Object) this;
+            MaidSelfTalkService.onPlayerChatStart(self.getMaid(), source.request());
+        }
     }
 }

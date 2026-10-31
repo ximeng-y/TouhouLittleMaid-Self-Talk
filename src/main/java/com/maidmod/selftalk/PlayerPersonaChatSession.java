@@ -132,7 +132,7 @@ public final class PlayerPersonaChatSession {
         String language = SelfTalkContexts.sanitizeLanguage(StringUtils.isBlank(chatManager.chatLanguage)
                 ? Config.SELF_TALK_LANGUAGE.get() : chatManager.chatLanguage);
         PlayerPersonaChatSession session = new PlayerPersonaChatSession(maid, chatManager, message,
-                new ArrayList<>(messages), chatClient, language, personaConfig);
+                PlayerChatContext.rebuild(messages, messages), chatClient, language, personaConfig);
         session.register();
         session.startPlanning();
         return true;
@@ -229,6 +229,10 @@ public final class PlayerPersonaChatSession {
         }
         resuming = this;
         try {
+            PlayerChatContext.Source source = PlayerChatContext.sourceOf(messages);
+            if (source != null) {
+                source.setPersonaBlock(personaBlock);
+            }
             ((MaidAIChatManagerAccessor) (Object) chatManager).invokeNormalChat(message, messages, chatClient);
         } catch (Throwable t) {
             MaidSelfTalkMod.LOGGER.warn("Failed to resume player chat for maid {}", maid.getId(), t);
@@ -307,7 +311,7 @@ public final class PlayerPersonaChatSession {
                     maid.getId(), t);
             return false;
         }
-        messages = rebuilt;
+        messages = PlayerChatContext.rebuild(messages, rebuilt);
         return true;
     }
 
