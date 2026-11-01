@@ -1,0 +1,4 @@
+# Gradle wrapper 脚本必须固定行尾，否则在 bash 下会因 CRLF 报错
+gradlew text eol=lf
+gradlew.bat text eol=crlf
+*.sh text eol=lf
