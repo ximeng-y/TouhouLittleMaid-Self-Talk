@@ -2,22 +2,18 @@
 
 ## 环境
 
-- 现成 JDK：`D:\Games\ABOUT_MINECRAFT\JAVA\`（zulu17 供 forge-1.20.1 线、zulu21 供 neoforge-1.21.1 线；javap 等在 `zulu17.62.17-ca-jdk17.0.17-win_x64\bin\` 或 `zulu21.44.17-ca-jdk21.0.8-win_x64\bin\`）
+- NeoForge线使用JDK21，Forge线使用JDK17
 
 ## 项目概况
 
-- 东方小女仆（TLM 1.5.3，Modrinth maven）的附属 mod：女仆 AI 自言自语 / 主人登录欢迎语 / 女仆互聊，附玩家级设置（自话、互聊、睡觉安静、自定义 Prompt、Tool 调用）、环境事件上下文、历史检索、四栏人设与 AI 拆分，以及默认关闭的预制自话/欢迎语复用
+- 本项目为TouhouLittleMaid的附属 mod，主要添加了以下功能：女仆自言自语 / 主人登录欢迎语 / 女仆互聊
 - **双分支双线**：
   - `neoforge-1.21.1` 分支（GitHub 默认分支）：NeoForge 1.21.1（NeoForge 21.1.219 / ModDevGradle 2.0.95 / Java 21；TLM 1.5.3-neoforge+mc1.21.1）
   - `forge-1.20.1` 分支：Forge 1.20.1（Forge 47.2.0 / ForgeGradle 6 + parchment + mixingradle / Java 17；TLM 1.5.3-forge+mc1.20.1，fg.deobf）
-- 产物 jar（1.0.3 起加分支后缀区分）：neoforge 线 `build/libs/tlm-self-talk-1.4.0-neoforge-1.21.1.jar`；forge 线 `build/libs/tlm-self-talk-1.4.0-forge-1.20.1.jar`（双线 jarJar 内嵌 SnakeYAML 后，正式发布 jar 由 jarJar 任务产出，forge 线原始 jar 退居 `-thin.jar`）；部署替换 jar 后需重启服务端（代码改动无法热加载）
+- 产物 jar 使用分支后缀区分：neoforge 线 `build/libs/tlm-self-talk-1.4.0-neoforge-1.21.1.jar`；forge 线 `build/libs/tlm-self-talk-1.4.0-forge-1.20.1.jar`（正式发布 jar 由 jarJar 任务产出）
 
-## 构建
-
-- 项目**无 gradlew wrapper**，使用缓存的 Gradle 发行版：
-  `"$USERPROFILE/.gradle/wrapper/dists/gradle-8.14.3-bin/cv11ve7ro1n3o1j4so8xd9n66/gradle-8.14.3/bin/gradle.bat" <task>`
-- 常用：`compileJava`（编译验证）、`build`（产出 jar）
-- forge-1.20.1 分支构建必须 `JAVA_HOME` 指向 JDK17（PATH 的 java 损坏）；neoforge-1.21.1 分支用 JDK21
+- 项目自带 Gradle Wrapper（Gradle 8.14.3，下载地址与校验和见 `gradle/wrapper/gradle-wrapper.properties`）：`gradlew.bat <task>`（Windows）/ `./gradlew <task>`（bash），首次运行会下载对应发行版到 `~/.gradle/wrapper/dists/`
+- `JAVA_HOME` 指向 JDK17 构建 forge-1.20.1 线，指向 JDK21 构建 neoforge-1.21.1 线
 
 ## 架构（src/main/java/com/maidmod/selftalk）
 
@@ -65,8 +61,10 @@
 
 ### 代码改动后
 
-- 主 Agent 在交付前检查代码改动是否影响入口、调用链、生命周期、平台差异、协议、存储或 Mixin 边界。
-- 本地存在索引且涉及上述变化时，主 Agent 主动派出一个执行型子 Agent 维护受影响的导航，并提供改动摘要、涉及文件与符号、目标分支与提交、已完成的验证及维护范围。
+> 若本地不存在 `.XMagent-docs/README.md`，直接跳过本节不执行
+
+- 在交付前检查代码改动是否影响入口、调用链、生命周期、平台差异、协议、存储或 Mixin 边界
+- 本地存在索引且涉及上述变化时，派出一个执行型子 Agent 维护受影响的导航，并提供改动摘要、涉及文件与符号、目标分支与提交、已完成的验证及维护范围
+- `.XMagent-docs` 为独立 Git 仓库，维护时需要要求新建临时worktree工作，完成并确认无误后合并并清理临时worktree，禁止残留，禁止直接在main分支修改
 - 子 Agent 少量、局部核对相关源码后更新对应导航与实际核对的源码基线，返回修改文件、核对依据和未核验事项。
-- 主 Agent 轻量复查文档差异、关键源码锚点与基线；发现偏差时局部修正，再交付维护结果。子 Agent 不可用时，由主 Agent 按相同范围完成。
-- `.XMagent-docs` 为独立 Git 仓库，维护时分别检查主仓库与索引仓库的工作树和提交状态。
+- 子 Agent 完成返回后，主 Agent 轻量复查文档差异、关键源码锚点与基线；发现偏差时局部修正，再交付维护结果。子 Agent 不可用时，由主 Agent 按相同范围完成
