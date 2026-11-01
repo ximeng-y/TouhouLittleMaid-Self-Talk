@@ -21,36 +21,43 @@
 
 ## 架构（src/main/java/com/maidmod/selftalk）
 
-- 触发与调度：`SelfTalkHandler`（服务端状态机，事件驱动）/ `SelfTalkDispatcher`（派发闸门：立即派发 / 顺延入队 / 吞请求，单一入口）
-- 业务服务与回调：`MaidSelfTalkService`（自话）/ `MaidInterChatService`（互聊）/ `SelfTalkCallback`、`InterChatCallback`（两条链的回调，含 Tool 轮次与历史清理）
-- 提示词与上下文：`SelfTalkPrompts`（硬编码提示词与 tool policy 段）/ `SelfTalkContexts`（环境上下文、语言指令、自定义 Prompt 块）/ `SegmentTags`（段标签与玩家输入清洗）/ `SelfTalkProvenance`（来源指纹判定）
-- 历史与人设：`HistoryContextSession` / `KeywordPlanningSession`（历史、人设共用规划）/ `SelfTalkHistoryAssembler`（请求历史组装）/ `AutonomousChatHistory`（独立自动聊天档案）；`MaidPersonaRuntime` / `MaidPersonaConfig` / `MaidPersonaHost`（每女仆原版/四栏模式与召回），`PlayerPersonaChatSession` 接入玩家聊天，`persona/PersonaSplitService` 管理独立 AI 拆分任务
-- 预制复用：`SelfTalkReuseService`（身份指纹、匹配、入库凭据）/ `SelfTalkReuseStore`（世界 YAML 头 Markdown 库）/ `PrebuiltReuseParameters`（最低可用条数与使用概率的缺省、范围与合法性判定）/ `PrebuiltEntryCodec`（YAML 头 Markdown 编解码与诊断告警）/ `PrebuiltCustomEntries`、`PrebuiltDiagnostics`（custom/ 人类条目扫描与诊断报告）/ `SelfTalkTtsTranslationSession`、`SelfTalkTtsTranslationCallback`（命中后独立短翻译）/ `PrebuiltAudioStore`（预制压缩语音缓存：音频查找、压缩格式识别、声音标识键、待保存与淘汰清理）/ `PrebuiltAudioContext`（单请求音频上下文：缓存命中播放或真实合成捕获）；由 `MaidSelfTalkService` 在历史/人设规划前分流，`SelfTalkCallback` 统一交付
-- 存储与状态：`PlayerSettingsStore`（玩家设置统一读写口）/ `SelfTalkState`（服务端内存状态）/ `SelfTalkMigration`（1.1.2 存储迁移）
-  - neoforge 线另有 `SelfTalkAttachments`（Level 附件注册）；forge 线另有 `PlayerSettingsSavedData`（overworld SavedData）、`SelfTalkProvenanceHost`（无附件，经 mixin 挂接口）。forge 线迁移另有损坏名单保留（原始 NBT 原样透传、阻断该组迁移直到显式写入替换）与「显式接管」持久标记（防止显式清空后被旧值回灌），`PlayerSettingsMigrationTest` 覆盖
-- `client/`：仅客户端 —— `SelfTalkClothConfig`（管理员配置界面，反射注册）、`SelfTalkPlayerSettingsClient`（客户端设置缓存与保存确认）、`SelfTalkPlayerSettingsScreen`（玩家开关/Prompt 界面）、`EnvironmentContextPanel` / `SelfTalkReusePanel`（互斥浮层）、`MaidPersonaEditScreen` / `MaidPersonaSplitClient`（人设编辑与拆分候选）
-- `mixin/`：TLM 钩子（玩家 chat 入口标记、AIChatScreen 加 💬 按钮、LLMCallback、历史摘要、女仆 AI 数据；forge 线另有女仆指纹挂载）；`SelfTalkPrebuiltTtsMixin` 在 `MaidAIChatManager.tts` HEAD 做预制语音缓存分流（命中改播缓存、未命中冻结交付身份），`SelfTalkTtsMixin` 另捕获合成字节并做 TTS 现势重判
-- `network/`：双线协议版本串均为 `17`；NeoForge 使用 payload，Forge 使用 message；Forge 人设保存序号 20/21、AI 拆分 22/23、预制复用 Request/Set/Response 24/25/26。v16 复用 Set 新增 11 号操作码 `OP_PREBUILT_AUDIO`（「保存并复用预制语音」世界开关，仅管理员，value 0／1），Response 新增 `prebuiltAudioEnabled` 布尔字段。v17 将自定义 Prompt 存储上限提升到 2048、流上限提升到 2200，并将四栏人设由合计 4096 改为每栏各自 4096。版本演进见各分支 `SelfTalkPackets` 注册处注释（不向后兼容，版本串即协商拒连依据）
+- 触发与调度：`SelfTalkHandler` 处理服务端事件和状态，`SelfTalkDispatcher` 统一处理立即派发、顺延与冲突。
+- 业务与生命周期：`MaidSelfTalkService` / `MaidInterChatService` 组织请求，`SelfTalkCallback` / `InterChatCallback` 处理工具轮次与交付，`SelfTalkRequestToken` / `SelfTalkState` 管理请求身份、取消和清空。
+- 提示词与上下文：`SelfTalkPrompts` / `SelfTalkContexts` 组织提示词与环境信息，`SegmentTags` / `SelfTalkProvenance` 处理段标签和来源标记。
+- 历史：`HistoryContextSession` / `SelfTalkHistoryAssembler` 规划并组装请求历史，`AutonomousChatHistory` 保存独立自动聊天档案。
+- 人设：`MaidPersonaRuntime` 管理原版／四栏模式与召回，`PlayerPersonaChatSession` 接入玩家聊天，`persona/` 管理检索与 AI 拆分。
+- 预制复用：`SelfTalkReuseService` / `SelfTalkReuseStore` 管理匹配与库存，`PrebuiltAudioStore` 管理预制语音；由 `MaidSelfTalkService` 分流，`SelfTalkCallback` 统一交付。
+- 玩家设置：`PlayerSettingsStore` 为统一读写入口；NeoForge 使用 `SelfTalkAttachments`，Forge 使用 `PlayerSettingsSavedData`，旧档迁移见 `SelfTalkMigration`。
+- `client/`：设置、人设和复用界面，以及客户端配置与保存确认；Cloth Config 为可选的反射注册入口。
+- `mixin/`：接入 TLM 聊天、历史、工具与 TTS；注入清单见 `src/main/resources/maid_self_talk.mixins.json`。
+- `network/`：双线协议版本串均为 `17`，NeoForge 使用 payload，Forge 使用 message；注册、字段和版本演进见各分支 `SelfTalkPackets`。协议不向后兼容，修改报文结构时同步调整版本。
+
+## 开发约定
+
 - 代码注释与 git 提交信息使用中文；避免引入非必要依赖
+- 平台 API 与 TLM 接入按目标分支及目标版本依赖核对。
 
-## 关键约定与陷阱
+## 运行与存储边界
 
-- 配置文件：`config/maid_self_talk-common.toml`（COMMON 档，服务端权威、不自动下发，客户端各自读本地）
-- **配置热重载**：neoforge 线已实测确认——NeoForge ConfigFileWatcher 监视 config 目录，替换 toml 立即生效、无需重启。forge 线反编译 47.2.0 显示同样注册了 FileWatcher，但**尚未实机复验**，复验前不要断言任一侧；`/reload` 命令不重载配置文件（只重载资源/数据包）
-- 玩家设置（自话/互聊/睡觉安静/自定义 Prompt/Tool/环境上下文/历史模式/预制复用开关）双线均存于 **overworld 世界存档**（neoforge 走 Level 附件、forge 走 SavedData），不随玩家实体；任何维度读同一份。预制复用的匹配参数（最低可用条数／使用概率）自 issue #108 起也在此存档：服务器默认值、个人参数权限、跟随状态与个人值均按 overworld 保存，旧 TOML 的 `hitChancePercent`／`minEligibleEntries` 仅作旧兼容保留、运行时不读取。「保存并复用预制语音」世界开关（缺省关闭、仅管理员可改、关闭不清空已有缓存）同样在 overworld：neoforge `LEVEL_PREBUILT_AUDIO_ENABLED` 附件 / forge `prebuiltAudioEnabled` 字段。每只女仆的人设配置和自动聊天档案另存女仆 AI 数据 NBT，不经过玩家设置
-- forge 线针对 TLM 的 mixin 注入通常需显式 `remap=false`（FG6 Mixin AP 按 searge 解析 deobf 依赖方法会失败；TLM 类 prod 不混淆）；原版调用点应单独核对，如 `ItemFilmMixin` 内 `Level.addFreshEntity` 的 `@At` 在 Forge 为 `remap=true`。AIChatScreenMixin 继承 Screen 使 `this.addRenderableWidget(...)` 合法、随 reobf 重映射为 `m_142416_`；宿主方法是否 static 也须核对，编译不能代替运行时注入验证
-- **HTTP 400 陷阱**：自话请求发送前必须调用 `HistoryMessagesCheck.checkMessages(messages)` 清洗未配对的 tool 消息（与 TLM `tryToChat` 同构），否则 OpenAI 兼容 API 拒绝请求；清洗失败时放弃本次触发，绝不向上抛
-- **Tool 历史清理红线**：带工具调用的一轮结束后，`assistant(tool_calls)` 与其 `tool` 结果必须按本轮捕获的引用**成对**整批删除；不可改成按 role 扫全表删除（会误删玩家聊天路径的记录）。TLM 1.5.3 的 `checkMessages` 含 `removeUnpairedToolCalls`，会处理未配对的工具调用，但不能用发送前清洗代替本轮生命周期清理；无效配对仍可能导致 API 返回 400
-- 欢迎窗口计时必须用 `server.getTickCount()`（全局单调 tick）；各维度 `gameTime` 独立计数，跨维度比较会出现负差
-- **限流闸门**：欢迎语全局每秒最多 1 次（`rate_limit.maxTriggerPerSecond`）；自话全局每 5~8 秒（`rate_limit.selfTalkMinIntervalSeconds` / `selfTalkMaxIntervalSeconds`）放行 1 只，**互聊发起者派发共用同一自话闸门**（链式续接不走闸门）；被限流自话**不发请求**、随机退避 8~15 秒重试（玩家聊天框不会出现报错）；欢迎语不进入顺延队列、无随机退避，忙或闸门未放行时窗口内每 tick 重试，窗口过期则错过本次欢迎
-- **环境事件过滤**：死亡事件固定过滤为玩家、有主动物、其他女仆——「有主动物」必须按 `OwnableEntity` 判定（马/驴/骡等坐骑不继承 `TamableAnimal` 但同样有主人）；受伤事件必须用**实际掉血**事件（neo `LivingDamageEvent.Post` / forge `LivingDamageEvent`），更早的 incoming/hurt 事件在格挡成功或减免到 0 时仍会以正数触发
-- cloth-config 界面通过反射注册（`MaidSelfTalkMod.registerClothConfigIfPresent`），未装 cloth-config 时自动跳过、不影响核心功能
-- **预制复用边界**：实验性、玩家默认关闭，单只可继承/强制开/强制关；管理员 `PLAYER_OPTION_ENABLED` 关闸时保留已存偏好。匹配参数分世界级默认与受控玩家覆盖两层：服务器管理员（OP ≥ 2 或单人房主）可设最低可用条数、使用概率与「是否允许个人参数」；玩家在权限开放且取消跟随后才生效个人值，管理员撤回个人参数权限时清空取消跟随表、保留个人数值。入库 UUID 冲突最多重随机两次（共三次尝试），耗尽即放弃本次入库、不淘汰旧条目。只接入自话与欢迎语，不绕过原触发和限流；命中跳过历史/人设规划与正式生成，真实生成成功才追加库存，复用投放不重复入库
-- **预制库存与翻译**：机器条目位于 `<世界根>/data/maid_self_talk/prebuilt/generated/<source>/v1-<fingerprint>/entry-<UUID>.md`（YAML 头须声明 `bodyFormat: "fenced-v1"`、`## Chat`/`## TTS` 正文置于反引号围栏内，schemaVersion 4），按名称与生效人设指纹共享，欢迎语/自话分别限容（扫描加载后按当前容量重算裁剪），仍走 n-of-m 匹配；`createdAt` 缺失或空白时用文件最后修改时间补足并记告警（非标量仍拒绝，文件时间不可用时跳过该文件，绝不用当前时刻）；人类手写条目位于同层 `custom/_global|<女仆显示名>/{welcome,self-talk}/*.md`，只读、不淘汰、不回写 TTS，与机器条目共用同一格式门槛（有 YAML 头并声明 `bodyFormat: "fenced-v1"`，否则整条拒绝并写诊断、原件保留），env 全 key 严格相等（AND）匹配、缺 `chatLanguage` 为语言通配，entryId 由 UTF-8 相对路径派生；旧版 JSON 路径与 schema 3 整段 Markdown 不读取、不迁移、不删除（schema 3 只是停止参与匹配）。custom/ 扫描告警覆盖写出 `custom/_diagnostics.md`，有告警具名目录的女仆主人本会话首次上线时收到一条合并私信。SnakeYAML 2.2 经 jarJar 嵌套进产物 jar（FG6 的 jarJar 依赖必须写 maven 版本区间，`2.+` 这类 Gradle 写法构建期即报错）。与女仆 NBT、玩家设置隔离，overworld 存档及停服时写出（custom/ 只在扫描与停服写诊断报告）。匹配与渲染共用一次环境快照；命中后仅按需短翻译缓存 TTS，失败只投放上屏文本，取消不投放；翻译登记为在途计划并受清空/人设变更/卸载/超时取消约束。预制语音缓存由独立世界开关「保存并复用预制语音」控制（缺省关闭、仅管理员）：自动音频位于 `generated-audio/{generated|custom}/.../<voice-key>/<主名>.<lang>.mp3|.ogg` + 同名 `.json`，人工音频放在 custom 条目同目录、同主名、无语言后缀（只读、跨声音跨语言、MP3 优先）；只保存 MP3／Ogg Opus／Ogg Vorbis，WAV／裸 Opus 不写；复用命中先查人工音频再查当前声音与完整语言的自动音频，命中直接缓存播放、不翻译不调供应商、不重复入库；真实合成仅在 `appendEntry` 成功（非 null）后按最终条目身份结算，未命中继续原翻译/合成链；待保存音频在 overworld 存档与停服时临时文件 + 原子替换写出，淘汰条目在 Markdown 删除成功后清理其全部声音与语言音频；系统 TTS／Player2 不参与缓存
+- COMMON 配置为 `config/maid_self_talk-common.toml`，服务端权威，不自动下发；客户端本地等待气泡显示由 `client/SelfTalkClientConfig` 的 CLIENT 配置控制。
+- 玩家设置、预制复用匹配参数和预制语音世界开关统一存于 overworld，所有维度使用同一份；每只女仆的人设配置与自动聊天档案存于女仆 AI 数据 NBT。
+- 预制库存与音频位于 `<世界根>/data/maid_self_talk/prebuilt/`，与玩家设置、女仆 NBT 分开管理。
+- 欢迎窗口和跨维度调度统一使用 `server.getTickCount()`。
+- 自话与互聊发起者共用全局限流闸门，链式续接绕过该闸门；欢迎语使用独立闸门，在窗口内等待空闲和额度，不进入顺延队列。具体间隔见 `Config`。
+- 死亡事件仅记录玩家、有主动物和其他女仆；有主动物按 `OwnableEntity` 判定。受伤事件使用实际掉血事件：NeoForge 为 `LivingDamageEvent.Post`，Forge 为 `LivingDamageEvent`。
 
-## Code Navigation
+## 代码导航与索引维护
 
-- 如果本地存在 `.XMagent-docs/README.md`，优先按需读取索引。
-- 索引不存在时，改用公开架构文档、符号搜索和源码检索。
-- 不要因为索引缺失而停止任务。
-- 本地索引为独立 Git 仓库，不随主仓库同步；入口、调用链、协议、存储或 Mixin 边界变动后，应同步受影响导航并记录实际核对的双线源码基线。
+### 开始代码任务
+
+- 先检查 `.XMagent-docs/README.md`。存在时先读该入口，按任务路由选择一个相关源码入口或模块／流程文档，再局部核对目标分支源码。
+- 索引不存在时，直接使用仓库文档、符号搜索和源码检索。
+- 索引以实际目标分支源码为准；核对其记录的分支与提交，区分主线和未合并实施分支。历史决策与平台踩坑按需检索可用的项目记忆。
+
+### 代码改动后
+
+- 主 Agent 在交付前检查代码改动是否影响入口、调用链、生命周期、平台差异、协议、存储或 Mixin 边界。
+- 本地存在索引且涉及上述变化时，主 Agent 主动派出一个执行型子 Agent 维护受影响的导航，并提供改动摘要、涉及文件与符号、目标分支与提交、已完成的验证及维护范围。
+- 子 Agent 少量、局部核对相关源码后更新对应导航与实际核对的源码基线，返回修改文件、核对依据和未核验事项。
+- 主 Agent 轻量复查文档差异、关键源码锚点与基线；发现偏差时局部修正，再交付维护结果。子 Agent 不可用时，由主 Agent 按相同范围完成。
+- `.XMagent-docs` 为独立 Git 仓库，维护时分别检查主仓库与索引仓库的工作树和提交状态。
