@@ -7,7 +7,10 @@ logs/
 
 # Agent 配置目录（本地维护，不纳入版本管理）
 .claude/
-.agents/
+.agents/*
+!.agents/github/
+.agents/github/*
+!.agents/github/PR.md
 
 # ZCode 会话计划目录（本地维护，不纳入版本管理）
 .zcode/
