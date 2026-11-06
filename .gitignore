@@ -7,7 +7,10 @@ logs/
 
 # Agent 配置目录（本地维护，不纳入版本管理）
 .claude/
-.agents/
+.agents/*
+!.agents/github/
+.agents/github/*
+!.agents/github/PR.md
 
 # ZCode 会话计划目录（本地维护，不纳入版本管理）
 .zcode/
@@ -17,11 +20,6 @@ logs/
 # Gradle 构建缓存与产物
 .gradle/
 build/
-
-# 编译工具（gradle wrapper 等二进制工具不纳入版本管理）
-gradle/wrapper/
-gradlew
-gradlew.bat
 
 # 游戏运行实例（dev 环境生成的客户端/服务端实例目录）
 run/

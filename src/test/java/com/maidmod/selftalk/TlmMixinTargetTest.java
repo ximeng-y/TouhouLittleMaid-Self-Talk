@@ -37,7 +37,7 @@ import java.util.regex.Pattern;
  * 本类期望值；neoforge 线的对应自检差异仅在 {@code lambda$onPlaySoundLocal} 的序号。
  * <p>
  * 覆盖边界：覆盖承载 lambda 绑定的四个宿主类（TTSCallback、MaidAIChatManager、LLMCallback、
- * AIChatScreen），外加 LLMCallback 内两处历史写入 {@code @Redirect} 的调用点方法名
+ * AIChatScreen），外加 LLMCallback 内两处历史写入注入的调用点方法名
  * （{@code addAssistantHistory}/{@code addToolHistory}，调用点 owner 为 MaidAIChatManager）
  * 与 SettingEditScreen 的 {@code drawMaid}/{@code saveConfig}/{@code mouseReleased} 命名绑定、
  * AIChatScreen 常量池里的 SettingEditScreen 构造引用（类引用 + 构造描述符，类级粒度）。
