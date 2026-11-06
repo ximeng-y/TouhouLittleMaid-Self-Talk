@@ -4,6 +4,8 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.response.ResponseChat;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.maidmod.selftalk.InterChatCallback;
 import com.maidmod.selftalk.MaidSelfTalkService;
 import com.maidmod.selftalk.PlayerChatRequest;
@@ -14,7 +16,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.net.http.HttpRequest;
@@ -25,10 +26,10 @@ import java.net.http.HttpRequest;
  * 仅释放本回调持有的真实玩家登记；未登记的辅助请求不参与计数。
  * 成功转失败或重复结束只接收一次，不依赖回调子类排除名单。
  * <p>
- * 同时承接<b>最终自话回复的历史写入切断</b>：窄范围重定向
+ * 同时承接<b>最终自话回复的历史写入切断</b>：窄范围调用点包装
  * {@code addAssistantHistory(String)}，只在宿主是 {@link SelfTalkCallback} 时跳过写入。
- * 普通玩家回调原样调用；TLM 的空白回复判定、TTS、气泡、主人聊天栏输出与错误处理全部保留
- * （它们都在被重定向的这一行之后，或由本类其它注入点之外的逻辑负责）。
+ * 普通玩家回调沿包装链原样放行；TLM 的空白回复判定、TTS、气泡、主人聊天栏输出与错误处理全部保留
+ * （它们都在该调用点之后，或由本类其它注入点之外的逻辑负责）。
  */
 @Mixin(LLMCallback.class)
 public abstract class LLMCallbackMixin implements PlayerChatRequestHost {
@@ -61,14 +62,15 @@ public abstract class LLMCallbackMixin implements PlayerChatRequestHost {
      * 自话／欢迎语的独立记录在回调的主线程收尾里直接构造（原 {@code ResponseChat.toString()} 形态），
      * 因此这里跳过不影响模型侧可见内容，只切断 TLM 的待压缩历史。
      */
-    @Redirect(method = "onSuccess",
+    @WrapOperation(method = "onSuccess",
             at = @At(value = "INVOKE",
                     target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/manager/entity/MaidAIChatManager;addAssistantHistory(Ljava/lang/String;)V"))
-    private void maid_self_talk$skipSelfTalkHistory(MaidAIChatManager chatManager, String message) {
+    private void maid_self_talk$skipSelfTalkHistory(
+            MaidAIChatManager chatManager, String message, Operation<Void> original) {
         if ((Object) this instanceof SelfTalkCallback) {
             return;
         }
-        chatManager.addAssistantHistory(message);
+        original.call(chatManager, message);
     }
 
     @Unique
