@@ -179,7 +179,7 @@ public final class SelfTalkDispatcher {
         if (PersonaSplitService.isSplitting(maid.getUUID())) {
             return true;
         }
-        return state.selfTalkPending || state.interChatPending || state.playerChatCount > 0
+        return state.selfTalkPending || state.interChatPending || state.playerChats.count() > 0
                 || state.isPlanning();
     }
 

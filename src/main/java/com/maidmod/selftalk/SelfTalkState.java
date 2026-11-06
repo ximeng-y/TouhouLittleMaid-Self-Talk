@@ -49,6 +49,7 @@ public final class SelfTalkState {
             // 在途规划与会话一起结束：状态条目没了，任何迟到的规划回调都不该再动游戏状态。
             // 先摘掉登记再取消，取消过程自身（或它触发的清理）不会再往已移除的状态里写登记
             state.cancelAllPlans();
+            state.playerChats.retire();
             state.clearGeneration.retire();
         }
     }
@@ -188,13 +189,8 @@ public final class SelfTalkState {
         public SelfTalkCallback currentSelfTalkCallback = null;
         /** selfTalkPending 置位时的服务器 tick（-1 = 未置位），用于超时强制复位防卡死 */
         public long selfTalkPendingSinceTick = -1;
-        /**
-         * 在途玩家 chat 数（TLM 无并发护栏，玩家可连发多条 chat；
-         * 计数而非布尔，避免先完成的回复提前清掉标记导致自话与在途 chat 交错写历史）
-         */
-        public int playerChatCount = 0;
-        /** playerChatCount 最近一次自增时的服务器 tick（-1 = 未置位），用于超时强制复位防卡死 */
-        public long playerChatSinceTick = -1;
+        /** 玩家在途登记表：按请求身份配对，数量与最近激活 tick 统一由登记表维护。 */
+        public final PlayerChatRequest.Registry playerChats = new PlayerChatRequest.Registry();
         /** 当前自话窗口内已保留的独立记录（按时间序），用于原「到阈值仅留最新一条」规则 */
         public final List<AutonomousChatRecord> windowSelfTalkMsgs = new ArrayList<>();
         /** 本女仆已欢迎过的玩家 */
