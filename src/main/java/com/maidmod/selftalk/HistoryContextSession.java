@@ -165,6 +165,13 @@ public final class HistoryContextSession {
     private boolean dispatched;
     /** 本次会话是否已被作废（作废后不再产生任何派发/纠正/召回回报；幂等标记） */
     private boolean cancelled;
+    /**
+     * 本会话在状态表中的自动准备登记所属的状态（null = 未登记或已摘除）。
+     * <p>
+     * 保存实际登记的那个 {@link SelfTalkState.State} 引用而不是每次按女仆 ID 现查：
+     * 摘除不得创建状态，也不能误碰女仆后来重建的新状态。
+     */
+    private SelfTalkState.State preparationOwner;
     /** 本次会话的历史检索结果是否已回报（回报口只被调用一次） */
     private boolean historyReported;
     /**
@@ -208,18 +215,51 @@ public final class HistoryContextSession {
      * <p>
      * 规划会话的取消不回调消费者，因此作废后不会再有正式派发、纠正或召回回报；
      * 迟到结果由规划回调自身的作废标记挡下。幂等：第二次调用不再重复终止。
+     * <p>
+     * 作废标记持久保留：关闭总开关作废的会话即使随后重新开启也不会复活——准备链条上
+     * 每一处许可判断都先看这个标记。
      */
     void cancel() {
         if (cancelled) {
             return;
         }
         cancelled = true;
+        releasePreparation();
         if (planning != null) {
             planning.cancel();
             planning = null;
         }
         if (onCancelled != null) {
             onCancelled.run();
+        }
+    }
+
+    /**
+     * 登记本会话为「自动回答准备期」（服务端主线程，在任何同步/异步准备动作之前）。
+     * <p>
+     * 覆盖索引构建、关键词规划、纠正与资料选择整段：这些阶段里都还没有正式请求，
+     * 关闭总开关或状态移除时必须能整体作废。
+     */
+    private void registerPreparation() {
+        SelfTalkState.State state = SelfTalkState.peek(maid.getId());
+        if (state == null) {
+            return;
+        }
+        preparationOwner = state;
+        state.registerAutomaticPreparation(this);
+    }
+
+    /**
+     * 摘除准备登记（幂等）。
+     * <p>
+     * 正式生成进入派发后调用：此后本会话不再属于「待生成准备」，关闭总开关不能借它
+     * 取消当前正式回答。摘除不创建状态、也不影响同一女仆后来创建的新状态。
+     */
+    private void releasePreparation() {
+        SelfTalkState.State owner = preparationOwner;
+        preparationOwner = null;
+        if (owner != null) {
+            owner.unregisterAutomaticPreparation(this);
         }
     }
 
@@ -240,6 +280,14 @@ public final class HistoryContextSession {
      * @return 受理结果：同步派发成功／异步流程已受理／同步派发失败，见 {@link StartOutcome}
      */
     public StartOutcome start() {
+        // 登记之前先复核许可：没有许可就不启动任何准备（也不留下准备登记）
+        if (!allowed()) {
+            cancel();
+            return StartOutcome.FAILED;
+        }
+        // 登记必须在任何同步或异步准备动作之前：索引构建、关键词规划、纠正与资料选择
+        // 都在这之后发生，关闭总开关时才能整体作废这一段准备期
+        registerPreparation();
         switch (mode) {
             case FULL, COMPACT -> {
                 if (needsPersonaRecall()) {
@@ -297,7 +345,9 @@ public final class HistoryContextSession {
         HistoryRetrievalCache.indexFor(maid, fullHistory, result -> {
             // 索引可能是在文本执行器线程算完再回主线程的；本回调统一在主线程执行
             if (!allowed()) {
+                // 无许可（含总开关已关闭）：经取消收束并摘除准备登记，迟到的索引结果不再导出发言
                 syncOutcome = StartOutcome.FAILED;
+                cancel();
                 return;
             }
             boolean historyNeeded = result.hasSearchableHistory();
@@ -367,6 +417,8 @@ public final class HistoryContextSession {
                            boolean personaEnabled, HistoryRetrievalCache.Result result) {
         planning = null;
         if (!allowed()) {
+            // 规划迟到且已无许可（插话中断、请求作废、总开关关闭）：整体收束并摘除准备登记
+            cancel();
             return;
         }
         List<LLMMessage> recalledBlocks = List.of();
@@ -587,16 +639,22 @@ public final class HistoryContextSession {
     }
 
     private boolean allowed() {
-        return !dispatched && !cancelled && maid.isAlive() && (stillAllowed == null || stillAllowed.get());
+        return !dispatched && !cancelled && maid.isAlive()
+                && Config.ENABLED.get()
+                && (stillAllowed == null || stillAllowed.get());
     }
 
     /** 正式派发（服务端主线程）：派发前再复核一次许可，超时或插话中断的迟到结果不会继续发请求 */
     private StartOutcome deliver(List<LLMMessage> messages) {
         if (!allowed()) {
+            // 无许可出口同样收束：作废会话并摘除准备登记，不留待生成登记
             settle(false);
+            cancel();
             return StartOutcome.FAILED;
         }
         dispatched = true;
+        // 进入正式派发即不再是「待生成准备」：此后关闭总开关不能经本会话取消当前正式回答
+        releasePreparation();
         if (dispatcher.dispatch(messages)) {
             settle(true);
             return StartOutcome.DISPATCHED;

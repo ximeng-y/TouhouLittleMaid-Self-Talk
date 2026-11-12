@@ -304,6 +304,9 @@ public class InterChatCallback extends LLMCallback {
         if (!(nextSpeaker.level() instanceof ServerLevel level)) { endChainAndComplete(null); return; }
         // 热重载下中途关闭互聊时立即终止在途链
         if (!Config.INTER_CHAT_ENABLED.get()) { endChainAndComplete(null); return; }
+        // 总开关关闭：当前回复照常交付，但不再请求下一只女仆回答——按正常终态结束本链，
+        // 不走取消路径（本轮已交付，请求登记与链在对锁解除后一并正常释放）
+        if (!Config.ENABLED.get()) { endChainAndComplete(lastSpeaker); return; }
         // 链长护栏：本条消息已是链上第 chainRound 条，达到上限即结束本次互聊，
         // 防止连续概率配到 1.0 等极端配置下无限往返消耗 token
         if (chainRound >= Config.INTER_CHAT_MAX_CHAIN_ROUNDS.get()) { endChainAndComplete(null); return; }
