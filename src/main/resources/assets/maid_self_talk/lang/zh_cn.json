@@ -1,8 +1,8 @@
 {
   "config.maid_self_talk.title": "女仆自言自语",
   "config.maid_self_talk.title.tooltip": "本 mod 的总入口：自话、互聊、环境感知与身份注入。",
-  "config.maid_self_talk.enabled": "启用自言自语",
-  "config.maid_self_talk.enabled.tooltip": "总开关。开启后女仆才会自言自语/打招呼。",
+  "config.maid_self_talk.enabled": "启用自动聊天",
+  "config.maid_self_talk.enabled.tooltip": "控制自言自语、登录欢迎语和女仆互聊。关闭后不再发起新的自动聊天，未发出的排队请求被丢弃，已经发出的一轮正常结束；玩家手动聊天的提示词增强不受影响。",
   "config.maid_self_talk.player_option_enabled": "允许玩家自定义配置",
   "config.maid_self_talk.player_option_enabled.tooltip": "玩家能否单独配置自己的女仆（自言自语、互聊、自定义 Prompt、Tool 调用）。关闭后玩家设置项置灰，自话/互聊视为启用，自定义 Prompt 不注入、Tool 调用不开启。",
   "config.maid_self_talk.tool_call_enabled": "启用 Tool 调用",

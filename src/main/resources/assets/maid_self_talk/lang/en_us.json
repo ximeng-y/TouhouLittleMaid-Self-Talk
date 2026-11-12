@@ -1,8 +1,8 @@
 {
   "config.maid_self_talk.title": "Maid Self-Talk",
   "config.maid_self_talk.title.tooltip": "Entry point for this mod: self-talk, inter-chat, environment awareness and identity injection.",
-  "config.maid_self_talk.enabled": "Enable Self-Talk",
-  "config.maid_self_talk.enabled.tooltip": "Master switch. Maids will only talk to themselves / greet when enabled.",
+  "config.maid_self_talk.enabled": "Enable Automatic Chat",
+  "config.maid_self_talk.enabled.tooltip": "Controls self-talk, login greetings and maid inter-chat. When off, no new automatic chats start; queued requests that were not sent are dropped, while a reply already sent runs to completion. Player chat prompt enhancements are unaffected.",
   "config.maid_self_talk.player_option_enabled": "Allow Player Customization",
   "config.maid_self_talk.player_option_enabled.tooltip": "Whether players can individually configure their maids (self-talk, inter-chat, custom prompt, tool calls). When off, the player options are greyed out; self-talk/inter-chat are treated as enabled, custom prompts are not injected and tool calls stay off.",
   "config.maid_self_talk.tool_call_enabled": "Enable Tool Calls",

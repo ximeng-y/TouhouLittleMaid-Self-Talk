@@ -44,12 +44,12 @@ public final class AutonomousChatHistoryLifecycleTest {
         LLMMessage second = message("第二句", 2);
         LLMMessage third = message("第三句", 3);
 
-        history.trackTlmEnqueue(queue, first);
-        history.trackTlmEnqueue(queue, second);
+        history.trackTlmEnqueue(queue, () -> queue.add(first));
+        history.trackTlmEnqueue(queue, () -> queue.add(second));
         check("淘汰前两条都已登记", history.seqOf(first) != null && history.seqOf(second) != null);
         check("淘汰前队列满额", queue.size() == 2);
 
-        history.trackTlmEnqueue(queue, third);
+        history.trackTlmEnqueue(queue, () -> queue.add(third));
         check("容量淘汰后旧消息旁路条目被修剪", history.seqOf(first) == null);
         check("仍在队列的消息保留条目",
                 history.seqOf(second) != null && history.seqOf(third) != null);
@@ -58,7 +58,7 @@ public final class AutonomousChatHistoryLifecycleTest {
 
         // 修剪不回收顺序号：再入队的新消息必须拿到更大的号
         LLMMessage fourth = message("第四句", 4);
-        history.trackTlmEnqueue(queue, fourth);
+        history.trackTlmEnqueue(queue, () -> queue.add(fourth));
         check("修剪后顺序号不回退", history.seqOf(fourth) > history.seqOf(third));
         check("再次淘汰只清最旧", history.seqOf(second) == null
                 && history.seqOf(third) != null && history.seqOf(fourth) != null);
@@ -72,7 +72,7 @@ public final class AutonomousChatHistoryLifecycleTest {
         for (int i = 0; i < 4; i++) {
             LLMMessage message = message("压缩前 " + i, i);
             messages.add(message);
-            history.trackTlmEnqueue(queue, message);
+            history.trackTlmEnqueue(queue, () -> queue.add(message));
         }
         // 模拟 completeHistorySummary 成功路径：从队尾（最旧端）逐条删除快照里的消息
         queue.getDeque().pollLast();
@@ -95,7 +95,7 @@ public final class AutonomousChatHistoryLifecycleTest {
         AutonomousChatHistory history = new AutonomousChatHistory(null);
         CappedQueue<LLMMessage> queue = new CappedQueue<>(8);
         LLMMessage before = message("清空前", 10);
-        history.trackTlmEnqueue(queue, before);
+        history.trackTlmEnqueue(queue, () -> queue.add(before));
         Long beforeSeq = history.seqOf(before);
         check("清空前条目存在", beforeSeq != null);
 
@@ -104,7 +104,7 @@ public final class AutonomousChatHistoryLifecycleTest {
         check("清空后旧条目消失", history.seqOf(before) == null);
 
         LLMMessage after = message("清空后", 11);
-        history.trackTlmEnqueue(queue, after);
+        history.trackTlmEnqueue(queue, () -> queue.add(after));
         check("清空后新消息获得更大顺序号", history.seqOf(after) > beforeSeq);
     }
 
@@ -117,8 +117,8 @@ public final class AutonomousChatHistoryLifecycleTest {
         LLMMessage second = new LLMMessage(Role.USER, "重复的一句", 42, null, null);
         check("构造前提：两条消息 equals 相等", first.equals(second) && first != second);
 
-        history.trackTlmEnqueue(queue, first);
-        history.trackTlmEnqueue(queue, second);
+        history.trackTlmEnqueue(queue, () -> queue.add(first));
+        history.trackTlmEnqueue(queue, () -> queue.add(second));
         Long firstSeq = history.seqOf(first);
         Long secondSeq = history.seqOf(second);
         check("相同正文的不同对象各自登记", firstSeq != null && secondSeq != null);

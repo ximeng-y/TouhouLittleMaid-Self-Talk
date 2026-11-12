@@ -93,9 +93,6 @@ public final class SelfTalkHandler {
     }
 
     private static void tick(EntityMaid maid) {
-        if (!Config.ENABLED.get()) {
-            return;
-        }
         if (!(maid.level() instanceof ServerLevel level)) {
             return;
         }
@@ -163,6 +160,11 @@ public final class SelfTalkHandler {
         // 不清已有顺延队列、不获取欢迎/自话额度、不新建互聊链、不推进触发冷却——
         // 拆分结束后由正常 tick 恢复欢迎窗口检查与顺延队列处理
         if (PersonaSplitService.isSplitting(maid.getUUID())) {
+            return;
+        }
+        // 总开关关闭：只在超时维护与清扫之后、欢迎和自动触发之前返回。
+        // 关闭期间不新增自动触发；未发送的顺延队列就地丢弃（丢弃与准备作废由服务端 END tick 统一执行）
+        if (!Config.ENABLED.get()) {
             return;
         }
         // AI 前置门槛
@@ -361,11 +363,34 @@ public final class SelfTalkHandler {
     /**
      * 全局服务端 tick 扫描（END 相位）：AI 拆分人设任务的超时兜底（6000 tick，服务器 tick 计时）。
      * 拆分任务不挂女仆 tick（结果与女仆 tick 无关），只能靠全局扫描兜底挂死任务。
+     * <p>
+     * 总开关关闭时，另在此遍历现有状态条目的快照：作废各自的自动准备期、丢弃各自的未发送队列。
+     * 这项清理<b>不依赖女仆是否正在收到实体 tick</b>，因此关闭后即使女仆所在区块无 tick，
+     * 残留准备与队列也会被收掉。只按服务端 tick 感知开关，不引入跨线程配置取消流程。
      */
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase == TickEvent.Phase.END) {
             PersonaSplitService.onServerTick(event.getServer());
+            if (!Config.ENABLED.get()) {
+                discardAutomaticPreparationsAndQueues();
+            }
+        }
+    }
+
+    /** 关闭总开关后的统一清理：作废全部自动准备期并丢弃未发送队列（服务端主线程） */
+    private static void discardAutomaticPreparationsAndQueues() {
+        // 先取快照：作废过程会回摘登记，直接遍历会破坏 HashMap 的迭代
+        List<Map.Entry<Integer, SelfTalkState.State>> snapshot =
+                new ArrayList<>(SelfTalkState.entrySet());
+        for (Map.Entry<Integer, SelfTalkState.State> entry : snapshot) {
+            try {
+                SelfTalkDispatcher.discardQueuedRequests(entry.getKey());
+                entry.getValue().discardAutomaticPreparations();
+            } catch (Throwable t) {
+                MaidSelfTalkMod.LOGGER.warn("Failed to discard automatic chat state for maid {}",
+                        entry.getKey(), t);
+            }
         }
     }
 
