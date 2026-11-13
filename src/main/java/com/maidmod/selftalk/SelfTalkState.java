@@ -49,6 +49,7 @@ public final class SelfTalkState {
             // 在途规划与会话一起结束：状态条目没了，任何迟到的规划回调都不该再动游戏状态。
             // 先摘掉登记再取消，取消过程自身（或它触发的清理）不会再往已移除的状态里写登记
             state.cancelAllPlans();
+            state.discardAutomaticPreparations();
             state.playerChats.retire();
             state.clearGeneration.retire();
         }
@@ -231,6 +232,53 @@ public final class SelfTalkState {
          * 见 {@link PendingPlan}：既是忙判定的一部分，也是超时／作废时能真正取消的抓手。
          */
         public final List<PendingPlan> pendingPlans = new ArrayList<>();
+        /**
+         * 自动回答准备期的登记表：只追踪自话／欢迎语／互聊在<b>正式生成之前</b>的
+         * {@link HistoryContextSession}，供关闭总开关与状态移除时整体作废。
+         * <p>
+         * 与 {@link #pendingPlans} 分开：那份登记是关键词规划本身（TTS 翻译也登记在那里且
+         * {@code playerChat=false}），按它批量取消会连已经进入交付的翻译一起废掉；
+         * 而关键词请求之前还有异步历史索引阶段，此时规划尚未登记。这里按会话身份登记，
+         * 覆盖整个准备期。这份集合<b>不参与</b>忙判定，也不改变既有规划超时。
+         */
+        public final List<HistoryContextSession> automaticPreparations = new ArrayList<>();
+
+        /**
+         * 登记一个进入自动回答准备期的会话（服务端主线程；同一会话重复登记无副作用）。
+         * 登记后才能在关闭总开关或状态移除时被整体作废。
+         */
+        public void registerAutomaticPreparation(HistoryContextSession session) {
+            if (session != null && !automaticPreparations.contains(session)) {
+                automaticPreparations.add(session);
+            }
+        }
+
+        /** 按对象身份摘除准备登记（会话自行收束时调用；不属于本状态时无副作用） */
+        public void unregisterAutomaticPreparation(HistoryContextSession session) {
+            automaticPreparations.remove(session);
+        }
+
+        /**
+         * 作废全部自动回答准备：先整体摘除登记，再逐个走会话自己的 {@link HistoryContextSession#cancel()}。
+         * 取消过程中的回摘因此是空操作；正式生成已派发的会话不在本表内，当前轮不受影响。
+         *
+         * @return 实际作废的会话数
+         */
+        public int discardAutomaticPreparations() {
+            if (automaticPreparations.isEmpty()) {
+                return 0;
+            }
+            List<HistoryContextSession> targets = new ArrayList<>(automaticPreparations);
+            automaticPreparations.clear();
+            for (HistoryContextSession session : targets) {
+                try {
+                    session.cancel();
+                } catch (Throwable t) {
+                    MaidSelfTalkMod.LOGGER.warn("Failed to discard an automatic chat preparation", t);
+                }
+            }
+            return targets.size();
+        }
         /** 人设索引缓存对应的配置快照（null = 尚无缓存）；配置不同即重建，见 {@link MaidPersonaRuntime} */
         public MaidPersonaConfig personaIndexConfig = null;
         /** 与 {@link #personaIndexConfig} 配套的人设索引（不持久化，随状态移除释放） */

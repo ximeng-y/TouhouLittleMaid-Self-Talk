@@ -87,24 +87,35 @@ public final class AutonomousChatHistory {
     // ===== 顺序号与 TLM 旁路登记 =====
 
     /**
-     * 分配顺序号并完成 TLM 历史入队（四个 {@code add*History} 的唯一入口）。
+     * 完成 TLM 历史入队并按实际入队结果补顺序号（四个 {@code add*History} 的唯一入口）。
      * <p>
-     * 分配、入队与旁路登记在同一把锁内：若分成两步，玩家回调线程与服务端线程交错时
-     * 会出现「顺序号与队内实际次序相反」，混合展示就会错序。
+     * 入队动作由调用方以 {@code enqueue} 传入并在本锁内执行一次：分配、入队与旁路登记必须在同一把锁内，
+     * 若分成两步，玩家回调线程与服务端线程交错时会出现「顺序号与队内实际次序相反」，混合展示就会错序。
+     * 补号在入队之后按队列旧到新的实际次序进行：只有真正进了队列的消息才登记，
+     * 已登记的对象保留原号（不因再次经过入口而重排）。
      * <p>
      * 入队本身可能就是一次容量淘汰（{@code CappedQueue.add} 满时先 {@code pollLast} 再插入），
      * 被淘汰的旧消息从此不会再出现在任何请求或展示里，却仍被旁路表强持有；因此在同一把锁内、
      * 入队完成后立刻按当前队列身份集合修剪，死引用最多只存活到下一次入队。
+     * 原入队动作抛出的异常原样向外传递，不做吞掉或替代。
      */
-    public void trackTlmEnqueue(CappedQueue<LLMMessage> queue, LLMMessage message) {
-        if (message == null) {
+    public void trackTlmEnqueue(CappedQueue<LLMMessage> queue, Runnable enqueue) {
+        if (enqueue == null) {
             return;
         }
         synchronized (lock) {
-            orderByMessage.put(message, nextSeq++);
+            enqueue.run();
             if (queue != null) {
-                queue.add(message);
-                pruneOrderMetadataLocked(queue.getDeque());
+                Deque<LLMMessage> deque = queue.getDeque();
+                // 队列头部最新（CappedQueue.add 用 offerFirst），逆序迭代即旧到新
+                for (java.util.Iterator<?> it = deque.descendingIterator(); it.hasNext(); ) {
+                    Object element = it.next();
+                    // 只登记实际的消息对象；其他元素原样留在队列里，不强制转换
+                    if (element instanceof LLMMessage message && !orderByMessage.containsKey(message)) {
+                        orderByMessage.put(message, nextSeq++);
+                    }
+                }
+                pruneOrderMetadataLocked(deque);
             }
         }
     }

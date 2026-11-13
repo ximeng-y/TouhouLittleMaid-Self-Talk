@@ -4,6 +4,8 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.openai.response.ToolCall;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.maidmod.selftalk.InterChatCallback;
 import com.maidmod.selftalk.SelfTalkCallback;
 import com.maidmod.selftalk.SelfTalkWaitingBubbles;
@@ -11,7 +13,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Coerce;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
@@ -61,7 +62,7 @@ import java.util.concurrent.CompletableFuture;
  * <p>
  * 兼容边界：{@code lambda$executeSingleToolCall$5}／{@code lambda$onFunctionCall$2} 对应 TLM
  * {@code 1.5.3-forge+mc1.20.1}（Modrinth）的字节码。lambda 序号由编译器按宿主类内出现顺序生成，
- * 升级或更换 TLM 构建可能漂移，须同步复核本类 method 绑定与两处 @Redirect 目标
+ * 升级或更换 TLM 构建可能漂移，须同步复核本类 method 绑定与两处历史写入包装目标
  * （{@code com.maidmod.selftalk.TlmMixinTargetTest} 已在 CI 校验）。
  */
 @Mixin(LLMCallback.class)
@@ -165,47 +166,49 @@ public abstract class InterChatToolLifecycleMixin {
 
     /**
      * {@code onFunctionCall} 内写入的 {@code assistant(tool_calls)} 历史：本 mod 宿主跳过。
-     * 请求内的 {@code messages.add(assistantChat(...))} 不受影响（在重定向的这一行之外），
+     * 请求内的 {@code messages.add(assistantChat(...))} 不受影响（在包装的这一行之外），
      * 因此工具调用配对与后续轮次照常工作。
      */
-    @Redirect(method = "onFunctionCall", remap = false,
+    @WrapOperation(method = "onFunctionCall", remap = false,
             at = @At(value = "INVOKE",
                     target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/manager/entity/MaidAIChatManager;addAssistantHistory(Ljava/lang/String;Ljava/util/List;)V"))
     private void maid_self_talk$skipToolCallHistory(MaidAIChatManager chatManager, String message,
-                                                     List<ToolCall> toolCalls) {
+                                                    List<ToolCall> toolCalls, Operation<Void> original) {
         if (maid_self_talk$isAutonomousHost()) {
             return;
         }
-        chatManager.addAssistantHistory(message, toolCalls);
+        original.call(chatManager, message, toolCalls);
     }
 
     /**
      * {@code addToolResult} 内写入的 tool 结果历史：本 mod 宿主跳过。
      * 请求内的 {@code messages.add(toolChat(...))} 不受影响。
      */
-    @Redirect(method = "addToolResult", remap = false,
+    @WrapOperation(method = "addToolResult", remap = false,
             at = @At(value = "INVOKE",
                     target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/manager/entity/MaidAIChatManager;addToolHistory(Ljava/lang/String;Ljava/lang/String;)V"))
-    private void maid_self_talk$skipToolResultHistory(MaidAIChatManager chatManager, String result, String toolId) {
+    private void maid_self_talk$skipToolResultHistory(MaidAIChatManager chatManager, String result, String toolId,
+                                                      Operation<Void> original) {
         if (maid_self_talk$isAutonomousHost()) {
             return;
         }
-        chatManager.addToolHistory(result, toolId);
+        original.call(chatManager, result, toolId);
     }
 
     /**
      * 子 agent 分支（{@code lambda$executeSingleToolCall$5}）直接写入的占位 tool 历史：本 mod 宿主跳过。
-     * 该分支还负责把返回值换成新的 {@code ToolBatchResult}，因此只重定向写入行、
+     * 该分支还负责把返回值换成新的 {@code ToolBatchResult}，因此只包装写入调用、
      * 不动方法本身的返回结构。
      */
-    @Redirect(method = "lambda$executeSingleToolCall$5", remap = false,
+    @WrapOperation(method = "lambda$executeSingleToolCall$5", remap = false,
             at = @At(value = "INVOKE",
                     target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/manager/entity/MaidAIChatManager;addToolHistory(Ljava/lang/String;Ljava/lang/String;)V"))
-    private void maid_self_talk$skipSubAgentToolHistory(MaidAIChatManager chatManager, String result, String toolId) {
+    private void maid_self_talk$skipSubAgentToolHistory(MaidAIChatManager chatManager, String result, String toolId,
+                                                        Operation<Void> original) {
         if (maid_self_talk$isAutonomousHost()) {
             return;
         }
-        chatManager.addToolHistory(result, toolId);
+        original.call(chatManager, result, toolId);
     }
 
     /**
