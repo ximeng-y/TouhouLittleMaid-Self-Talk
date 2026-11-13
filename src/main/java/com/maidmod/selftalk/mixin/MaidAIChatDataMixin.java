@@ -4,7 +4,8 @@ import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatData
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.github.tartaricacid.touhoulittlemaid.util.CappedQueue;
-import com.google.common.collect.Lists;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.maidmod.selftalk.AutonomousChatHistory;
 import com.maidmod.selftalk.AutonomousChatHistoryHost;
 import com.maidmod.selftalk.AutonomousChatHistoryMigration;
@@ -15,9 +16,10 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.ModifyArgs;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import org.spongepowered.asm.mixin.injection.invoke.arg.Args;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,12 +31,12 @@ import java.util.List;
  * （双线统一，不新增 NeoForge 附件或 Forge 实体字段）。数据随该女仆 AI 数据写入世界存档，
  * 不放静态状态表——静态表随实体卸载清空，而档案必须跨卸载与重启保留。
  * <p>
- * 顺序元数据：在四个 {@code add*History} 方法调用 {@code CappedQueue.add} 的位置重定向，
- * 捕获<b>实际传入的消息对象</b>，在同一把每实例锁内完成「分配顺序号 + 实际入队 + 旁路登记」。
+ * 顺序元数据：在四个 {@code add*History} 方法调用 {@code CappedQueue.add} 的位置包装原调用，
+ * 把实际入队动作交给档案入口，在该锁内完成「实际入队 + 按队列补顺序号 + 旁路登记」。
  * 不修改消息正文/角色/工具字段，也不使用 {@code peekFirst()} 猜刚插入的是哪条消息
  * （响应线程与主线程交错时猜法必然出错）。
  * <p>
- * NBT：{@code writeToTag} 内重定向 {@code Lists.newArrayList(history.getDeque())}，
+ * 档案的 NBT：{@code writeToTag} 内观察 {@code LLMMessage.CODEC.listOf().encodeStart(...)} 的实参，
  * 拿到 TLM <b>本次实际序列化的那一份快照</b>，顺序元数据与之逐位对应——
  * 绝不分别读取两次可变队列再假设下标一致。{@code readFromTag} 在 RETURN 处读取已settle的队列，
  * 按同一序列位置重新绑定顺序号。
@@ -59,21 +61,23 @@ public abstract class MaidAIChatDataMixin implements AutonomousChatHistoryHost {
 
     // ===== 顺序元数据：四个 add*History 的实际入队点 =====
 
-    @Redirect(method = "addUserHistory(Ljava/lang/String;)V",
+    @WrapOperation(method = "addUserHistory(Ljava/lang/String;)V",
             at = @At(value = "INVOKE",
                     target = "Lcom/github/tartaricacid/touhoulittlemaid/util/CappedQueue;add(Ljava/lang/Object;)V"))
-    private void maid_self_talk$orderUserHistory(CappedQueue<LLMMessage> queue, Object element) {
-        maid_self_talk$orderEnqueue(queue, element);
+    private void maid_self_talk$orderUserHistory(CappedQueue<LLMMessage> queue, Object element,
+                                                 Operation<Void> original) {
+        maid_self_talk$orderEnqueue(queue, element, original);
     }
 
     /**
      * 普通 assistant 回复（不带工具）入队点。
      */
-    @Redirect(method = "addAssistantHistory(Ljava/lang/String;)V",
+    @WrapOperation(method = "addAssistantHistory(Ljava/lang/String;)V",
             at = @At(value = "INVOKE",
                     target = "Lcom/github/tartaricacid/touhoulittlemaid/util/CappedQueue;add(Ljava/lang/Object;)V"))
-    private void maid_self_talk$orderAssistantHistory(CappedQueue<LLMMessage> queue, Object element) {
-        maid_self_talk$orderEnqueue(queue, element);
+    private void maid_self_talk$orderAssistantHistory(CappedQueue<LLMMessage> queue, Object element,
+                                                      Operation<Void> original) {
+        maid_self_talk$orderEnqueue(queue, element, original);
     }
 
     /**
@@ -81,49 +85,55 @@ public abstract class MaidAIChatDataMixin implements AutonomousChatHistoryHost {
      * <p>
      * 选择器写全描述符：{@code addAssistantHistory} 有重载，只给名字会让注入目标有歧义。
      */
-    @Redirect(method = "addAssistantHistory(Ljava/lang/String;Ljava/util/List;)V",
+    @WrapOperation(method = "addAssistantHistory(Ljava/lang/String;Ljava/util/List;)V",
             at = @At(value = "INVOKE",
                     target = "Lcom/github/tartaricacid/touhoulittlemaid/util/CappedQueue;add(Ljava/lang/Object;)V"))
-    private void maid_self_talk$orderAssistantToolCallHistory(CappedQueue<LLMMessage> queue, Object element) {
-        maid_self_talk$orderEnqueue(queue, element);
+    private void maid_self_talk$orderAssistantToolCallHistory(CappedQueue<LLMMessage> queue, Object element,
+                                                              Operation<Void> original) {
+        maid_self_talk$orderEnqueue(queue, element, original);
     }
 
-    @Redirect(method = "addToolHistory(Ljava/lang/String;Ljava/lang/String;)V",
+    @WrapOperation(method = "addToolHistory(Ljava/lang/String;Ljava/lang/String;)V",
             at = @At(value = "INVOKE",
                     target = "Lcom/github/tartaricacid/touhoulittlemaid/util/CappedQueue;add(Ljava/lang/Object;)V"))
-    private void maid_self_talk$orderToolHistory(CappedQueue<LLMMessage> queue, Object element) {
-        maid_self_talk$orderEnqueue(queue, element);
+    private void maid_self_talk$orderToolHistory(CappedQueue<LLMMessage> queue, Object element,
+                                                 Operation<Void> original) {
+        maid_self_talk$orderEnqueue(queue, element, original);
     }
 
+    /**
+     * 把原入队操作交给档案入口，在同一把锁内执行并按实际队列补顺序号。
+     * <p>
+     * 非预期元素类型同样经原操作入队——包装器不重新实现队列逻辑，也不把其他元素强制转成消息。
+     */
     @Unique
-    @SuppressWarnings("unchecked")
-    private void maid_self_talk$orderEnqueue(CappedQueue<LLMMessage> queue, Object element) {
-        if (element instanceof LLMMessage message) {
-            maid_self_talk$autonomousHistory().trackTlmEnqueue(queue, message);
-            return;
-        }
-        // 未知元素类型（TLM 未来改动的兜底）：原样入队，不影响其原有行为
-        @SuppressWarnings("rawtypes")
-        CappedQueue raw = queue;
-        raw.add(element);
+    private void maid_self_talk$orderEnqueue(CappedQueue<LLMMessage> queue, Object element,
+                                             Operation<Void> original) {
+        maid_self_talk$autonomousHistory().trackTlmEnqueue(queue, () -> original.call(queue, element));
     }
 
     // ===== NBT =====
 
     /**
-     * 捕获 TLM 本次实际序列化的历史快照：重定向 {@code Lists.newArrayList(history.getDeque())}，
-     * 先记下这份列表，再原样交给 TLM 继续编码。
+     * 捕获 TLM 本次实际序列化的历史快照：在 {@code writeToTag} 的
+     * {@code LLMMessage.CODEC.listOf().encodeStart(NbtOps.INSTANCE, llmMessages)} 调用处观察参数，
+     * 记下参数 1（实际待编码列表）的引用。
      * <p>
      * 顺序元数据必须与这份快照逐位对应——若改成在 writeToTag 返回后再读一次队列，
      * 两次读取之间可能发生容量淘汰或新消息入队，下标就对不上了。
+     * 只读观察，不改参数、不复制列表、不自行编码。
      */
-    @Redirect(method = "writeToTag",
+    @ModifyArgs(method = "writeToTag",
             at = @At(value = "INVOKE",
-                    target = "Lcom/google/common/collect/Lists;newArrayList(Ljava/lang/Iterable;)Ljava/util/ArrayList;"))
-    private ArrayList<LLMMessage> maid_self_talk$captureSerializedSnapshot(Iterable<LLMMessage> deque) {
-        ArrayList<LLMMessage> snapshot = Lists.newArrayList(deque);
-        maid_self_talk$pendingSnapshot = snapshot;
-        return snapshot;
+                    target = "Lcom/mojang/serialization/Codec;encodeStart(Lcom/mojang/serialization/DynamicOps;Ljava/lang/Object;)Lcom/mojang/serialization/DataResult;"))
+    private void maid_self_talk$captureSerializedSnapshot(Args args) {
+        // 接收者不计入 Args 下标：参数 0 是 DynamicOps，参数 1 是实际 List<LLMMessage>
+        Object encoded = args.get(1);
+        if (encoded instanceof List<?> list) {
+            @SuppressWarnings("unchecked")
+            List<LLMMessage> snapshot = (List<LLMMessage>) list;
+            maid_self_talk$pendingSnapshot = snapshot;
+        }
     }
 
     /** TLM 本次写出的历史快照（由上面的重定向在编码前填入，writeToTag 返回后即被使用并清空） */

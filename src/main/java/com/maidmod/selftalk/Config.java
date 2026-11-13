@@ -116,7 +116,10 @@ public final class Config {
         ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
 
         builder.push("general");
-        ENABLED = builder.comment("总开关，默认关闭。开启后女仆才会自言自语/欢迎/对话")
+        ENABLED = builder.comment("""
+                自动聊天开关，默认关闭。控制自言自语、登录欢迎语与女仆互聊；
+                关闭后不再发起新的自动聊天，未发出的排队请求被丢弃，已经发出的那一轮正常结束；
+                玩家手动聊天的提示词增强不受影响。""")
                 .define("enabled", false);
         PLAYER_OPTION_ENABLED = builder.comment("""
                 允许玩家自定义配置。玩家能否单独配置自己的女仆（自言自语、互聊、自定义 Prompt、Tool 调用）。

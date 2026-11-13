@@ -42,6 +42,10 @@ public final class MaidInterChatService {
     private static boolean triggerInternal(EntityMaid maid, EntityMaid peer, UUID peerMessageId, String peerText,
                                            boolean isResponder, double broadcastRange, int chainRound,
                                            InterChatChain chain) {
+        // 总开关关闭：不新建自动准备（请求登记、会话与规划都不启动）
+        if (!Config.ENABLED.get()) {
+            return false;
+        }
         MaidAIChatManager chatManager = maid.getAiChatManager();
         if (chatManager == null) return false;
         if (!AIConfig.LLM_ENABLED.get()) return false;
@@ -156,6 +160,11 @@ public final class MaidInterChatService {
                                              String peerText,
                                              double broadcastRange, boolean isResponder, int chainRound,
                                              boolean toolEnabled, InterChatChain chain, InterChatRequest request) {
+        // 正式派发前再复核总开关：关闭时经本轮现有请求取消口收束并返回失败，不建正式回调
+        if (!Config.ENABLED.get()) {
+            request.cancel();
+            return false;
+        }
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.interChatPending = true;
         state.interChatPendingSinceTick = maid.level().getServer().getTickCount();

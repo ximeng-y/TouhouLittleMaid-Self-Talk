@@ -66,6 +66,10 @@ public final class MaidSelfTalkService {
      */
     public static boolean triggerSelfTalk(EntityMaid maid, boolean welcome, int keep, double broadcastRange,
                                           HistoryContextSession.CachedRecall cachedRecall) {
+        // 总开关关闭：自话、欢迎语与预制复用分流一律不再触发（已进入交付的当前轮不受影响）
+        if (!Config.ENABLED.get()) {
+            return false;
+        }
         MaidAIChatManager chatManager = maid.getAiChatManager();
         if (chatManager == null) {
             return false;
@@ -288,6 +292,11 @@ public final class MaidSelfTalkService {
                                             List<LLMMessage> messages, boolean welcome, int keep,
                                             double broadcastRange, boolean toolEnabled, SelfTalkRequestToken token,
                                             SelfTalkReuseService.ArchiveData archiveData) {
+        // 正式派发前再复核总开关：准备期可能在异步路径里跨过关闭时刻。
+        // 关闭时返回失败，不置 pending、不建回调、不发正式生成
+        if (!Config.ENABLED.get()) {
+            return false;
+        }
         // 标记进行中（防重入）
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.selfTalkPending = true;

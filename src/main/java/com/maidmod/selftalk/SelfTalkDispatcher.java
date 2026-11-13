@@ -55,6 +55,10 @@ public final class SelfTalkDispatcher {
      * 请求被吞或派发失败时链立即释放，不留悬挂条目。
      */
     public static void requestInterChatInitiator(EntityMaid initiator, EntityMaid responder, double broadcastRange) {
+        // 总开关关闭：不新建链（否则链与配对锁会随请求一起悬空）
+        if (!Config.ENABLED.get()) {
+            return;
+        }
         InterChatChain chain = InterChatChain.create(initiator, responder);
         boolean accepted = submit(initiator, new SelfTalkState.DeferredRequest(
                 SelfTalkState.RequestKind.INTER_CHAT_INITIATOR, responder, null, null, 0, broadcastRange, 1,
@@ -66,12 +70,19 @@ public final class SelfTalkDispatcher {
 
     /**
      * 互聊回答者（链式续接）派发请求：沿用本链的 chainId。
+     * <p>
+     * 关闭期间被拒绝的续接请求必须收掉它携带的链：调用方已持有旧 chainId，
+     * 不释放会让链登记与配对锁留到超时。
      *
      * @param peerMessageId 需要回应的对方发言的消息身份（稳定 UUID，贯穿到回调与归档）
      */
     public static void requestInterChatResponder(EntityMaid responder, EntityMaid initiator,
                                                  UUID peerMessageId, String peerText, double broadcastRange,
                                                  int chainRound, long chainId) {
+        if (!Config.ENABLED.get()) {
+            InterChatChain.releaseById(chainId);
+            return;
+        }
         submit(responder, new SelfTalkState.DeferredRequest(
                 SelfTalkState.RequestKind.INTER_CHAT_RESPONDER, initiator, peerMessageId, peerText, 0,
                 broadcastRange, chainRound, chainId));
@@ -85,6 +96,10 @@ public final class SelfTalkDispatcher {
      * @return 请求是否被受理（入队或已派发）；false 表示被吞，调用方需自行释放随请求创建的资源
      */
     private static boolean submit(EntityMaid maid, SelfTalkState.DeferredRequest req) {
+        // 总开关关闭：拒绝新请求（不改状态、不入队）
+        if (!Config.ENABLED.get()) {
+            return false;
+        }
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         boolean isInterChat = req.kind() != SelfTalkState.RequestKind.SELF_TALK;
 
@@ -138,8 +153,46 @@ public final class SelfTalkDispatcher {
         state.deferredRequests.removeIf(r -> r.chainId() == chainId);
     }
 
+    /**
+     * 丢弃该女仆顺延队列中的全部未发送请求（总开关关闭时调用，服务端主线程）。
+     * <p>
+     * 只清「尚未发出」的意图：队列里的互聊条目按各自 chainId 释放链与配对锁，
+     * 已正式发出的请求不在此处取消——当前轮按既有规则正常收尾。
+     * 使用只读查询：女仆状态已被移除时不重建条目。
+     */
+    public static void discardQueuedRequests(EntityMaid maid) {
+        if (maid == null) {
+            return;
+        }
+        discardQueuedRequests(maid.getId());
+    }
+
+    /** 按女仆 ID 丢弃顺延队列（状态条目的快照遍历用；不创建状态） */
+    static void discardQueuedRequests(int maidId) {
+        SelfTalkState.State state = SelfTalkState.peek(maidId);
+        if (state == null || state.deferredRequests.isEmpty()) {
+            return;
+        }
+        List<Long> chains = new ArrayList<>();
+        for (SelfTalkState.DeferredRequest req : state.deferredRequests) {
+            if (req.chainId() != 0 && !chains.contains(req.chainId())) {
+                chains.add(req.chainId());
+            }
+        }
+        state.deferredRequests.clear();
+        // 按各自 chainId 释放链与配对锁：无条件按女仆 ID 解锁会误拆其它在途链
+        for (long chainId : chains) {
+            InterChatChain.releaseById(chainId);
+        }
+    }
+
     /** 空闲时从顺延队列出队派发，直到忙或队列空 */
     public static void drainDeferred(EntityMaid maid) {
+        // 总开关关闭：不是暂停队列，而是把队列整批丢弃（重新开启后不补发）
+        if (!Config.ENABLED.get()) {
+            discardQueuedRequests(maid);
+            return;
+        }
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         while (!isBusy(maid, state) && !state.deferredRequests.isEmpty()) {
             SelfTalkState.DeferredRequest req = state.deferredRequests.pollFirst();
@@ -189,6 +242,13 @@ public final class SelfTalkDispatcher {
      */
     private static boolean dispatchNow(EntityMaid maid, SelfTalkState.DeferredRequest req) {
         if (!maid.isAlive()) {
+            return false;
+        }
+        // 总开关关闭：不再调用业务服务；互聊请求携带的链必须在拒绝时收掉，不能留下锁
+        if (!Config.ENABLED.get()) {
+            if (req.chainId() != 0) {
+                InterChatChain.releaseById(req.chainId());
+            }
             return false;
         }
         switch (req.kind()) {
