@@ -154,6 +154,8 @@ public final class HistoryContextSession {
     private final boolean overheardRecentHit;
     /** 同链复用：首次正式派发时记录的本轮资料编号（空表表示不复用） */
     private final List<Long> reusedOverheardIds;
+    /** 同链复用：该女仆在本链的偷听本轮资料是否已登记（空结果同样算已登记） */
+    private final boolean overheardRoundReused;
     /** 本轮触发内容（写进规划资料，供模型判断该查什么；可为 null） */
     private final String triggerText;
     /** 派发许可：插话中断、请求作废等情况下返回 false 即放弃 */
@@ -205,7 +207,8 @@ public final class HistoryContextSession {
                                  List<LLMMessage> systemPrefix, List<LLMMessage> fullHistory,
                                  List<LLMMessage> windowMessages, CachedRecall cachedRecall,
                                  CachedPersonaRecall cachedPersonaRecall, MaidPersonaConfig personaConfig,
-                                 boolean overheardRecentHit, List<Long> reusedOverheardIds,
+                                 boolean overheardRecentHit, boolean overheardRoundReused,
+                                 List<Long> reusedOverheardIds,
                                  String triggerText, Supplier<Boolean> stillAllowed, Dispatcher dispatcher,
                                  RecallReporter recallReporter, FinalMessageRenderer finalMessageRenderer,
                                  Runnable onCancelled) {
@@ -223,6 +226,7 @@ public final class HistoryContextSession {
         this.cachedPersonaRecall = cachedPersonaRecall;
         this.personaConfig = personaConfig == null ? MaidPersonaConfig.DEFAULT : personaConfig;
         this.overheardRecentHit = overheardRecentHit;
+        this.overheardRoundReused = overheardRoundReused;
         this.reusedOverheardIds = reusedOverheardIds == null ? List.of() : List.copyOf(reusedOverheardIds);
         this.overheard = OverheardRecallSession.inactive(maid, mode);
         this.triggerText = triggerText;
@@ -314,10 +318,10 @@ public final class HistoryContextSession {
         // 都在这之后发生，关闭总开关时才能整体作废这一段准备期
         registerPreparation();
         // 偷听资料与准备登记同一时点冻结：此后异步索引、规划与纠正都复用这份快照，
-        // 不重新抽概率、不读取新锚点。同链复用只持有编号，按当前绑定重新读取
-        this.overheard = reusedOverheardIds.isEmpty()
-                ? OverheardRecallSession.prepare(maid, overheardRecentHit, mode)
-                : OverheardRecallSession.reuse(maid, mode, reusedOverheardIds);
+        // 不重新抽概率、不读取新锚点。同链已登记本轮资料时只持有编号，按当前绑定重新读取
+        this.overheard = overheardRoundReused
+                ? OverheardRecallSession.reuse(maid, mode, reusedOverheardIds)
+                : OverheardRecallSession.prepare(maid, overheardRecentHit, mode);
         switch (mode) {
             case FULL, COMPACT -> {
                 if (needsPersonaRecall()) {
@@ -688,25 +692,15 @@ public final class HistoryContextSession {
     }
 
     /**
-     * 规划资料里的偷听背景：只给本次实际可用的近期片段与该女仆可检索档案的摘要文本，
-     * 不把整份档案或全服其他消息送给模型。没有内容时返回空串（整段省略）。
+     * 规划资料里的偷听背景：只给本次实际渲染的近期片段与当前模式允许的有效背景
+     * （{@link OverheardRecallSession#block()} 的口径），不把整份档案送进规划请求。
+     * <p>
+     * 旧档案原文只进检索索引，命中后才作为正式回答的背景组装；规划阶段把它们全部拼进来，
+     * 既让未被 BM25 选中、已退出有效范围的片段提前泄露给模型，也会让规划输入随档案无限增长，
+     * 而正式回答「旧资料最多 3 块」的上限约束不到这一步。没有内容时返回空串（整段省略）。
      */
     private String overheardPlanningMaterial() {
-        if (overheard == null) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder();
-        String block = overheard.block();
-        if (!block.isBlank()) {
-            sb.append(block);
-        }
-        for (OverheardChatStore.Group group : overheard.archivedLibrary()) {
-            if (!sb.isEmpty()) {
-                sb.append('\n');
-            }
-            sb.append(group.text());
-        }
-        return sb.toString();
+        return overheard == null ? "" : overheard.block();
     }
 
     private boolean allowed() {

@@ -2,6 +2,7 @@ package com.maidmod.selftalk.mixin;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Local;
 import com.maidmod.selftalk.OverheardChatService;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.ChatType;
@@ -13,19 +14,27 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
 import java.util.function.Predicate;
+import javax.annotation.Nullable;
 
 /**
  * 玩家本人执行的 {@code /say}：在 {@code PlayerList} 的「命令来源」广播重载处建立采集来源作用域。
  * <p>
- * 该重载只有 {@code SayCommand} 使用，传入的正是已解析的命令来源与绑定聊天类型，
- * 因此不需要注入 {@code SayCommand} 的合成 lambda：那需要按生产名指定目标，跨版本脆弱，
+ * 该重载被两个命令共用：{@code SayCommand} 用 {@code SAY_COMMAND} 绑定，
+ * {@code EmoteCommands} 的 {@code /me} 用 {@code EMOTE_COMMAND} 绑定，因此必须按绑定类型区分，
+ * 否则玩家 {@code /me} 会被当成 {@code /say} 占用编号。
+ * 不注入 {@code SayCommand} 的合成 lambda：那需要按生产名指定目标，跨版本脆弱，
  * 且双线的合成方法名并不一致。宿主是 Minecraft 类，生产环境用官方名，
  * 外层与 {@code @At} 都显式 {@code remap = false}。
  * <p>
+ * handler 的参数必须与被包装调用的实参一致（{@code PlayerChatMessage, Predicate, ServerPlayer, ChatType$Bound}，
+ * 前面另有 {@code PlayerList} 接收者）：MixinExtras 在应用 Mixin 时按此校验，写错会让 PlayerList
+ * 加载失败、开服即崩。命令来源 {@code CommandSourceStack} 是宿主方法自己的参数，
+ * 用 {@code @Local(argsOnly = true)} 取得。
+ * <p>
  * 合格条件严格按「本人执行」判定：{@code source.source} 是真实 {@code ServerPlayer}、
- * {@code source.getEntity()} 就是该玩家、不是平台伪装玩家。
+ * {@code source.getEntity()} 就是该玩家、不是平台伪装玩家，且绑定类型为 {@code SAY_COMMAND}。
  * 不能只判断 {@code getPlayer()}，否则控制台／命令方块 {@code execute as 玩家 run say}
- * 会被当成本人发言。两种情况都执行原广播一次，不改变命令行为。
+ * 会被当成本人发言。不合格时原广播原样放行，不改变命令行为。
  */
 @Mixin(value = PlayerList.class, remap = false)
 public abstract class OverheardSayCommandMixin {
@@ -35,13 +44,14 @@ public abstract class OverheardSayCommandMixin {
             at = @At(value = "INVOKE", remap = false,
                     target = "Lnet/minecraft/server/players/PlayerList;broadcastChatMessage(Lnet/minecraft/network/chat/PlayerChatMessage;Ljava/util/function/Predicate;Lnet/minecraft/server/level/ServerPlayer;Lnet/minecraft/network/chat/ChatType$Bound;)V"))
     private void maid_self_talk$markPlayerSaySource(PlayerList playerList, PlayerChatMessage message,
-                                                    CommandSourceStack source, ChatType.Bound bound,
-                                                    Operation<Void> original) {
-        ServerPlayer sender = realSender(source);
-        OverheardChatService.ScopeHandle scope = sender == null ? null : OverheardChatService.beginPlayerSay(sender);
+                                                    Predicate<ServerPlayer> filter,
+                                                    @Nullable ServerPlayer sender, ChatType.Bound bound,
+                                                    Operation<Void> original,
+                                                    @Local(argsOnly = true) CommandSourceStack source) {
+        ServerPlayer sayer = realSender(source, bound);
+        OverheardChatService.ScopeHandle scope = sayer == null ? null : OverheardChatService.beginPlayerSay(sayer);
         try {
-            original.call(playerList, message, (Predicate<ServerPlayer>) source::shouldFilterMessageTo,
-                    source.getPlayer(), bound);
+            original.call(playerList, message, filter, sender, bound);
         } finally {
             if (scope != null) {
                 scope.close();
@@ -49,9 +59,19 @@ public abstract class OverheardSayCommandMixin {
         }
     }
 
-    /** 命令来源是否确为玩家本人执行；控制台、命令方块与伪装玩家一律不合格 */
-    private static ServerPlayer realSender(CommandSourceStack source) {
-        if (source == null || !(source.source instanceof ServerPlayer player)) {
+    /**
+     * 命令来源是否确为玩家本人执行、且这次广播是 {@code /say}；
+     * 控制台、命令方块、伪装玩家与 {@code /me} 一律不合格。
+     */
+    private static ServerPlayer realSender(CommandSourceStack source, ChatType.Bound bound) {
+        if (source == null || bound == null) {
+            return null;
+        }
+        // 绑定里持有的是注册表 Holder，直接按键判断，不比较资源位置字符串
+        if (!bound.chatType().is(ChatType.SAY_COMMAND)) {
+            return null;
+        }
+        if (!(source.source instanceof ServerPlayer player)) {
             return null;
         }
         if (source.getEntity() != player) {

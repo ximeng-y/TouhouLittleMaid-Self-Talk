@@ -249,9 +249,7 @@ public final class OverheardRecallSession {
             store.commitRecall(recent, injected);
         }
         if (archived != null) {
-            for (OverheardChatStore.RecalledGroup group : archived.recalledGroups()) {
-                store.commitRecall(archived, group.ids());
-            }
+            store.commitRecall(archived, injected);
         }
         OverheardChatSavedData data = OverheardChatSavedData.get(maid.level().getServer());
         if (data != null) {

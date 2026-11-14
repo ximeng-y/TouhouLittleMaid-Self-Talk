@@ -152,6 +152,11 @@ public final class InterChatChain {
             return overheardRoundIds;
         }
 
+        /** 该女仆在本链的偷听本轮资料是否已登记（空结果同样算已登记） */
+        public boolean overheardRoundRecorded() {
+            return overheardRoundRecorded;
+        }
+
         /** 登记本链该女仆首次派发时注入的偷听资料编号（同一女仆只生效一次；空表同样算已登记） */
         private void recordOverheardRound(List<Long> ids) {
             if (overheardRoundRecorded) {
@@ -376,6 +381,12 @@ public final class InterChatChain {
     public List<Long> overheardRoundIds(EntityMaid maid) {
         Participant participant = participants.get(maid.getId());
         return participant == null ? List.of() : participant.overheardRoundIds();
+    }
+
+    /** 该女仆在本链的偷听本轮资料是否已登记（空结果同样算已登记） */
+    public boolean overheardRoundRecorded(EntityMaid maid) {
+        Participant participant = participants.get(maid.getId());
+        return participant != null && participant.overheardRoundRecorded();
     }
 
     /** 登记该女仆本链首次派发时注入的偷听资料编号（同一女仆只生效一次；空表也登记） */

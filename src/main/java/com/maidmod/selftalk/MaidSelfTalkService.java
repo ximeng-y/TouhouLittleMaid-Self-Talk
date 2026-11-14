@@ -194,6 +194,8 @@ public final class MaidSelfTalkService {
                 null,
                 personaConfig,
                 overheardRecentHit,
+                // 自话／欢迎语没有互聊链，也就不存在链内已登记的本轮资料
+                false,
                 List.of(),
                 welcome ? SelfTalkPrompts.planTriggerWelcome(selfTalkLanguage)
                         : SelfTalkPrompts.planTriggerSelfTalk(selfTalkLanguage),

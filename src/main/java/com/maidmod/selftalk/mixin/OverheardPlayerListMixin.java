@@ -22,6 +22,8 @@ import javax.annotation.Nullable;
  * 本次实际广播对象用 {@code @Local} 按类型捕获（该方法只有一个 {@code OutgoingChatMessage}
  * 局部变量），正文取其 {@code content().getString()}——这正是服务端共同广播的纯文本，
  * 不取命令原串、不取签名内容、不重新装饰（玩家 /say 的选择器已在上游展开）。
+ * 发送时显示名同样取自这次广播的绑定名 {@code bound.name()}（含队伍前后缀等修饰），
+ * 与正文一起持久保存，不用账号名冒充。
  * <p>
  * 不在此处按收件人循环记录：每个收件人只显示，消息本身只采集一次。
  * 生产环境使用官方名，外层与 {@code @At} 都显式 {@code remap = false}。
@@ -37,6 +39,7 @@ public abstract class OverheardPlayerListMixin {
         if (outgoing == null) {
             return;
         }
-        OverheardChatService.onBroadcastCompleted(outgoing.content().getString());
+        OverheardChatService.onBroadcastCompleted(outgoing.content().getString(),
+                bound == null || bound.name() == null ? null : bound.name().getString());
     }
 }
