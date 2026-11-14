@@ -171,8 +171,25 @@ public final class SelfTalkContexts {
      */
     public static String renderFrozenWelcomeUserMessage(String prompt, String personaBlock,
                                                         WelcomeEnvironmentSnapshot snapshot) {
-        return UserPromptContexts.CONTEXT_START + snapshot.envLines() + UserPromptContexts.CONTEXT_END
-                + "\n" + prompt + personaBlock + snapshot.situationalFragment();
+        return renderFrozenWelcomeUserMessage(prompt, personaBlock, null, snapshot);
+    }
+
+    /**
+     * 同 {@link #renderFrozenWelcomeUserMessage(String, String, WelcomeEnvironmentSnapshot)}，
+     * 并在人设块之后追加偷听背景块（欢迎语不新增近期召回入口，但可按历史模式携带已有有效原文）。
+     */
+    public static String renderFrozenWelcomeUserMessage(String prompt, String personaBlock,
+                                                        String overheardBlock,
+                                                        WelcomeEnvironmentSnapshot snapshot) {
+        StringBuilder message = new StringBuilder();
+        message.append(UserPromptContexts.CONTEXT_START).append(snapshot.envLines())
+                .append(UserPromptContexts.CONTEXT_END)
+                .append("\n").append(prompt).append(personaBlock);
+        if (overheardBlock != null && !overheardBlock.isBlank()) {
+            message.append('\n').append(overheardBlock);
+        }
+        message.append(snapshot.situationalFragment());
+        return message.toString();
     }
 
     /**
@@ -376,6 +393,19 @@ public final class SelfTalkContexts {
      */
     public static String renderConfiguredUserMessage(String basePrompt, String language,
                                                      EnvironmentSnapshot snapshot, String personaBlock) {
+        return renderConfiguredUserMessage(basePrompt, language, snapshot, personaBlock, null);
+    }
+
+    /**
+     * 同上，并在动态资料区追加一段已渲染好的偷听背景块。
+     * <p>
+     * 插入位置紧跟人设召回块之后：两者都是本轮动态资料，位于当前情境之后、感知背景之前。
+     * 偷听块自带独立标签边界（{@code <maid-overheard-chat>}），空块时整段不出现，
+     * 不改变既有渲染顺序。
+     */
+    public static String renderConfiguredUserMessage(String basePrompt, String language,
+                                                     EnvironmentSnapshot snapshot, String personaBlock,
+                                                     String overheardBlock) {
         ContextLanguage lang = snapshot.language();
         StringBuilder message = new StringBuilder();
         // 固定信息段用采集时冻结的正文：目录外提供者取值已定格，渲染不再二次调用提供者
@@ -394,6 +424,9 @@ public final class SelfTalkContexts {
                 snapshot.naturalLanguage(), snapshot.naturalLanguage() && snapshot.perceptionBody().isEmpty());
         if (personaBlock != null && !personaBlock.isBlank()) {
             message.append(personaBlock);
+        }
+        if (overheardBlock != null && !overheardBlock.isBlank()) {
+            message.append('\n').append(overheardBlock);
         }
         appendPerceptionContext(message, snapshot.perceptionBody(), snapshot.naturalLanguage(), lang);
         return message.toString();
