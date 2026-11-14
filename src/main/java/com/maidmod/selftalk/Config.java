@@ -114,6 +114,14 @@ public final class Config {
     /** 附近女仆查询 Tool 开关（仅启动时读取，改动需重启） */
     public static ForgeConfigSpec.BooleanValue MAID_IDENTITY_TOOL_ENABLED;
 
+    // ===== 附近玩家聊天偷听 =====
+    /** 偷听采集半径（格，球形距离），以发送玩家为中心 */
+    public static ForgeConfigSpec.DoubleValue OVERHEARD_HEARING_RADIUS;
+    /** 每只存活女仆独立保存锚点的概率（0~1） */
+    public static ForgeConfigSpec.DoubleValue OVERHEARD_ACQUIRE_PROBABILITY;
+    /** 自话单次触发／互聊整条链开始时的近期召回注入概率（0~1） */
+    public static ForgeConfigSpec.DoubleValue OVERHEARD_INJECT_PROBABILITY;
+
     public static final ForgeConfigSpec SPEC;
 
     static {
@@ -123,6 +131,7 @@ public final class Config {
         ENABLED = builder.comment("""
                 自动聊天开关，默认关闭。控制自言自语、登录欢迎语与女仆互聊；
                 关闭后不再发起新的自动聊天，未发出的排队请求被丢弃，已经发出的那一轮正常结束；
+                关闭后停止记录新的附近玩家聊天，已有记忆保留；
                 玩家手动聊天的提示词增强不受影响。""")
                 .define("enabled", false);
         PLAYER_OPTION_ENABLED = builder.comment("""
@@ -325,6 +334,22 @@ public final class Config {
                 玩家级 Tool 开关决定）。是否注册在启动时读取一次，修改后需重启服务端。
                 默认开启。""")
                 .define("toolEnabled", true);
+        builder.pop();
+
+        builder.push("overheard_chat");
+        OVERHEARD_HEARING_RADIUS = builder.comment("""
+                附近玩家聊天偷听：采集半径（格）。以发送玩家所在位置为中心按球形距离筛选女仆，
+                只采集该玩家所在维度内的存活女仆。属于管理员配置，玩家设置界面不提供该项。""")
+                .defineInRange("hearingRadius", 32.0, 1.0, 512.0);
+        OVERHEARD_ACQUIRE_PROBABILITY = builder.comment("""
+                每只符合条件的存活女仆独立保存该条聊天为近期锚点的概率（0~1）。
+                不要求玩家是这只女仆的主人。未命中只影响该女仆的锚点，聊天本身仍进入全服序列。""")
+                .defineInRange("acquireProbability", 0.60, 0.0, 1.0);
+        OVERHEARD_INJECT_PROBABILITY = builder.comment("""
+                近期偷听片段注入自动聊天的概率（0~1）：自言自语每次触发判定一次，
+                一次连续互聊在整条链开始判定一次，链内续接不重抽。欢迎语不参与该判定。
+                未命中时仍按历史模式携带已召回的有效原文与档案检索结果。""")
+                .defineInRange("injectProbability", 0.50, 0.0, 1.0);
         builder.pop();
 
         SPEC = builder.build();
