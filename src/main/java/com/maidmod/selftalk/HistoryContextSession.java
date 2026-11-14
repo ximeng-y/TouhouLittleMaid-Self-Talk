@@ -74,8 +74,8 @@ public final class HistoryContextSession {
 
         void reportPersona(MaidPersonaConfig config, List<PersonaFragment> fragments);
 
-        /** 首次正式派发时回报本轮实际注入的偷听资料编号（链内后续轮次复用；空表也回报） */
-        void reportOverheardRound(List<Long> ids);
+        /** 首次正式派发时回报本轮实际注入的偷听资料（链内后续轮次复用；空结果也回报） */
+        void reportOverheardRound(OverheardRecallSession.Round round);
     }
 
     /**
@@ -152,8 +152,8 @@ public final class HistoryContextSession {
     private OverheardRecallSession overheard;
     /** 本次是否命中近期召回概率（欢迎语恒为 false；互聊由整条链的判定传入） */
     private final boolean overheardRecentHit;
-    /** 同链复用：首次正式派发时记录的本轮资料编号（空表表示不复用） */
-    private final List<Long> reusedOverheardIds;
+    /** 同链复用：首次正式派发时记录的本轮资料（空结果表示不复用） */
+    private final OverheardRecallSession.Round reusedOverheardRound;
     /** 同链复用：该女仆在本链的偷听本轮资料是否已登记（空结果同样算已登记） */
     private final boolean overheardRoundReused;
     /** 本轮触发内容（写进规划资料，供模型判断该查什么；可为 null） */
@@ -208,7 +208,7 @@ public final class HistoryContextSession {
                                  List<LLMMessage> windowMessages, CachedRecall cachedRecall,
                                  CachedPersonaRecall cachedPersonaRecall, MaidPersonaConfig personaConfig,
                                  boolean overheardRecentHit, boolean overheardRoundReused,
-                                 List<Long> reusedOverheardIds,
+                                 OverheardRecallSession.Round reusedOverheardRound,
                                  String triggerText, Supplier<Boolean> stillAllowed, Dispatcher dispatcher,
                                  RecallReporter recallReporter, FinalMessageRenderer finalMessageRenderer,
                                  Runnable onCancelled) {
@@ -227,7 +227,8 @@ public final class HistoryContextSession {
         this.personaConfig = personaConfig == null ? MaidPersonaConfig.DEFAULT : personaConfig;
         this.overheardRecentHit = overheardRecentHit;
         this.overheardRoundReused = overheardRoundReused;
-        this.reusedOverheardIds = reusedOverheardIds == null ? List.of() : List.copyOf(reusedOverheardIds);
+        this.reusedOverheardRound = reusedOverheardRound == null
+                ? OverheardRecallSession.Round.empty() : reusedOverheardRound;
         this.overheard = OverheardRecallSession.inactive(maid, mode);
         this.triggerText = triggerText;
         this.stillAllowed = stillAllowed;
@@ -320,7 +321,7 @@ public final class HistoryContextSession {
         // 偷听资料与准备登记同一时点冻结：此后异步索引、规划与纠正都复用这份快照，
         // 不重新抽概率、不读取新锚点。同链已登记本轮资料时只持有编号，按当前绑定重新读取
         this.overheard = overheardRoundReused
-                ? OverheardRecallSession.reuse(maid, mode, reusedOverheardIds)
+                ? OverheardRecallSession.reuse(maid, mode, reusedOverheardRound)
                 : OverheardRecallSession.prepare(maid, overheardRecentHit, mode);
         switch (mode) {
             case FULL, COMPACT -> {
@@ -724,7 +725,7 @@ public final class HistoryContextSession {
         if (dispatcher.dispatch(new PreparedRequest(List.copyOf(messages), mode, overheardEvent))) {
             // 只有同步派发成功才提交实际带入的编号；ACCEPTED_ASYNC 不是提交条件
             overheard.commit();
-            reportOverheardRound(overheard.renderedRecentIds());
+            reportOverheardRound(overheard.renderedRecentRound());
             settle(true);
             overheard.close();
             return StartOutcome.DISPATCHED;
@@ -736,12 +737,12 @@ public final class HistoryContextSession {
     }
 
     /** 首次正式派发时回报本轮实际注入的偷听编号（同链后续轮次复用同一轮背景，不重复追加有效历史） */
-    private void reportOverheardRound(List<Long> ids) {
+    private void reportOverheardRound(OverheardRecallSession.Round round) {
         if (recallReporter == null || overheardReported) {
             return;
         }
         overheardReported = true;
-        recallReporter.reportOverheardRound(ids);
+        recallReporter.reportOverheardRound(round);
     }
 
     /** 派发失败（含被中断／请求作废）时回报空召回：失败同样算「首次检索完成」，链不得继续等待 */
@@ -749,7 +750,7 @@ public final class HistoryContextSession {
         if (!delivered) {
             reportHistoryRecall(List.of());
             // 首次派发失败也要回报偷听本轮资料（空表），链不得无限等待首次轮次
-            reportOverheardRound(List.of());
+            reportOverheardRound(OverheardRecallSession.Round.empty());
         }
     }
 }
