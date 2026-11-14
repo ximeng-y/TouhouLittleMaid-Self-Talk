@@ -22,7 +22,11 @@
     "GameContextRegisterAccessor",
     "InterChatToolLifecycleMixin",
     "WaitingChatBubbleDataMixin",
-    "ItemFilmMixin"
+    "ItemFilmMixin",
+    "OverheardPlayerChatMixin",
+    "OverheardSayCommandMixin",
+    "OverheardPlayerListMixin",
+    "HistorySummaryCallbackMixin"
   ],
   "client": [
     "AIChatScreenMixin",

@@ -17,6 +17,7 @@ import com.maidmod.selftalk.MaidInterChatService;
 import com.maidmod.selftalk.MaidPersonaConfig;
 import com.maidmod.selftalk.MaidPersonaRuntime;
 import com.maidmod.selftalk.MaidSelfTalkService;
+import com.maidmod.selftalk.OverheardChatContext;
 import com.maidmod.selftalk.PlayerPersonaChatSession;
 import com.maidmod.selftalk.PlayerChatContext;
 import com.maidmod.selftalk.PlayerChatRequest;
@@ -249,6 +250,9 @@ public abstract class MaidAIChatManagerMixin {
                 ? "en_us" : maid.getAiChatManager().chatLanguage;
         boolean chinese = ContextLanguage.of(SelfTalkContexts.sanitizeLanguage(chatLanguage)).isZh();
         String declaration = chinese ? SelfTalkPrompts.OWNER_CHAT_DECLARATION_ZH : SelfTalkPrompts.OWNER_CHAT_DECLARATION_EN;
+        // 有效偷听原文是独立 USER 背景资料：不受自动聊天历史模式与总开关影响，不抽概率、不新增档案。
+        // 只在本参数增强里读取一次，随后与 OWNER 段分开包裹
+        source.setOverheardBlock(OverheardChatContext.effectiveBlock(maid, chinese));
         args.set(0, PlayerChatContext.decorateOwner(original, source, declaration,
                 UserPromptContexts.CONTEXT_REG));
     }

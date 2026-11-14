@@ -56,7 +56,9 @@ public final class PlayerChatContext<T> extends ArrayList<T> {
         }
         // 只沿用本 mod 的段标签清洗，其他增强的未知标签与正文不另外过滤。
         String sanitizedRaw = SegmentTags.stripTagsFromPlayerInput(raw);
-        String content = contextPrefix + source.personaBlock() + SegmentTags.OWNER_OPEN
+        // 排列固定：原 context 前缀 → 人设块 → 偷听背景块 → OWNER 开标签 → 声明与玩家原话 → OWNER 闭标签。
+        // 偷听块始终位于 OWNER 标签之外，不属于本次主人发言
+        String content = contextPrefix + source.personaBlock() + source.overheardBlock() + SegmentTags.OWNER_OPEN
                 + declaration + StringUtils.LF + sanitizedRaw + SegmentTags.OWNER_CLOSE;
         // LLMMessage 为不可变 record；只换正文，角色、时间与工具元数据全部沿用实际对象。
         return new LLMMessage(original.role(), content, original.gameTime(),
@@ -67,6 +69,8 @@ public final class PlayerChatContext<T> extends ArrayList<T> {
     public static final class Source {
         private PlayerChatRequest request;
         private String personaBlock = "";
+        /** 有效偷听背景块（默认空串）：只在正常玩家聊天增强时按实际女仆读取一次 */
+        private String overheardBlock = "";
 
         public PlayerChatRequest request() {
             return request;
@@ -82,6 +86,14 @@ public final class PlayerChatContext<T> extends ArrayList<T> {
 
         public void setPersonaBlock(String personaBlock) {
             this.personaBlock = personaBlock;
+        }
+
+        public String overheardBlock() {
+            return overheardBlock;
+        }
+
+        public void setOverheardBlock(String overheardBlock) {
+            this.overheardBlock = overheardBlock == null ? "" : overheardBlock;
         }
     }
 }
