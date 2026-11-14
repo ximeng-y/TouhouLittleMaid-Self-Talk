@@ -99,32 +99,27 @@ public final class OverheardChatStore {
         private final int generation;
         private final UUID maidUuid;
         private final MaidRef owner;
-        private final List<Entry> recentEntries;
+        private final List<RecalledGroup> recentGroups;
         private final boolean timeGap;
         private final List<RecalledGroup> recalledGroups;
         private final List<Long> materialIds;
         private final Set<Long> deltaIds;
 
         private Snapshot(OverheardChatStore store, int generation, UUID maidUuid, MaidRef owner,
-                         List<Entry> recentEntries, boolean timeGap, List<RecalledGroup> recalledGroups,
+                         List<RecalledGroup> recentGroups, boolean timeGap, List<RecalledGroup> recalledGroups,
                          List<Long> materialIds, Set<Long> deltaIds) {
             this.store = store;
             this.generation = generation;
             this.maidUuid = maidUuid;
             this.owner = owner;
-            this.recentEntries = recentEntries;
+            this.recentGroups = recentGroups;
             this.timeGap = timeGap;
             this.recalledGroups = recalledGroups;
             this.materialIds = materialIds;
             this.deltaIds = deltaIds;
         }
 
-        /** 近期窗口内的聊天（从旧到新）；档案快照为空 */
-        public List<Entry> recentEntries() {
-            return recentEntries;
-        }
-
-        /** 两个窗口之间是否需要时间间隔提示 */
+        /** 两个近期窗口之间是否需要时间间隔提示 */
         public boolean timeGap() {
             return timeGap;
         }
@@ -132,6 +127,14 @@ public final class OverheardChatStore {
         /** 本快照实际召回的档案分组（从旧到新）；近期快照为空 */
         public List<RecalledGroup> recalledGroups() {
             return recalledGroups;
+        }
+
+        /** 按编号合并本快照要渲染的分组（近期窗口分组在前，档案分组在后） */
+        public List<RecalledGroup> renderGroups() {
+            List<RecalledGroup> groups = new ArrayList<>(recentGroups.size() + recalledGroups.size());
+            groups.addAll(recentGroups);
+            groups.addAll(recalledGroups);
+            return List.copyOf(groups);
         }
 
         /** 本快照涉及的全部编号（近期窗口 + 档案分组） */
@@ -147,20 +150,6 @@ public final class OverheardChatStore {
         /** 是否有实际增量（无增量时近期快照不额外注入，也不算一次偷听注入事件） */
         public boolean hasDelta() {
             return !deltaIds.isEmpty();
-        }
-
-        /** 按编号合并本快照要渲染的分组（近期窗口在前，档案分组在后） */
-        public List<RecalledGroup> renderGroups() {
-            List<RecalledGroup> groups = new ArrayList<>();
-            if (!recentEntries.isEmpty()) {
-                List<Long> ids = new ArrayList<>(recentEntries.size());
-                for (Entry entry : recentEntries) {
-                    ids.add(entry.id());
-                }
-                groups.add(new RecalledGroup(List.copyOf(ids), recentEntries));
-            }
-            groups.addAll(recalledGroups);
-            return List.copyOf(groups);
         }
 
         private boolean valid() {
@@ -228,6 +217,9 @@ public final class OverheardChatStore {
             if (ref.fillNextId <= 0) {
                 waiting.remove(maidUuid);
             }
+            // 后文同样属于该女仆的窗口／连接候选：不在这里登记引用，正文只在全服 7 条缓冲里暂存，
+            // 缓冲一淘汰就没了；等女仆之后再听见新锚点，旧锚点的窗口就永远补不齐
+            refreshReferences(maidUuid);
         }
         Set<UUID> heard = heardMaidUuids == null ? Set.of() : new LinkedHashSet<>(heardMaidUuids);
         for (UUID maidUuid : heard) {
@@ -310,18 +302,31 @@ public final class OverheardChatStore {
         }
         OverheardChatWindows.Selection selection =
                 OverheardChatWindows.select(ref.anchors, ID_FIRST, lastAssignedId);
-        List<Long> ids = OverheardChatWindows.ids(selection);
-        List<Entry> entries = entriesOf(ids);
-        if (entries.isEmpty()) {
-            return null;
-        }
+        // 每个窗口自成一个分组：两个锚点相距较远时中间要保留间隔提示，合成一组就没了
+        List<RecalledGroup> groups = new ArrayList<>(selection.windows().size());
         Set<Long> material = new LinkedHashSet<>();
-        for (Entry entry : entries) {
-            material.add(entry.id());
+        for (OverheardChatWindows.Window window : selection.windows()) {
+            List<Long> ids = new ArrayList<>((int) Math.min(Integer.MAX_VALUE, window.endId() - window.startId() + 1));
+            for (long id = window.startId(); id <= window.endId(); id++) {
+                ids.add(id);
+            }
+            List<Entry> entries = entriesOf(ids);
+            if (entries.isEmpty()) {
+                continue;
+            }
+            List<Long> keptIds = new ArrayList<>(entries.size());
+            for (Entry entry : entries) {
+                keptIds.add(entry.id());
+                material.add(entry.id());
+            }
+            groups.add(new RecalledGroup(List.copyOf(keptIds), entries));
+        }
+        if (groups.isEmpty()) {
+            return null;
         }
         Set<Long> delta = new LinkedHashSet<>(material);
         delta.removeAll(ref.effective);
-        Snapshot snapshot = new Snapshot(this, generation, maidUuid, ref, List.copyOf(entries),
+        Snapshot snapshot = new Snapshot(this, generation, maidUuid, ref, List.copyOf(groups),
                 selection.timeGap(), List.of(), List.copyOf(material), Set.copyOf(delta));
         pin(snapshot);
         return snapshot;
@@ -417,7 +422,13 @@ public final class OverheardChatStore {
                 added.add(id);
             }
         }
-        for (RecalledGroup group : snapshot.recalledGroups) {
+        if (snapshot.recentGroups.isEmpty() && snapshot.recalledGroups.isEmpty()) {
+            refreshReferences(snapshot.maidUuid);
+            return Set.copyOf(added);
+        }
+        // 近期窗口与档案分组一样要落档：锚点被替换后这批原文仍可被检索召回，
+        // 不能只在内存里走一遍、随锚点移走就被回收
+        for (RecalledGroup group : snapshot.renderGroups()) {
             if (injected.containsAll(group.ids()) && !containsGroup(ref.archive, group.ids())) {
                 ref.archive.add(List.copyOf(group.ids()));
             }
@@ -460,7 +471,9 @@ public final class OverheardChatStore {
             }
         }
         if (removed != null) {
-            // 绑定到已移除引用记录的旧快照不能继续使用；pin 随引用移除一并释放
+            // 绑定到已移除引用记录的旧快照不能继续使用；pin 随引用移除一并释放。
+            // 只处理这一只女仆：Snapshot.valid() 另比较 MaidRef 对象身份，
+            // 对象被移出 maids 表后其快照自然失效，不需要推进全库世代把其他女仆的快照一起废掉
             List<Snapshot> stale = new ArrayList<>();
             for (Snapshot snapshot : openSnapshots) {
                 if (snapshot.owner == removed) {
@@ -470,7 +483,6 @@ public final class OverheardChatStore {
             for (Snapshot snapshot : stale) {
                 closeSnapshot(snapshot);
             }
-            generation++;
         }
     }
 

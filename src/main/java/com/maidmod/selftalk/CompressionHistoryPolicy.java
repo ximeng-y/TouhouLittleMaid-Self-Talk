@@ -72,7 +72,10 @@ public final class CompressionHistoryPolicy {
         if (store == null) {
             return null;
         }
-        // 先确保状态存在再捕获令牌：令牌按引用共享世代计数器，不能先捕获再建状态
+        // 先确保状态存在再捕获令牌：令牌按引用共享状态条目里的世代计数器，
+        // 没有状态时 capture 只能给一个独立计数器，之后清空／卸载推进的是状态表里另一个计数器，
+        // 这个摘要令牌就再也不会失效，已排队的退出任务也就挡不住迟到的摘要结果
+        SelfTalkState.get(maid.getId());
         SelfTalkRequestToken token = SelfTalkRequestToken.capture(maid.getId());
         if (!token.isValid()) {
             return null;

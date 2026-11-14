@@ -95,9 +95,10 @@ public final class OverheardChatService {
      * 无有效来源（控制台、命令方块、冒用执行者、其他 mod 的直接广播）直接返回；
      * 关闭总开关时停止采集新的偷听聊天，已有记忆保留。
      *
-     * @param content 本次实际广播对象的纯正文
+     * @param content    本次实际广播对象的纯正文
+     * @param playerName 本次广播使用的发送时显示名（含队伍前缀等修饰）；为空时回退账号名
      */
-    public static void onBroadcastCompleted(String content) {
+    public static void onBroadcastCompleted(String content, String playerName) {
         Scope scope = SCOPE.get();
         if (scope == null || scope.consumed()) {
             return;
@@ -108,11 +109,12 @@ public final class OverheardChatService {
         }
         ServerPlayer player = scope.player();
         MinecraftServer server = scope.server();
-        if (server == null || player.level().getServer() != server || !player.isAlive()) {
+        // 只校验服务器一致性：广播发起后玩家可能立刻死亡/退出，消息本身仍然真的发出了
+        if (server == null || player.level().getServer() != server) {
             return;
         }
         try {
-            collect(server, player, content, scope.source());
+            collect(server, player, playerName, content, scope.source());
         } catch (Throwable t) {
             // 采集不影响原聊天；异常只记录，不向广播路径抛出
             MaidSelfTalkMod.LOGGER.warn("Failed to record overheard player chat", t);
@@ -120,7 +122,7 @@ public final class OverheardChatService {
     }
 
     /** 在实际发送玩家所在维度按球形距离筛选存活女仆，每只独立按获取概率保存锚点 */
-    private static void collect(MinecraftServer server, ServerPlayer player, String content,
+    private static void collect(MinecraftServer server, ServerPlayer player, String playerName, String content,
                                 OverheardChatStore.Source source) {
         OverheardChatStore store = OverheardChatSavedData.storeOf(server);
         if (store == null) {
@@ -149,8 +151,11 @@ public final class OverheardChatService {
             }
         }
         long now = System.currentTimeMillis();
-        long id = store.recordQualified(player.getUUID(), player.getGameProfile().getName(), now, content,
-                source, heard);
+        // 显示名取本次广播用的绑定名：玩家有队伍前后缀或平台显示名修饰时与账号名不同；
+        // 身份判断仍用 UUID，名字只作资料里的标签
+        String name = playerName == null || playerName.isBlank()
+                ? player.getGameProfile().getName() : playerName;
+        long id = store.recordQualified(player.getUUID(), name, now, content, source, heard);
         OverheardChatSavedData.get(server).markDirtyIfChanged();
         MaidSelfTalkMod.LOGGER.debug("Recorded overheard chat {} for {} maids (source {})",
                 id, heard.size(), source);
