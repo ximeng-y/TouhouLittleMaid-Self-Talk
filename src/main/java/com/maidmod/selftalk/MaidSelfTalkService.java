@@ -143,6 +143,11 @@ public final class MaidSelfTalkService {
         // 清空恰好发生在规划期间就会被漏掉（迟到结果会照常写档案）
         SelfTalkRequestToken token = SelfTalkRequestToken.capture(maid.getId());
 
+        // 近期偷听召回：非欢迎自话每次触发只判定一次；欢迎语不新增该入口（已有有效原文仍按模式携带）。
+        // 判定在既有触发条件全部满足、设置冻结之后进行，与预制复用分流独立——命中预制时照常投放且不准备偷听资料
+        boolean overheardRecentHit = !welcome
+                && maid.getRandom().nextDouble() < Config.OVERHEARD_INJECT_PROBABILITY.get();
+
         // 预制复用（实验性，默认关闭）：有效开关按玩家默认 + 单只三态判定；
         // 命中即直接投放旧稿（跳过历史检索/人设召回/真实生成），未命中带冻结凭据继续正常生成链
         if (PlayerSettingsStore.isPrebuiltReuseEnabledForMaid(maid.level().getServer(), maid)) {
@@ -160,12 +165,12 @@ public final class MaidSelfTalkService {
             SelfTalkReuseService.ArchiveData archiveData = SelfTalkReuseService.archiveData(
                     fingerprint, source, matchEntries, selfTalkLanguage);
             return startGeneration(maid, chatManager, site, selfTalkLanguage, prompt, mode, environment,
-                    welcomeEnvironment, layout, cachedRecall, personaConfig, toolEnabled, token,
-                    welcome, keep, broadcastRange, archiveData);
+                    welcomeEnvironment, layout, cachedRecall, personaConfig, overheardRecentHit,
+                    toolEnabled, token, welcome, keep, broadcastRange, archiveData);
         }
         return startGeneration(maid, chatManager, site, selfTalkLanguage, prompt, mode, environment,
-                welcomeEnvironment, layout, cachedRecall, personaConfig, toolEnabled, token,
-                welcome, keep, broadcastRange, null);
+                welcomeEnvironment, layout, cachedRecall, personaConfig, overheardRecentHit,
+                toolEnabled, token, welcome, keep, broadcastRange, null);
     }
 
     /**
@@ -177,7 +182,8 @@ public final class MaidSelfTalkService {
                                            SelfTalkContexts.WelcomeEnvironmentSnapshot welcomeEnvironment,
                                            SelfTalkHistoryAssembler.HistoryLayout layout,
                                            HistoryContextSession.CachedRecall cachedRecall,
-                                           MaidPersonaConfig personaConfig, boolean toolEnabled,
+                                           MaidPersonaConfig personaConfig, boolean overheardRecentHit,
+                                           boolean toolEnabled,
                                            SelfTalkRequestToken token, boolean welcome, int keep,
                                            double broadcastRange,
                                            SelfTalkReuseService.ArchiveData archiveData) {
@@ -187,16 +193,18 @@ public final class MaidSelfTalkService {
                 // 自话／欢迎语没有互聊链，人设召回不做链上缓存（传 null 即无缓存）
                 null,
                 personaConfig,
+                overheardRecentHit,
+                List.of(),
                 welcome ? SelfTalkPrompts.planTriggerWelcome(selfTalkLanguage)
                         : SelfTalkPrompts.planTriggerSelfTalk(selfTalkLanguage),
                 token::isValid,
                 prepared -> dispatchSelfTalk(maid, chatManager, site, prepared, welcome, keep, broadcastRange,
                         toolEnabled, token, archiveData),
                 null,
-                // 欢迎语用触发时定格的快照渲染：人设召回块接在业务提示词之后、随机情境之前，
+                // 欢迎语用触发时定格的快照渲染：人设与偷听块接在业务提示词之后、随机情境之前，
                 // 不改变原生 <context> 包装与随机情境的既有位置
-                welcome ? (p, personaBlock) -> SelfTalkContexts.renderFrozenWelcomeUserMessage(
-                        p, personaBlock, welcomeEnvironment) : null,
+                welcome ? (p, personaBlock, overheardBlock) -> SelfTalkContexts.renderFrozenWelcomeUserMessage(
+                        p, personaBlock, overheardBlock, welcomeEnvironment) : null,
                 null);
         // 全量/精简模式同步派发：结果如实上报；检索模式在建索引/规划期间按「已受理」收束，
         // 其后的正式派发（含失败）不再回传本次调用
@@ -289,14 +297,22 @@ public final class MaidSelfTalkService {
      * 回复验证通过后据此追加一条入库。
      */
     private static boolean dispatchSelfTalk(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
-                                            List<LLMMessage> messages, boolean welcome, int keep,
-                                            double broadcastRange, boolean toolEnabled, SelfTalkRequestToken token,
+                                            HistoryContextSession.PreparedRequest prepared, boolean welcome,
+                                            int keep, double broadcastRange, boolean toolEnabled,
+                                            SelfTalkRequestToken token,
                                             SelfTalkReuseService.ArchiveData archiveData) {
         // 正式派发前再复核总开关：准备期可能在异步路径里跨过关闭时刻。
         // 关闭时返回失败，不置 pending、不建回调、不发正式生成
         if (!Config.ENABLED.get()) {
             return false;
         }
+        // 入库资格在创建回调之前冻结：FULL 一律不入库；COMPACT／RETRIEVAL 仅本次有实际偷听
+        // 新增／重新召回时禁入库；其余沿用原冻结凭据
+        SelfTalkReuseService.ArchiveData effectiveArchiveData = archiveData;
+        if (prepared.overheardEvent() || prepared.mode() == HistoryContextMode.FULL) {
+            effectiveArchiveData = null;
+        }
+        List<LLMMessage> messages = prepared.messages();
         // 标记进行中（防重入）
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.selfTalkPending = true;
@@ -308,12 +324,13 @@ public final class MaidSelfTalkService {
             // 预制语音缓存捕获上下文：凭据齐全且世界开关开启时携带（条目身份待入库结果回填），
             // TTS 关闭或供应商被排除时不携带——前者不会发起合成，后者的音频无法缓存
             PrebuiltAudioContext captureContext = null;
-            if (archiveData != null && PlayerSettingsStore.isPrebuiltAudioEnabled(maid.level().getServer())) {
-                captureContext = PrebuiltAudioContext.forCapture(token, archiveData.fingerprint(),
-                        archiveData.source(), null, null);
+            if (effectiveArchiveData != null
+                    && PlayerSettingsStore.isPrebuiltAudioEnabled(maid.level().getServer())) {
+                captureContext = PrebuiltAudioContext.forCapture(token, effectiveArchiveData.fingerprint(),
+                        effectiveArchiveData.source(), null, null);
             }
             callback = new SelfTalkCallback(chatManager, messages, welcome, keep,
-                    broadcastRange, toolEnabled, token, archiveData, false, captureContext);
+                    broadcastRange, toolEnabled, token, effectiveArchiveData, false, captureContext);
             state.currentSelfTalkCallback = callback;
             client.chat(callback);
         } catch (Throwable t) {
