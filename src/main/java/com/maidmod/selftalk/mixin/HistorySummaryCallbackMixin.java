@@ -7,6 +7,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.maidmod.selftalk.OverheardChatSavedData;
 import com.maidmod.selftalk.OverheardSummaryHost;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -76,6 +77,12 @@ public abstract class HistorySummaryCallbackMixin implements OverheardSummaryHos
                 return;
             }
             context.store().retireEffective(context.maidUuid(), context.coveredIds());
+            // 退出自动携带是持久变更：与其他写入点一样立即比对并置脏，
+            // 不依赖之后恰好还有别的偷听写入把它顺带落盘
+            OverheardChatSavedData data = OverheardChatSavedData.get(maid.level().getServer());
+            if (data != null) {
+                data.markDirtyIfChanged();
+            }
         });
     }
 
