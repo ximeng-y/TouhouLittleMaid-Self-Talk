@@ -35,7 +35,7 @@ public abstract class OverheardSayCommandMixin {
     private void maid_self_talk$markPlayerSaySource(PlayerList playerList, PlayerChatMessage message,
                                                     CommandSourceStack source, ChatType.Bound bound,
                                                     Operation<Void> original) {
-        ServerPlayer sender = realSender(source, bound);
+        ServerPlayer sender = realSender(source);
         OverheardChatService.ScopeHandle scope = sender == null ? null : OverheardChatService.beginPlayerSay(sender);
         try {
             original.call(playerList, message, (Predicate<ServerPlayer>) source::shouldFilterMessageTo,
@@ -47,9 +47,9 @@ public abstract class OverheardSayCommandMixin {
         }
     }
 
-    /** 命令来源是否确为玩家本人执行；控制台、命令方块、伪装玩家与非 SAY 类型一律不合格 */
-    private static ServerPlayer realSender(CommandSourceStack source, ChatType.Bound bound) {
-        if (source == null || bound == null || !(source.source instanceof ServerPlayer player)) {
+    /** 命令来源是否确为玩家本人执行；控制台、命令方块与伪装玩家一律不合格 */
+    private static ServerPlayer realSender(CommandSourceStack source) {
+        if (source == null || !(source.source instanceof ServerPlayer player)) {
             return null;
         }
         if (source.getEntity() != player) {
