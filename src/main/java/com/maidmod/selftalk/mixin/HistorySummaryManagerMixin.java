@@ -1,17 +1,24 @@
 package com.maidmod.selftalk.mixin;
 
+import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.LLMCallback;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.MaidAIChatManager;
 import com.github.tartaricacid.touhoulittlemaid.ai.manager.entity.summary.HistorySummaryManager;
+import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.maidmod.selftalk.AutonomousChatHistory;
 import com.maidmod.selftalk.AutonomousChatHistoryHost;
 import com.maidmod.selftalk.AutonomousChatHistoryMigration;
 import com.maidmod.selftalk.CompressionHistoryPolicy;
 import com.maidmod.selftalk.HistoryRetrievalCache;
+import com.maidmod.selftalk.OverheardChatContext;
+import com.maidmod.selftalk.OverheardSummaryHost;
 import com.maidmod.selftalk.SelfTalkProvenance;
 import net.minecraft.server.level.ServerLevel;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
@@ -20,42 +27,66 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.List;
 
 /**
- * 历史压缩（TLM 摘要替换旧消息）时的两处接入：压缩材料来源口，以及压缩成功后的指纹清理。
+ * 历史压缩（TLM 摘要替换旧消息）时的接入：压缩材料来源口、迁移入口与摘要 Prompt 追加，
+ * 以及把本次偷听覆盖上下文移交给实际 callback。
  * <p>
  * 一、{@code buildSummaryRequest} 的入参处理处调用 {@link CompressionHistoryPolicy}：
- * 摘要<b>材料副本</b>从统一入口取，默认只用 TLM 原始快照（自话／欢迎语／互聊与工具过程
- * 已改存独立档案，不在 TLM 队列里）。必须分清两份数据——原始快照仍由 TLM 用于尾部一致性校验
- * 与成功后的删除依据，材料副本只用于构造摘要请求，两者绝不混用。
+ * 摘要<b>材料副本</b>从统一入口取，默认只用 TLM 原始快照。必须分清两份数据——原始快照仍由
+ * TLM 用于尾部一致性校验与成功后的删除依据，材料副本只用于构造摘要请求，两者绝不混用。
+ * 同一次调用里冻结「本次覆盖的偷听有效原文」，暂存到本 Manager 实例。
  * <p>
- * 二、注入点选 TAIL：{@code completeHistorySummary} 的所有提前返回路径
- * （压缩进行标志守卫、摘要空白、快照与历史不一致）都不会到达 TAIL，即指纹删除只在
- * 「pollLast 已真正删除历史消息」的成功路径上执行——判定始终与历史内容同步。
+ * 二、压缩调度前完成旧数据迁移（{@code tryScheduleHistorySummary} 开始处）。
  * <p>
- * 该回调在 LLM 响应线程执行（TLM 异步摘要），而附件容器（AttachmentHolder）的
- * IdentityHashMap 非线程安全，故派发到服务端主线程删除（延迟一 tick 无害——
- * 被压缩的消息已出历史，指纹多留一 tick 只是短暂死条目）。
+ * 三、{@code HistorySummaryPrompts.buildSummaryRequest} 的调用点用 {@code @WrapOperation}
+ * 先执行原操作，再在返回的既有 Prompt 后追加偷听摘要规则；没有偷听材料时原样返回，
+ * 不复制也不替换 TLM 整段 Prompt。
  * <p>
- * 另在 {@code tryScheduleHistorySummary} 开始处完成旧数据迁移：自动与手动两条压缩入口
- * 都先看到已清理的 TLM 历史（幂等；迁移只搬旧指纹明确命中的存量自话）。
+ * 四、{@code tryScheduleHistorySummary} 里对 {@code LLMClient.chat(LLMCallback)} 使用
+ * {@code @WrapOperation}：把暂存上下文交给这次实际 {@code HistorySummaryCallback}，
+ * 清掉暂存后再执行原调用一次。同一鉴权失败路径释放暂存并保留原异常行为；
+ * 方法 RETURN 清理未移交的暂存。
+ * <p>
+ * 五、原有 TAIL 注入（指纹清理、顺序号修剪、检索缓存失效）保持不变。
  */
-@Mixin(HistorySummaryManager.class)
+@Mixin(value = HistorySummaryManager.class, remap = false)
 public abstract class HistorySummaryManagerMixin {
+
+    /** 本次摘要请求冻结的偷听覆盖上下文（由材料参数处理处填入，移交 callback 或方法 RETURN 时清空） */
+    @Unique
+    private OverheardSummaryHost.Context maid_self_talk$overheardContext;
 
     /**
      * 压缩材料副本的唯一生成口。
      * <p>
-     * 只改{@code buildSummaryRequest} 收到的材料，不动原始快照：
-     * {@code matchesTailSnapshot} 与成功后的 {@code pollLast} 都仍以 TLM 自己的快照为准，
-     * 因此即使将来策略往材料里加内容，也不会让 TLM 删错历史。
+     * 只改 {@code buildSummaryRequest} 收到的材料，不动原始快照：
+     * {@code matchesTailSnapshot} 与成功后的 {@code pollLast} 都仍以 TLM 自己的快照为准。
      */
-    @ModifyVariable(method = "buildSummaryRequest", at = @At("HEAD"), argsOnly = true)
+    @ModifyVariable(method = "buildSummaryRequest", remap = false, at = @At("HEAD"), argsOnly = true)
     private List<LLMMessage> maid_self_talk$summaryMaterial(List<LLMMessage> snapshot) {
         MaidAIChatManager manager = ((HistorySummaryManagerAccessor) (Object) this).maid_self_talk$getChatManager();
-        return CompressionHistoryPolicy.summaryMaterial(manager == null ? null : manager.getMaid(), snapshot);
+        CompressionHistoryPolicy.Result result = CompressionHistoryPolicy.prepare(
+                manager == null ? null : manager.getMaid(), snapshot);
+        // 同一次调度只会调用一次 buildSummaryRequest；若有残留（上次异常路径），以本次为准
+        this.maid_self_talk$overheardContext = result.context();
+        return result.material();
+    }
+
+    /** 在既有摘要 Prompt 之后追加偷听来源要求；没有偷听材料时原样返回 */
+    @WrapOperation(method = "buildSummaryRequest", remap = false,
+            at = @At(value = "INVOKE", remap = false,
+                    target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/manager/entity/summary/HistorySummaryPrompts;buildSummaryRequest(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"))
+    private String maid_self_talk$appendOverheardSummaryRules(String previousSummary, String historyBlock,
+                                                             Operation<String> original) {
+        String prompt = original.call(previousSummary, historyBlock);
+        OverheardSummaryHost.Context context = this.maid_self_talk$overheardContext;
+        if (context == null || prompt == null || prompt.isEmpty()) {
+            return prompt;
+        }
+        return prompt + OverheardChatContext.summaryPromptSuffix(context.chinese());
     }
 
     /** 压缩调度前完成旧数据迁移：自动与手动压缩共用同一幂等入口 */
-    @Inject(method = "tryScheduleHistorySummary", at = @At("HEAD"))
+    @Inject(method = "tryScheduleHistorySummary", remap = false, at = @At("HEAD"))
     private void maid_self_talk$migrateBeforeSummary(Runnable afterSummary, CallbackInfoReturnable<Boolean> cir) {
         MaidAIChatManager manager = ((HistorySummaryManagerAccessor) (Object) this).maid_self_talk$getChatManager();
         if (manager != null) {
@@ -63,7 +94,33 @@ public abstract class HistorySummaryManagerMixin {
         }
     }
 
-    @Inject(method = "completeHistorySummary", at = @At("TAIL"))
+    /**
+     * 把本次覆盖上下文移交给实际摘要 callback。
+     * <p>
+     * 只有这里移交过的上下文才会在原生接受成功后让编号退出有效范围；
+     * 移交后清掉暂存，确保一个上下文只对应一次真实请求。
+     */
+    @WrapOperation(method = "tryScheduleHistorySummary", remap = false,
+            at = @At(value = "INVOKE", remap = false,
+                    target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/service/llm/LLMClient;chat(Lcom/github/tartaricacid/touhoulittlemaid/ai/manager/entity/LLMCallback;)V"))
+    private void maid_self_talk$handOverOverheardContext(LLMClient client, LLMCallback callback,
+                                                         Operation<Void> original) {
+        OverheardSummaryHost.Context context = this.maid_self_talk$overheardContext;
+        this.maid_self_talk$overheardContext = null;
+        if (context != null && callback instanceof OverheardSummaryHost host) {
+            host.maid_self_talk$setOverheardSummary(context);
+        }
+        original.call(client, callback);
+    }
+
+    /** 未走到派发的提前返回：清掉暂存的覆盖上下文，不让它串到下一次调度 */
+    @Inject(method = "tryScheduleHistorySummary", remap = false, at = @At("RETURN"))
+    private void maid_self_talk$clearPendingOverheardContext(Runnable afterSummary,
+                                                             CallbackInfoReturnable<Boolean> cir) {
+        this.maid_self_talk$overheardContext = null;
+    }
+
+    @Inject(method = "completeHistorySummary", remap = false, at = @At("TAIL"))
     private void maid_self_talk$removeCompressedProvenance(String summary, List<LLMMessage> snapshot,
                                                            CallbackInfoReturnable<Boolean> cir) {
         MaidAIChatManager manager = ((HistorySummaryManagerAccessor) (Object) this).maid_self_talk$getChatManager();
@@ -79,8 +136,6 @@ public abstract class HistorySummaryManagerMixin {
             if (history != null) {
                 history.pruneOrderMetadata(manager.getHistory().getDeque());
             }
-            // 压缩把旧消息换成了摘要：可检索对话随之变化，只做失效标记。
-            // 独立档案与有效自话上下文不在这里清理——它们随 AI 数据另行保存，不受压缩影响
             HistoryRetrievalCache.invalidate(maid);
         });
     }

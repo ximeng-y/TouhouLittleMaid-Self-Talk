@@ -9,7 +9,10 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.maidmod.selftalk.AutonomousChatHistory;
 import com.maidmod.selftalk.AutonomousChatHistoryHost;
 import com.maidmod.selftalk.AutonomousChatHistoryMigration;
+import com.maidmod.selftalk.HistoryRetrievalCache;
 import com.maidmod.selftalk.MaidSelfTalkService;
+import com.maidmod.selftalk.OverheardChatSavedData;
+import com.maidmod.selftalk.OverheardChatStore;
 import com.maidmod.selftalk.SelfTalkProvenance;
 import net.minecraft.nbt.CompoundTag;
 import org.spongepowered.asm.mixin.Mixin;
@@ -218,5 +221,16 @@ public abstract class MaidAIChatDataMixin implements AutonomousChatHistoryHost {
         // 互聊链上对方对本女仆的续接）。作废后迟到结果只清自己的资源，不写档案/窗口/事件/广播。
         // 这里只处理本 mod 的请求，不扩展为全面重写 TLM 普通玩家请求的取消机制
         MaidSelfTalkService.invalidateRequestsOnClear(maid);
+        // 偷听：一并清空这只女仆的锚点、有效原文、已召回档案与相关引用（其他女仆不受影响），
+        // 并丢弃该女仆的检索缓存——旧缓存里的档案分组已不再属于她的引用记录
+        OverheardChatStore store = OverheardChatSavedData.storeOf(maid.level().getServer());
+        if (store != null) {
+            store.clearMaid(maid.getUUID());
+            OverheardChatSavedData data = OverheardChatSavedData.get(maid.level().getServer());
+            if (data != null) {
+                data.markDirtyIfChanged();
+            }
+        }
+        HistoryRetrievalCache.drop(maid);
     }
 }

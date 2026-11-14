@@ -9,6 +9,7 @@ import com.maidmod.selftalk.history.PlayerDialogueLibrary;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +66,10 @@ public final class HistoryRetrievalCache {
         List<String> sourceTokens;
         /** 分块结果（下标基于可检索序列） */
         List<DialogueBlock> blocks;
+        /** 本女仆偷听档案候选（与本条目同一来源快照） */
+        List<OverheardCandidate> overheard = List.of();
+        /** 本次快照里偷听档案的来源标识（分组编号与纯文本） */
+        List<String> overheardTokens = List.of();
         HistoryRetrievalIndex index;
         /** 失效标记：原始历史可能已变化；下次检索先比对来源序列，未变则直接复用并解除标记 */
         boolean dirty;
@@ -80,13 +85,35 @@ public final class HistoryRetrievalCache {
      *
      * @param index      索引（已确保对应当前来源序列）
      * @param searchable 可检索序列及回原始历史区的下标映射
+     * @param overheard  候选映射里偷听档案块的记录（按索引临时候选下标）
      */
-    public record Result(HistoryRetrievalIndex index, SelfTalkHistoryAssembler.SearchableIndices searchable) {
+    public record Result(HistoryRetrievalIndex index, SelfTalkHistoryAssembler.SearchableIndices searchable,
+                         List<OverheardCandidate> overheard) {
 
-        /** 是否已有可检索的玩家对话（没有就不必发关键词规划请求） */
+        /** 是否已有可检索的玩家对话或偷听档案（都没有就不必发关键词规划请求） */
         public boolean hasSearchableHistory() {
             return index.blockCount() > 0;
         }
+
+        /** 该检索下标是否为偷听档案候选；不是则返回 null */
+        public OverheardCandidate overheardAt(int blockStartIndex) {
+            for (OverheardCandidate candidate : overheard) {
+                if (candidate.startIndex() == blockStartIndex) {
+                    return candidate;
+                }
+            }
+            return null;
+        }
+    }
+
+    /**
+     * 合并候选池里的一段偷听档案（正常聊天块先占下标，偷听块接在其后）。
+     *
+     * @param startIndex 该块在合并候选序列里的起始下标
+     * @param ids        该分组的消息编号（有序）
+     * @param text       检索用纯文本
+     */
+    public record OverheardCandidate(int startIndex, List<Long> ids, String text) {
     }
 
     /**
@@ -99,10 +126,25 @@ public final class HistoryRetrievalCache {
      * 构建失败（极少见）时以「没有可检索历史」回调：本次不召回，仍进入一次正式生成。
      */
     public static void indexFor(EntityMaid maid, List<LLMMessage> history, Consumer<Result> onReady) {
+        indexFor(maid, history, List.of(), onReady);
+    }
+
+    /**
+     * 同 {@link #indexFor(EntityMaid, List, Consumer)}，并把该女仆已召回的偷听档案并入同一检索池。
+     * <p>
+     * 候选顺序固定：正常聊天原顺序在前，偷听档案按首个消息编号排序接在后；该顺序只用于现有
+     * 检索下标与同分处理，不新增持久排序键。一次检索在合并池中最多选 3 个完整旧资料块，
+     * 不会两类各取 3 个。
+     *
+     * @param archived 该女仆的偷听档案分组（主线程取得的纯文本快照）
+     */
+    public static void indexFor(EntityMaid maid, List<LLMMessage> history,
+                                List<OverheardChatStore.Group> archived, Consumer<Result> onReady) {
         UUID ownerUuid = maid.getOwnerUUID();
         List<HistoryMessage> view = SelfTalkHistoryAssembler.toSearchableView(history);
         SelfTalkHistoryAssembler.SearchableIndices searchable =
                 SelfTalkHistoryAssembler.filterSearchable(view, SelfTalkHistoryAssembler.selfTalkFingerprints(maid));
+        List<OverheardChatStore.Group> groups = archived == null ? List.of() : archived;
 
         Entry entry = CACHE.get(maid.getUUID());
         if (entry == null || entry.maid != maid || !Objects.equals(entry.ownerUuid, ownerUuid)) {
@@ -112,30 +154,92 @@ public final class HistoryRetrievalCache {
         }
 
         List<String> tokens = PlayerDialogueLibrary.snapshotTokens(searchable.searchable());
-        if (entry.index != null && entry.sourceTokens != null && entry.sourceTokens.equals(tokens)) {
+        List<String> overheardTokens = overheardTokens(groups);
+        if (entry.index != null && entry.sourceTokens != null && entry.sourceTokens.equals(tokens)
+                && entry.overheardTokens.equals(overheardTokens)) {
             // 来源序列未变：直接复用旧索引，失效标记就此解除（序列校验替代了立即重建）
             entry.dirty = false;
-            onReady.accept(new Result(entry.index, searchable));
+            onReady.accept(new Result(entry.index, searchable, entry.overheard));
             return;
         }
 
         final Entry target = entry;
         final int generation = target.generation;
         final List<HistoryMessage> source = searchable.searchable();
+        final List<HistorySourceBlock> combined = combinedBlocks(source, groups);
         try {
             worker().execute(() -> {
-                List<DialogueBlock> blocks = PlayerDialogueLibrary.buildBlocks(source);
+                List<DialogueBlock> blocks = new ArrayList<>(combined.size());
+                for (HistorySourceBlock block : combined) {
+                    blocks.add(block.block());
+                }
+                List<OverheardCandidate> overheardCandidates = new ArrayList<>();
+                for (int i = 0; i < combined.size(); i++) {
+                    OverheardChatStore.Group group = combined.get(i).group();
+                    if (group != null) {
+                        overheardCandidates.add(new OverheardCandidate(
+                                combined.get(i).block().startIndex(), group.ids(), group.text()));
+                    }
+                }
                 HistoryRetrievalIndex index = HistoryRetrievalIndex.build(blocks);
                 // 缓存写回与 onReady 回调都必须在服务端主线程执行：
                 // 回调会读取实体与状态机并提交 LLM 请求，不能留在文本工作线程
-                publish(target, generation, tokens, blocks, index, new Result(index, searchable), onReady);
+                publish(target, generation, tokens, overheardTokens, blocks, overheardCandidates, index,
+                        new Result(index, searchable, List.copyOf(overheardCandidates)), onReady);
             });
         } catch (Throwable t) {
             // 执行器已释放（服务器正在停止）：本次不召回，不复活缓存
             MaidSelfTalkMod.LOGGER.warn("Retrieval index worker unavailable for maid {}, no recall",
                     maid.getId(), t);
-            onReady.accept(new Result(HistoryRetrievalIndex.empty(), searchable));
+            onReady.accept(new Result(HistoryRetrievalIndex.empty(), searchable, List.of()));
         }
+    }
+
+    /** 合并候选池的一段来源：正常聊天块或偷听档案分组（二者互斥） */
+    private record HistorySourceBlock(DialogueBlock block, OverheardChatStore.Group group) {
+    }
+
+    /**
+     * 合并候选池：正常聊天原顺序在前，偷听档案按首个消息编号排序在后。
+     * <p>
+     * 正常聊天仍按 {@link PlayerDialogueLibrary#buildBlocks} 分块；偷听片段直接构造成
+     * 单文档块，不经过 USER／ASSISTANT 配对过滤。
+     */
+    private static List<HistorySourceBlock> combinedBlocks(List<HistoryMessage> searchable,
+                                                           List<OverheardChatStore.Group> groups) {
+        List<HistorySourceBlock> combined = new ArrayList<>();
+        int offset = 0;
+        for (DialogueBlock block : PlayerDialogueLibrary.buildBlocks(searchable)) {
+            combined.add(new HistorySourceBlock(block, null));
+            offset += block.messages().size();
+        }
+        List<OverheardChatStore.Group> ordered = new ArrayList<>(groups);
+        ordered.sort((a, b) -> {
+            long firstA = a.ids().isEmpty() ? Long.MAX_VALUE : a.ids().get(0);
+            long firstB = b.ids().isEmpty() ? Long.MAX_VALUE : b.ids().get(0);
+            return Long.compare(firstA, firstB);
+        });
+        for (OverheardChatStore.Group group : ordered) {
+            if (group.ids().isEmpty() || group.text() == null || group.text().isBlank()) {
+                continue;
+            }
+            HistoryMessage message = new HistoryMessage(HistoryMessage.ROLE_USER, group.text(), 0L, false);
+            combined.add(new HistorySourceBlock(new DialogueBlock(offset, List.of(message)), group));
+            offset++;
+        }
+        return List.copyOf(combined);
+    }
+
+    /** 偷听档案来源标识：分组编号与纯文本，任一变化都要求重建索引 */
+    private static List<String> overheardTokens(List<OverheardChatStore.Group> groups) {
+        if (groups.isEmpty()) {
+            return List.of();
+        }
+        List<String> tokens = new ArrayList<>(groups.size());
+        for (OverheardChatStore.Group group : groups) {
+            tokens.add(group.ids().toString() + '\u0000' + group.text());
+        }
+        return List.copyOf(tokens);
     }
 
     /**
@@ -144,9 +248,9 @@ public final class HistoryRetrievalCache {
      * 即使世代号已过期（缓存不采用本次构建），索引仍对应本次来源快照，回调照常交付；
      * 服务器已停止时整体放弃——不写缓存也不再回调，调用方的会话随世界一并销毁。
      */
-    private static void publish(Entry entry, int generation, List<String> tokens,
-                                List<DialogueBlock> blocks, HistoryRetrievalIndex index,
-                                Result result, Consumer<Result> onReady) {
+    private static void publish(Entry entry, int generation, List<String> tokens, List<String> overheardTokens,
+                                List<DialogueBlock> blocks, List<OverheardCandidate> overheardCandidates,
+                                HistoryRetrievalIndex index, Result result, Consumer<Result> onReady) {
         EntityMaid maid = entry.maid;
         if (maid.level().getServer() == null) {
             return;
@@ -156,6 +260,8 @@ public final class HistoryRetrievalCache {
                 entry.blocks = blocks;
                 entry.index = index;
                 entry.sourceTokens = tokens;
+                entry.overheardTokens = overheardTokens;
+                entry.overheard = overheardCandidates;
                 entry.dirty = false;
             }
             onReady.accept(result);

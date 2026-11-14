@@ -3,6 +3,7 @@ package com.maidmod.selftalk;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -19,8 +20,9 @@ import java.util.List;
  * 「原样使用 TLM 原始快照」——独立档案、有效自话上下文与互聊窗口一律不参与摘要材料，
  * 也不为它们单独触发压缩（触发条件仍只看 TLM 普通历史条数与 token 用量，见 TLM 侧判定）。
  * <p>
- * 预留本入口是为后续可能的「是否把来源重新纳入压缩材料」配置：届时只改这里，
- * 不改 TLM 的删除依据。当前不开放任一来源配置，不实现「重新纳入自话／互聊」的选项。
+ * 偷听聊天是另一套口径：它是「有效原文」而不是 TLM 历史，普通摘要看不到它。
+ * 这里额外冻结一份本次摘要覆盖的偷听上下文（编号、store 与请求令牌），
+ * 由 Manager 的注入点交给实际回调；只有原生摘要被接受后，这些编号才退出自动携带。
  */
 public final class CompressionHistoryPolicy {
 
@@ -28,17 +30,69 @@ public final class CompressionHistoryPolicy {
     }
 
     /**
-     * 生成本次摘要使用的消息材料副本。
+     * 本次摘要使用的消息材料与附带的偷听覆盖快照。
      *
-     * @param maid    所属女仆（当前策略不使用；供后续按来源筛选或按女仆取独立档案）
-     * @param tlmSnapshot TLM 取出的原始快照（最旧端到新端），<b>只读</b>
-     * @return 供构造摘要请求使用的材料副本；默认与原始快照内容相同、互不影响
+     * @param material 摘要请求的消息材料副本（不可变）
+     * @param context  偷听覆盖上下文；没有有效偷听原文时为 null
      */
-    public static List<LLMMessage> summaryMaterial(EntityMaid maid, List<LLMMessage> tlmSnapshot) {
-        if (tlmSnapshot == null || tlmSnapshot.isEmpty()) {
-            return List.of();
+    public record Result(List<LLMMessage> material, OverheardSummaryHost.Context context) {
+    }
+
+    /**
+     * 生成本次摘要使用的消息材料副本与偷听覆盖上下文。
+     *
+     * @param maid        所属女仆
+     * @param tlmSnapshot TLM 取出的原始快照（最旧端到新端），<b>只读</b>
+     */
+    public static Result prepare(EntityMaid maid, List<LLMMessage> tlmSnapshot) {
+        List<LLMMessage> base = tlmSnapshot == null || tlmSnapshot.isEmpty()
+                ? List.of() : List.copyOf(tlmSnapshot);
+        OverheardSummaryHost.Context context = freezeOverheard(maid);
+        if (context == null) {
+            return new Result(base, null);
         }
-        // 默认策略：只用 TLM 原始快照。返回不可变副本，调用方无法借此改回原始快照
-        return List.copyOf(tlmSnapshot);
+        // 材料副本追加一段旁听聊天：只影响摘要请求，不改 TLM 原始快照与删除依据
+        String block = OverheardChatContext.summaryMaterialBlock(context.store(), context.coveredIds(),
+                context.chinese());
+        if (block.isBlank()) {
+            return new Result(base, context);
+        }
+        List<LLMMessage> material = new ArrayList<>(base.size() + 1);
+        material.addAll(base);
+        material.add(LLMMessage.userChat(maid, block));
+        return new Result(List.copyOf(material), context);
+    }
+
+    /** 冻结本次摘要覆盖的偷听有效原文；没有有效原文或取不到世界时返回 null */
+    private static OverheardSummaryHost.Context freezeOverheard(EntityMaid maid) {
+        if (maid == null || maid.level().getServer() == null) {
+            return null;
+        }
+        OverheardChatStore store = OverheardChatSavedData.storeOf(maid.level().getServer());
+        if (store == null) {
+            return null;
+        }
+        // 先确保状态存在再捕获令牌：令牌按引用共享状态条目里的世代计数器，
+        // 没有状态时 capture 只能给一个独立计数器，之后清空／卸载推进的是状态表里另一个计数器，
+        // 这个摘要令牌就再也不会失效，已排队的退出任务也就挡不住迟到的摘要结果
+        SelfTalkState.get(maid.getId());
+        SelfTalkRequestToken token = SelfTalkRequestToken.capture(maid.getId());
+        if (!token.isValid()) {
+            return null;
+        }
+        List<OverheardChatStore.Entry> effective = store.readEffectiveMessages(maid.getUUID());
+        if (effective.isEmpty()) {
+            return null;
+        }
+        List<Long> ids = new ArrayList<>(effective.size());
+        for (OverheardChatStore.Entry entry : effective) {
+            ids.add(entry.id());
+        }
+        String chatLanguage = maid.getAiChatManager() == null ? null
+                : maid.getAiChatManager().chatLanguage;
+        boolean chinese = ContextLanguage.of(SelfTalkContexts.sanitizeLanguage(
+                chatLanguage == null || chatLanguage.isBlank()
+                        ? Config.SELF_TALK_LANGUAGE.get() : chatLanguage)).isZh();
+        return new OverheardSummaryHost.Context(maid.getUUID(), token, store, List.copyOf(ids), chinese);
     }
 }

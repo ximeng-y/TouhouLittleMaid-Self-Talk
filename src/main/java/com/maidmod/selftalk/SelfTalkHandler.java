@@ -400,6 +400,12 @@ public final class SelfTalkHandler {
      */
     @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
+        // 偷听：原生最终保存已完成，这里只关闭本世界 store 的快照／提交能力（不删持久字段、
+        // 不搬缓冲、不重新开启保存）。晚到的释放／提交不能再修改已关闭的 store
+        OverheardChatStore overheardStore = OverheardChatSavedData.storeOf(event.getServer());
+        if (overheardStore != null) {
+            overheardStore.closeRuntime();
+        }
         PersonaSplitService.onServerStopped();
         SelfTalkState.dropAll();
         InterChatRequest.dropAll();
