@@ -105,7 +105,7 @@ public final class MaidInterChatService {
         chain.registerRequest(maid, request);
         // 偷听资料：整条链只抽一次近期注入概率（创建时判定，续接不重抽）；
         // 链内首次发言冻结该参与者自己的近期快照，后续轮次复用首次派发记录的结果
-        List<Long> reusedOverheardIds = chain.overheardRoundIds(maid);
+        OverheardRecallSession.Round reusedOverheardRound = chain.overheardRound(maid);
         // 「首次召回已完成」按登记标志判断，不按编号表是否为空：首次派发没有可注入片段时
         // 记录的就是空结果，续轮必须继续沿用这份空结果，不能重新按当时锚点选一批新资料
         boolean overheardRoundReused = chain.overheardRoundRecorded(maid);
@@ -119,7 +119,7 @@ public final class MaidInterChatService {
                 // 已登记本轮资料时不再重新抽概率：只按绑定校验复用同一轮背景
                 !overheardRoundReused && chain.overheardRecentHit(),
                 overheardRoundReused,
-                reusedOverheardIds,
+                reusedOverheardRound,
                 // 本轮触发内容（对方发言时连同来源标注；发起者用场合说明）——规划资料据此判断该查什么
                 isResponder ? SelfTalkPrompts.planTriggerPeerMessage(language, peerText)
                         : SelfTalkPrompts.planTriggerInterChatInitiator(language),
@@ -143,9 +143,9 @@ public final class MaidInterChatService {
                     }
 
                     @Override
-                    public void reportOverheardRound(List<Long> ids) {
-                        // 首次派发记录本轮资料编号：同链后续轮次复用它，不再次追加有效历史
-                        chain.recordOverheardRound(maid, ids);
+                    public void reportOverheardRound(OverheardRecallSession.Round round) {
+                        // 首次派发记录本轮资料：同链后续轮次复用它，不再次追加有效历史
+                        chain.recordOverheardRound(maid, round);
                     }
                 },
                 null,

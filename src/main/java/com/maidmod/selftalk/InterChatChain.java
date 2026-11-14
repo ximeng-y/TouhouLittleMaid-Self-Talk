@@ -73,8 +73,8 @@ public final class InterChatChain {
          * 不再次追加有效历史，也不持有长期 pin。
          */
         private boolean overheardRoundRecorded;
-        /** 本链该女仆首次派发时实际注入的偷听资料编号 */
-        private List<Long> overheardRoundIds = List.of();
+        /** 本链该女仆首次派发时实际注入的偷听本轮资料（按窗口分组，含间隔标志） */
+        private OverheardRecallSession.Round overheardRound = OverheardRecallSession.Round.empty();
         /**
          * 该女仆在本链的人设召回是否已完成（「未命中/空结果」也算完成）。
          * 与历史召回<b>分别</b>判断：FULL／COMPACT 下历史无需召回，人设结果照样记录与复用。
@@ -147,9 +147,9 @@ public final class InterChatChain {
             return formalPhase;
         }
 
-        /** 本链该女仆首次派发时注入的偷听资料编号（未登记时为空表） */
-        public List<Long> overheardRoundIds() {
-            return overheardRoundIds;
+        /** 本链该女仆首次派发时注入的偷听本轮资料（未登记时为空） */
+        public OverheardRecallSession.Round overheardRound() {
+            return overheardRound;
         }
 
         /** 该女仆在本链的偷听本轮资料是否已登记（空结果同样算已登记） */
@@ -157,13 +157,13 @@ public final class InterChatChain {
             return overheardRoundRecorded;
         }
 
-        /** 登记本链该女仆首次派发时注入的偷听资料编号（同一女仆只生效一次；空表同样算已登记） */
-        private void recordOverheardRound(List<Long> ids) {
+        /** 登记本链该女仆首次派发时注入的偷听本轮资料（同一女仆只生效一次；空结果同样算已登记） */
+        private void recordOverheardRound(OverheardRecallSession.Round round) {
             if (overheardRoundRecorded) {
                 return;
             }
             this.overheardRoundRecorded = true;
-            this.overheardRoundIds = ids == null ? List.of() : List.copyOf(ids);
+            this.overheardRound = round == null ? OverheardRecallSession.Round.empty() : round;
         }
 
         /** 是否被主人插话禁言 */
@@ -377,10 +377,10 @@ public final class InterChatChain {
         return overheardRecentHit;
     }
 
-    /** 该女仆在本链首次派发时注入的偷听资料编号（未登记时为空表） */
-    public List<Long> overheardRoundIds(EntityMaid maid) {
+    /** 该女仆在本链首次派发时注入的偷听本轮资料（未登记时为空） */
+    public OverheardRecallSession.Round overheardRound(EntityMaid maid) {
         Participant participant = participants.get(maid.getId());
-        return participant == null ? List.of() : participant.overheardRoundIds();
+        return participant == null ? OverheardRecallSession.Round.empty() : participant.overheardRound();
     }
 
     /** 该女仆在本链的偷听本轮资料是否已登记（空结果同样算已登记） */
@@ -389,9 +389,9 @@ public final class InterChatChain {
         return participant != null && participant.overheardRoundRecorded();
     }
 
-    /** 登记该女仆本链首次派发时注入的偷听资料编号（同一女仆只生效一次；空表也登记） */
-    public void recordOverheardRound(EntityMaid maid, List<Long> ids) {
-        participant(maid).recordOverheardRound(ids);
+    /** 登记该女仆本链首次派发时注入的偷听本轮资料（同一女仆只生效一次；空结果也登记） */
+    public void recordOverheardRound(EntityMaid maid, OverheardRecallSession.Round round) {
+        participant(maid).recordOverheardRound(round);
     }
 
     /**

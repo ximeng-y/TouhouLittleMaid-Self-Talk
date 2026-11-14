@@ -33,8 +33,31 @@ public final class OverheardRecallSession {
     private OverheardChatStore.Snapshot archived;
     /** 渲染后实际进入请求的主动召回编号（近期 + 命中档案） */
     private final Set<Long> injected = new LinkedHashSet<>();
-    /** 其中属于近期窗口的编号（链内复用的「本轮资料」只记这一批） */
-    private final Set<Long> recentInjected = new LinkedHashSet<>();
+    /** 其中属于近期窗口的编号，按窗口分组保留（链内复用的「本轮资料」只记这一批） */
+    private final List<List<Long>> renderedRecentGroups = new ArrayList<>();
+    /** 渲染时真正输出的窗口间隔标志（两个近期窗口都渲染出来才为 true） */
+    private boolean renderedTimeGap;
+
+    /**
+     * 一次派发实际带入的近期窗口资料：按窗口分组的编号与窗口间是否需要间隔提示。
+     * <p>
+     * 只存编号与边界：同链后续轮次按当前有效绑定重新读取正文，并保留首轮的窗口分隔，
+     * 不把两段原本不相连的聊天拼成连续对话。
+     */
+    public record Round(List<List<Long>> groups, boolean timeGap) {
+
+        public Round {
+            groups = groups == null ? List.of() : List.copyOf(groups);
+        }
+
+        public static Round empty() {
+            return new Round(List.of(), false);
+        }
+
+        public boolean isEmpty() {
+            return groups.isEmpty();
+        }
+    }
 
     private OverheardRecallSession(EntityMaid maid, OverheardChatStore store, HistoryContextMode mode,
                                    boolean chinese, Set<Long> effectiveAtPrepare,
@@ -77,23 +100,24 @@ public final class OverheardRecallSession {
     }
 
     /**
-     * 同链后续轮次的本轮资料复用：只持有编号，不复制正文、不持有长期 pin。
+     * 同链后续轮次的本轮资料复用：只持有编号分组与间隔标志，不复制正文、不持有长期 pin。
      * <p>
      * 渲染时按当前有效绑定重新读取；已不存在的编号自然被丢弃，不会把旧轮资料凭空带回。
+     * 窗口分组原样保留，首轮出现在两个不相连窗口之间的间隔提示不会在续轮消失。
      */
-    public static OverheardRecallSession reuse(EntityMaid maid, HistoryContextMode mode, List<Long> ids) {
+    public static OverheardRecallSession reuse(EntityMaid maid, HistoryContextMode mode, Round round) {
         OverheardChatStore store = storeOf(maid);
-        if (store == null || ids == null || ids.isEmpty()) {
+        if (store == null || round == null || round.isEmpty()) {
             return inactive(maid, mode);
         }
         OverheardRecallSession session = new OverheardRecallSession(maid, store, mode, isChinese(maid),
                 effectiveIds(store, maid), null, List.of());
-        session.reusedIds.addAll(ids);
+        session.reusedRound = round;
         return session;
     }
 
-    /** 同链复用的本轮资料编号（由首次正式派发时记录） */
-    private final List<Long> reusedIds = new ArrayList<>();
+    /** 同链复用的本轮资料（由首次正式派发时记录；null 表示不复用） */
+    private Round reusedRound;
 
     private static OverheardChatStore storeOf(EntityMaid maid) {
         if (maid == null || maid.level().getServer() == null) {
@@ -153,18 +177,44 @@ public final class OverheardRecallSession {
         List<OverheardChatStore.RecalledGroup> groups = new ArrayList<>();
         Set<Long> seen = new LinkedHashSet<>();
         Set<Long> rendered = new LinkedHashSet<>();
-        Set<Long> renderedRecent = new LinkedHashSet<>();
+        List<List<Long>> renderedRecent = new ArrayList<>();
         boolean timeGap = false;
         if (recent != null && recent.hasDelta()) {
-            timeGap = recent.timeGap();
             for (OverheardChatStore.RecalledGroup group : recent.renderGroups()) {
                 OverheardChatStore.RecalledGroup kept = dedupe(group, seen);
                 if (kept != null) {
                     groups.add(kept);
                     rendered.addAll(kept.ids());
-                    renderedRecent.addAll(kept.ids());
+                    renderedRecent.add(kept.ids());
                 }
             }
+            // 只有两个近期窗口都真的渲染出来时才输出间隔提示；其中一个整组落空就退回连接区间，
+            // 否则提示会跑到下一组（FULL 自动携带或命中档案）之前
+            timeGap = renderedRecent.size() > 1 && recent.timeGap();
+        }
+        // 同链复用：逐窗口按当前有效绑定重新读取本轮资料，不复制正文；已退出有效的编号不再带回。
+        // 与首轮同一顺序放在其他资料之前，分组边界与间隔标志沿用首轮，
+        // 两个原本不相连的窗口不会在续轮被拼成连续对话
+        List<OverheardChatStore.RecalledGroup> reusedGroups = new ArrayList<>();
+        if (reusedRound != null && !reusedRound.isEmpty()) {
+            Set<Long> stillEffective = effectiveIds(store, maid);
+            for (List<Long> window : reusedRound.groups()) {
+                List<Long> usable = new ArrayList<>(window.size());
+                for (Long id : window) {
+                    if (stillEffective.contains(id)) {
+                        usable.add(id);
+                    }
+                }
+                OverheardChatStore.RecalledGroup kept = usable.isEmpty() ? null : dedupe(
+                        new OverheardChatStore.RecalledGroup(List.copyOf(usable), store.entriesFor(usable)), seen);
+                if (kept != null) {
+                    reusedGroups.add(kept);
+                }
+            }
+        }
+        groups.addAll(reusedGroups);
+        if (reusedGroups.size() > 1) {
+            timeGap = reusedRound.timeGap();
         }
         if (mode == HistoryContextMode.FULL) {
             // 自动携带：读取此刻的有效原文（摘要已退出的编号不会因准备期快照被带回）
@@ -182,26 +232,12 @@ public final class OverheardRecallSession {
                 }
             }
         }
-        // 同链复用：只按当前有效绑定重新读取本轮资料，不复制正文；已退出有效的编号不再带回
-        if (!reusedIds.isEmpty()) {
-            Set<Long> stillEffective = effectiveIds(store, maid);
-            List<Long> usable = new ArrayList<>(reusedIds.size());
-            for (Long id : reusedIds) {
-                if (stillEffective.contains(id)) {
-                    usable.add(id);
-                }
-            }
-            OverheardChatStore.RecalledGroup kept = usable.isEmpty() ? null : dedupe(
-                    new OverheardChatStore.RecalledGroup(List.copyOf(usable), store.entriesFor(usable)), seen);
-            if (kept != null) {
-                groups.add(kept);
-            }
-        }
         // 实际进入请求的主动召回编号：只算真正渲染出来的近期与档案条目，复用与自动携带不计
         injected.clear();
         injected.addAll(rendered);
-        recentInjected.clear();
-        recentInjected.addAll(renderedRecent);
+        renderedRecentGroups.clear();
+        renderedRecentGroups.addAll(renderedRecent);
+        renderedTimeGap = timeGap;
         return OverheardChatContext.renderBlock(groups, timeGap, maid.getOwnerUUID(), chinese);
     }
 
@@ -218,9 +254,9 @@ public final class OverheardRecallSession {
         return kept.isEmpty() ? null : new OverheardChatStore.RecalledGroup(List.copyOf(keptIds), List.copyOf(kept));
     }
 
-    /** 本次实际渲染进请求的近期窗口编号（首次派发时供同链后续轮次复用） */
-    public List<Long> renderedRecentIds() {
-        return List.copyOf(recentInjected);
+    /** 本次实际渲染进请求的近期窗口资料（首次派发时供同链后续轮次复用） */
+    public Round renderedRecentRound() {
+        return new Round(renderedRecentGroups, renderedTimeGap);
     }
 
     /**
