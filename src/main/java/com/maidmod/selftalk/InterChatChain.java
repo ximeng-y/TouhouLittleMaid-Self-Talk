@@ -45,15 +45,19 @@ public final class InterChatChain {
     private final Map<Integer, Participant> participants = new HashMap<>();
     /** 整条链是否已被主人插话中断（响应线程也会检查，中断后不再续接） */
     private volatile boolean interrupted;
+    /** 整条链的近期偷听注入判定（创建时抽一次，链内续接不重抽） */
+    private final boolean overheardRecentHit;
 
-    private InterChatChain(long chainId, EntityMaid first, EntityMaid second) {
-        this(chainId, first.getId(), second.getId());
+    /** 每人链内状态：整条链只抽一次近期偷听注入概率，续接不重抽 */
+    private InterChatChain(long chainId, EntityMaid first, EntityMaid second, boolean overheardRecentHit) {
+        this(chainId, first.getId(), second.getId(), overheardRecentHit);
     }
 
-    private InterChatChain(long chainId, int firstMaidId, int secondMaidId) {
+    private InterChatChain(long chainId, int firstMaidId, int secondMaidId, boolean overheardRecentHit) {
         this.chainId = chainId;
         this.firstMaidId = firstMaidId;
         this.secondMaidId = secondMaidId;
+        this.overheardRecentHit = overheardRecentHit;
     }
 
     /** 每位参与女仆的链内状态 */
@@ -62,6 +66,15 @@ public final class InterChatChain {
         private boolean recallCompleted;
         /** 首次召回的历史块（每项是一块按历史顺序排列的消息） */
         private List<List<LLMMessage>> blocks = List.of();
+        /**
+         * 该女仆在本链的偷听本轮资料编号是否已登记（首次正式派发时记录）。
+         * <p>
+         * 只存编号：同链后续请求按当前有效绑定重新读取正文，作为同一轮背景复用，
+         * 不再次追加有效历史，也不持有长期 pin。
+         */
+        private boolean overheardRoundRecorded;
+        /** 本链该女仆首次派发时实际注入的偷听资料编号 */
+        private List<Long> overheardRoundIds = List.of();
         /**
          * 该女仆在本链的人设召回是否已完成（「未命中/空结果」也算完成）。
          * 与历史召回<b>分别</b>判断：FULL／COMPACT 下历史无需召回，人设结果照样记录与复用。
@@ -134,6 +147,20 @@ public final class InterChatChain {
             return formalPhase;
         }
 
+        /** 本链该女仆首次派发时注入的偷听资料编号（未登记时为空表） */
+        public List<Long> overheardRoundIds() {
+            return overheardRoundIds;
+        }
+
+        /** 登记本链该女仆首次派发时注入的偷听资料编号（同一女仆只生效一次；空表同样算已登记） */
+        private void recordOverheardRound(List<Long> ids) {
+            if (overheardRoundRecorded) {
+                return;
+            }
+            this.overheardRoundRecorded = true;
+            this.overheardRoundIds = ids == null ? List.of() : List.copyOf(ids);
+        }
+
         /** 是否被主人插话禁言 */
         public boolean suppressed() {
             return suppressed;
@@ -142,10 +169,11 @@ public final class InterChatChain {
 
     // ===== 注册表 =====
 
-    /** 新建一条链并登记双方（同一次连续互聊只在发起时调用一次） */
+    /** 新建一条链并登记双方（同一次连续互聊只在发起时调用一次；近期偷听注入概率在此判定一次） */
     public static InterChatChain create(EntityMaid first, EntityMaid second) {
         long id = nextChainId++;
-        InterChatChain chain = new InterChatChain(id, first, second);
+        boolean overheardHit = first.getRandom().nextDouble() < Config.OVERHEARD_INJECT_PROBABILITY.get();
+        InterChatChain chain = new InterChatChain(id, first, second, overheardHit);
         CHAINS.put(id, chain);
         ACTIVE_BY_MAID.put(chain.firstMaidId, id);
         ACTIVE_BY_MAID.put(chain.secondMaidId, id);
@@ -236,7 +264,7 @@ public final class InterChatChain {
     /** 自检：以实体 ID 直接建链，不依赖 EntityMaid 实例 */
     static InterChatChain createForSelfCheck(int firstMaidId, int secondMaidId) {
         long id = nextChainId++;
-        InterChatChain chain = new InterChatChain(id, firstMaidId, secondMaidId);
+        InterChatChain chain = new InterChatChain(id, firstMaidId, secondMaidId, false);
         CHAINS.put(id, chain);
         ACTIVE_BY_MAID.put(firstMaidId, id);
         ACTIVE_BY_MAID.put(secondMaidId, id);
@@ -337,6 +365,22 @@ public final class InterChatChain {
         if (!participant.recallCompleted) {
             participant.completeRecall(recalled);
         }
+    }
+
+    /** 整条链的近期偷听注入判定（创建时抽一次，链内续接不重抽） */
+    public boolean overheardRecentHit() {
+        return overheardRecentHit;
+    }
+
+    /** 该女仆在本链首次派发时注入的偷听资料编号（未登记时为空表） */
+    public List<Long> overheardRoundIds(EntityMaid maid) {
+        Participant participant = participants.get(maid.getId());
+        return participant == null ? List.of() : participant.overheardRoundIds();
+    }
+
+    /** 登记该女仆本链首次派发时注入的偷听资料编号（同一女仆只生效一次；空表也登记） */
+    public void recordOverheardRound(EntityMaid maid, List<Long> ids) {
+        participant(maid).recordOverheardRound(ids);
     }
 
     /**

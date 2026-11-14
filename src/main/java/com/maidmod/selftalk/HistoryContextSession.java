@@ -37,7 +37,15 @@ public final class HistoryContextSession {
 
     /** 成品消息列表的派发口：返回是否真正发出（false 表示放弃本次触发） */
     public interface Dispatcher {
-        boolean dispatch(List<LLMMessage> messages);
+        boolean dispatch(PreparedRequest request);
+    }
+
+    /**
+     * 交给派发口的成品请求：实际消息列表、本次冻结的历史模式与「是否有实际偷听新增／重新召回」标志。
+     * <p>
+     * 该标志来自实际注入编号相对有效集合的增量，不扫描 XML、摘要或旧历史推断。
+     */
+    public record PreparedRequest(List<LLMMessage> messages, HistoryContextMode mode, boolean overheardEvent) {
     }
 
     /**
@@ -65,6 +73,9 @@ public final class HistoryContextSession {
         void reportHistory(List<List<LLMMessage>> blocks);
 
         void reportPersona(MaidPersonaConfig config, List<PersonaFragment> fragments);
+
+        /** 首次正式派发时回报本轮实际注入的偷听资料编号（链内后续轮次复用；空表也回报） */
+        void reportOverheardRound(List<Long> ids);
     }
 
     /**
@@ -74,7 +85,7 @@ public final class HistoryContextSession {
      * （含 {@code <context>} 包装，人设块插在当前情境与感知背景之间）。
      */
     public interface FinalMessageRenderer {
-        String render(String prompt, String personaBlock);
+        String render(String prompt, String personaBlock, String overheardBlock);
     }
 
     /** 链上首次历史检索的成品结果（为空也是成品，不能靠空列表判断「还没算过」） */
@@ -137,6 +148,12 @@ public final class HistoryContextSession {
     private final CachedPersonaRecall cachedPersonaRecall;
     /** 本次会话冻结的人设配置快照（模式 + 四栏） */
     private final MaidPersonaConfig personaConfig;
+    /** 本次请求的偷听资料会话（在登记准备期之后创建，快照随本会话释放） */
+    private OverheardRecallSession overheard;
+    /** 本次是否命中近期召回概率（欢迎语恒为 false；互聊由整条链的判定传入） */
+    private final boolean overheardRecentHit;
+    /** 同链复用：首次正式派发时记录的本轮资料编号（空表表示不复用） */
+    private final List<Long> reusedOverheardIds;
     /** 本轮触发内容（写进规划资料，供模型判断该查什么；可为 null） */
     private final String triggerText;
     /** 派发许可：插话中断、请求作废等情况下返回 false 即放弃 */
@@ -174,6 +191,8 @@ public final class HistoryContextSession {
     private SelfTalkState.State preparationOwner;
     /** 本次会话的历史检索结果是否已回报（回报口只被调用一次） */
     private boolean historyReported;
+    /** 本次会话的偷听本轮资料是否已回报（回报口只被调用一次） */
+    private boolean overheardReported;
     /**
      * 同步路径的收束结果：{@link #start()} 期间内联完成（缓存命中、无历史可检索、
      * 同步发送失败）时置位，由 start 原样回传；异步路径保持 null。
@@ -186,6 +205,7 @@ public final class HistoryContextSession {
                                  List<LLMMessage> systemPrefix, List<LLMMessage> fullHistory,
                                  List<LLMMessage> windowMessages, CachedRecall cachedRecall,
                                  CachedPersonaRecall cachedPersonaRecall, MaidPersonaConfig personaConfig,
+                                 boolean overheardRecentHit, List<Long> reusedOverheardIds,
                                  String triggerText, Supplier<Boolean> stillAllowed, Dispatcher dispatcher,
                                  RecallReporter recallReporter, FinalMessageRenderer finalMessageRenderer,
                                  Runnable onCancelled) {
@@ -202,6 +222,9 @@ public final class HistoryContextSession {
         this.cachedRecall = cachedRecall;
         this.cachedPersonaRecall = cachedPersonaRecall;
         this.personaConfig = personaConfig == null ? MaidPersonaConfig.DEFAULT : personaConfig;
+        this.overheardRecentHit = overheardRecentHit;
+        this.reusedOverheardIds = reusedOverheardIds == null ? List.of() : List.copyOf(reusedOverheardIds);
+        this.overheard = OverheardRecallSession.inactive(maid, mode);
         this.triggerText = triggerText;
         this.stillAllowed = stillAllowed;
         this.dispatcher = dispatcher;
@@ -225,6 +248,8 @@ public final class HistoryContextSession {
         }
         cancelled = true;
         releasePreparation();
+        // 偷听资料只建立短命 pin：取消、失败与提交后都必须幂等释放，不提前写记忆
+        overheard.close();
         if (planning != null) {
             planning.cancel();
             planning = null;
@@ -288,6 +313,11 @@ public final class HistoryContextSession {
         // 登记必须在任何同步或异步准备动作之前：索引构建、关键词规划、纠正与资料选择
         // 都在这之后发生，关闭总开关时才能整体作废这一段准备期
         registerPreparation();
+        // 偷听资料与准备登记同一时点冻结：此后异步索引、规划与纠正都复用这份快照，
+        // 不重新抽概率、不读取新锚点。同链复用只持有编号，按当前绑定重新读取
+        this.overheard = reusedOverheardIds.isEmpty()
+                ? OverheardRecallSession.prepare(maid, overheardRecentHit, mode)
+                : OverheardRecallSession.reuse(maid, mode, reusedOverheardIds);
         switch (mode) {
             case FULL, COMPACT -> {
                 if (needsPersonaRecall()) {
@@ -342,7 +372,7 @@ public final class HistoryContextSession {
         // 同步性判定：indexFor 的回调可能在缓存命中/构建失败时内联执行（此时透传同步派发结果），
         // 也可能在索引重建后异步执行（此时按「已受理」收束）。收束规则：一旦发出规划请求，
         // 本次触发即异步受理；未进入规划请求的路径全部同步透传
-        HistoryRetrievalCache.indexFor(maid, fullHistory, result -> {
+        HistoryRetrievalCache.indexFor(maid, fullHistory, overheard.archivedLibrary(), result -> {
             // 索引可能是在文本执行器线程算完再回主线程的；本回调统一在主线程执行
             if (!allowed()) {
                 // 无许可（含总开关已关闭）：经取消收束并摘除准备登记，迟到的索引结果不再导出发言
@@ -403,7 +433,8 @@ public final class HistoryContextSession {
                 SelfTalkPrompts.buildKeywordPlanInput(language, systemPrefix, planningRecentDialogue(),
                         latestSelfTalkMessage(), windowMessages, environment, triggerText,
                         planningPersonaEnabled ? personaConfig.draft() : null,
-                        planningHistoryEnabled, planningPersonaEnabled, previousOutput, errorText)));
+                        planningHistoryEnabled, planningPersonaEnabled, overheardPlanningMaterial(),
+                        previousOutput, errorText)));
         return messages;
     }
 
@@ -424,10 +455,11 @@ public final class HistoryContextSession {
         List<LLMMessage> recalledBlocks = List.of();
         boolean historyRecalled = false;
         if (historyEnabled && result != null) {
-            List<List<LLMMessage>> blocks = retrieve(plan.historyKeywords(), result);
-            recalledBlocks = SelfTalkHistoryAssembler.flattenBlocks(blocks);
+            Recalled recall = retrieve(plan.historyKeywords(), result);
+            recalledBlocks = SelfTalkHistoryAssembler.flattenBlocks(recall.historyBlocks());
             historyRecalled = !recalledBlocks.isEmpty();
-            reportHistoryRecall(blocks);
+            overheard.recallArchived(recall.overheardGroups());
+            reportHistoryRecall(recall.historyBlocks());
         } else if (mode == HistoryContextMode.RETRIEVAL) {
             if (cachedRecall != null && cachedRecall.completed()) {
                 // 本轮只为另一个目标重新规划（人设变更等），历史召回链上已有成品：
@@ -492,21 +524,36 @@ public final class HistoryContextSession {
         recallReporter.reportPersona(config, fragments);
     }
 
-    /** 按关键词跑 BM25，并把命中块映射回原始历史区消息（按块切分，顺序同历史） */
-    private List<List<LLMMessage>> retrieve(List<String> keywords, HistoryRetrievalCache.Result result) {
+    /** 检索结果：正常聊天块（回原历史区消息）与命中偷听档案分组（按编号） */
+    private record Recalled(List<List<LLMMessage>> historyBlocks, List<List<Long>> overheardGroups) {
+    }
+
+    /**
+     * 按关键词跑 BM25，并把命中块映射回各自来源：正常块回原始历史区消息，偷听块回档案分组编号。
+     * <p>
+     * 合并池最多 3 个完整块，两类共用这一个上限；偷听块不经正常历史列表，作为独立背景资料组装。
+     */
+    private Recalled retrieve(List<String> keywords, HistoryRetrievalCache.Result result) {
         List<DialogueBlock> blocks = result.index().search(keywords);
         if (blocks.isEmpty()) {
-            return List.of();
+            return new Recalled(List.of(), List.of());
         }
         List<List<LLMMessage>> recalled = new ArrayList<>(blocks.size());
+        List<List<Long>> overheardGroups = new ArrayList<>();
         for (DialogueBlock block : blocks) {
+            HistoryRetrievalCache.OverheardCandidate candidate = result.overheardAt(block.startIndex());
+            if (candidate != null) {
+                // 偷听块：回到 store 校验该女仆档案绑定，再由背景块组装，不塞进正常历史列表
+                overheardGroups.add(candidate.ids());
+                continue;
+            }
             List<LLMMessage> messages = SelfTalkHistoryAssembler.selectRecalledMessages(
                     fullHistory, result.searchable(), List.of(block));
             if (!messages.isEmpty()) {
                 recalled.add(messages);
             }
         }
-        return List.copyOf(recalled);
+        return new Recalled(List.copyOf(recalled), List.copyOf(overheardGroups));
     }
 
     // ===== 组装与派发 =====
@@ -532,7 +579,6 @@ public final class HistoryContextSession {
         syncOutcome = outcome;
         return outcome;
     }
-
     /** 链上缓存的历史块需先按当前历史区复核有效性，再按历史顺序展平（与首次检索的成品同构） */
     private List<LLMMessage> flattenAlive(List<List<LLMMessage>> blocks) {
         return SelfTalkHistoryAssembler.flattenBlocks(
@@ -546,13 +592,14 @@ public final class HistoryContextSession {
      * 前一跳尚未交付时就派发，破坏串行语义。
      */
     private StartOutcome dispatchFull(String personaBlock) {
+        String overheardBlock = overheard.block();
         List<LLMMessage> history = rebuildHistoryWithSelfTalk();
         List<LLMMessage> messages = new ArrayList<>(systemPrefix);
         messages.addAll(history);
         messages.addAll(windowMessages);
         String prompt = basePrompt + SelfTalkContexts.latestSelfTalkNote(language, !selfTalkMessages.isEmpty())
                 + SelfTalkContexts.recalledHistoryNote(language, false);
-        messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt, personaBlock)));
+        messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt, personaBlock, overheardBlock)));
         int historyCount = systemPrefix.size() + history.size();
         SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowMessages.size(), sourceIndex);
         return deliver(messages);
@@ -568,6 +615,7 @@ public final class HistoryContextSession {
      */
     private StartOutcome dispatchReduced(List<LLMMessage> recalledBlocks, String personaBlock,
                                          boolean recallNote) {
+        String overheardBlock = overheard.block();
         // 合并视图先建：最新一条自话与它取自同一条记录，两条路径的段标签判据一致
         rebuildHistoryWithSelfTalk();
         LLMMessage latestSelfTalk = latestSelfTalkMessage();
@@ -585,17 +633,18 @@ public final class HistoryContextSession {
                 + SelfTalkContexts.latestSelfTalkNote(language, latestSelfTalk != null)
                 + SelfTalkContexts.recalledHistoryNote(language,
                 recallNote && recalledBlocks != null && !recalledBlocks.isEmpty());
-        messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt, personaBlock)));
+        messages.add(LLMMessage.userChat(maid, renderFinalUserMessage(prompt, personaBlock, overheardBlock)));
         SelfTalkContexts.wrapSegments(maid, messages, historyCount, windowMessages.size(), sourceIndex);
         return deliver(messages);
     }
 
     /** 渲染本轮最终 user message：默认按环境快照渲染；注入了自定义渲染器（如欢迎语）时走调用方口径 */
-    private String renderFinalUserMessage(String prompt, String personaBlock) {
+    private String renderFinalUserMessage(String prompt, String personaBlock, String overheardBlock) {
         if (finalMessageRenderer != null) {
-            return finalMessageRenderer.render(prompt, personaBlock);
+            return finalMessageRenderer.render(prompt, personaBlock, overheardBlock);
         }
-        return SelfTalkContexts.renderConfiguredUserMessage(prompt, language, environment, personaBlock);
+        return SelfTalkContexts.renderConfiguredUserMessage(prompt, language, environment, personaBlock,
+                overheardBlock);
     }
 
     /**
@@ -638,6 +687,28 @@ public final class HistoryContextSession {
         return SelfTalkHistoryAssembler.asRequestMessage(record, sourceIndex);
     }
 
+    /**
+     * 规划资料里的偷听背景：只给本次实际可用的近期片段与该女仆可检索档案的摘要文本，
+     * 不把整份档案或全服其他消息送给模型。没有内容时返回空串（整段省略）。
+     */
+    private String overheardPlanningMaterial() {
+        if (overheard == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        String block = overheard.block();
+        if (!block.isBlank()) {
+            sb.append(block);
+        }
+        for (OverheardChatStore.Group group : overheard.archivedLibrary()) {
+            if (!sb.isEmpty()) {
+                sb.append('\n');
+            }
+            sb.append(group.text());
+        }
+        return sb.toString();
+    }
+
     private boolean allowed() {
         return !dispatched && !cancelled && maid.isAlive()
                 && Config.ENABLED.get()
@@ -655,19 +726,36 @@ public final class HistoryContextSession {
         dispatched = true;
         // 进入正式派发即不再是「待生成准备」：此后关闭总开关不能经本会话取消当前正式回答
         releasePreparation();
-        if (dispatcher.dispatch(messages)) {
+        boolean overheardEvent = overheard.hasEvent();
+        if (dispatcher.dispatch(new PreparedRequest(List.copyOf(messages), mode, overheardEvent))) {
+            // 只有同步派发成功才提交实际带入的编号；ACCEPTED_ASYNC 不是提交条件
+            overheard.commit();
+            reportOverheardRound(overheard.renderedRecentIds());
             settle(true);
+            overheard.close();
             return StartOutcome.DISPATCHED;
         }
         MaidSelfTalkMod.LOGGER.warn("Failed to dispatch history-mode request for maid {}", maid.getId());
         settle(false);
+        overheard.close();
         return StartOutcome.FAILED;
+    }
+
+    /** 首次正式派发时回报本轮实际注入的偷听编号（同链后续轮次复用同一轮背景，不重复追加有效历史） */
+    private void reportOverheardRound(List<Long> ids) {
+        if (recallReporter == null || overheardReported) {
+            return;
+        }
+        overheardReported = true;
+        recallReporter.reportOverheardRound(ids);
     }
 
     /** 派发失败（含被中断／请求作废）时回报空召回：失败同样算「首次检索完成」，链不得继续等待 */
     private void settle(boolean delivered) {
         if (!delivered) {
             reportHistoryRecall(List.of());
+            // 首次派发失败也要回报偷听本轮资料（空表），链不得无限等待首次轮次
+            reportOverheardRound(List.of());
         }
     }
 }

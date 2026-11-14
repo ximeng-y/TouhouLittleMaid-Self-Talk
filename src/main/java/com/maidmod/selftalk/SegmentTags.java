@@ -29,6 +29,10 @@ public final class SegmentTags {
     public static final String SELF_OPEN = "<maid-self-chat>";
     /** 自话/互聊段关闭标签 */
     public static final String SELF_CLOSE = "</maid-self-chat>";
+    /** 偷听聊天背景段开启标签（独立 USER 背景资料，不属于任何一方发言） */
+    public static final String OVERHEARD_OPEN = "<maid-overheard-chat>";
+    /** 偷听聊天背景段关闭标签 */
+    public static final String OVERHEARD_CLOSE = "</maid-overheard-chat>";
 
     // 自定义 Prompt 主人风格段（功能 A）与 Tool 策略段（功能 B）的标签。
     // 能与 SelfTalkPrompts 公共常量对齐的引用之；仅嵌在提示词字符串内的
@@ -49,6 +53,7 @@ public final class SegmentTags {
 
     /** 全部已知标签（精确剥除集合）：旧段标签 + 自定义 Prompt/Tool 策略段标签 */
     private static final String[] KNOWN_TAGS = {OWNER_OPEN, OWNER_CLOSE, SELF_OPEN, SELF_CLOSE,
+            OVERHEARD_OPEN, OVERHEARD_CLOSE,
             OWNER_STYLE_NOTE_OPEN, OWNER_STYLE_NOTE_CLOSE,
             ALL_MAIDS_OPEN, ALL_MAIDS_CLOSE,
             THIS_MAID_OPEN, THIS_MAID_CLOSE,
@@ -59,7 +64,7 @@ public final class SegmentTags {
      * 精确替换漏网时兜底剔除并留痕。仅匹配本 mod 的标签命名空间，避免误伤正文。
      */
     private static final Pattern VARIANT_REG = Pattern.compile(
-            "<\\s*/?\\s*(maid-(owner|self)-chat|owner-style-note|all-maids|this-maid|tool-policy)\\s*>",
+            "<\\s*/?\\s*(maid-(owner|self|overheard)-chat|owner-style-note|all-maids|this-maid|tool-policy)\\s*>",
             Pattern.CASE_INSENSITIVE);
 
     /** 零宽字符（玩家可用其拼接出变体正则不命中的伪标签，多数 LLM tokenizer 会归一化还原） */

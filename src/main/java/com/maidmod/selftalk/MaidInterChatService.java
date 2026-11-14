@@ -103,6 +103,9 @@ public final class MaidInterChatService {
         // 至多一个在途互聊请求，新轮请求压着旧轮（旧轮的迟到回调按自身停止标记沉默，不误伤新轮）
         InterChatRequest request = InterChatRequest.registerFor(maid.getId(), chain.id(), chain);
         chain.registerRequest(maid, request);
+        // 偷听资料：整条链只抽一次近期注入概率（创建时判定，续接不重抽）；
+        // 链内首次发言冻结该参与者自己的近期快照，后续轮次复用首次派发记录的本轮编号
+        List<Long> reusedOverheardIds = chain.overheardRoundIds(maid);
         HistoryContextSession session = new HistoryContextSession(maid, chatManager, site, language,
                 prompt, mode, environment, layout.systemPrefix(), layout.history(), layout.window(),
                 // 链上首次检索结果：已完成（含「结果为空」）则直接复用，不再规划、不再跑 BM25
@@ -110,6 +113,9 @@ public final class MaidInterChatService {
                 // 人设召回结果：同样按链复用，但配置快照一变即失效（人设被改过不能复用旧结果）
                 participant.cachedPersonaRecall(personaConfig),
                 personaConfig,
+                // 已有本轮编号时不再重新抽概率：只按绑定校验复用同一轮背景
+                reusedOverheardIds.isEmpty() && chain.overheardRecentHit(),
+                reusedOverheardIds,
                 // 本轮触发内容（对方发言时连同来源标注；发起者用场合说明）——规划资料据此判断该查什么
                 isResponder ? SelfTalkPrompts.planTriggerPeerMessage(language, peerText)
                         : SelfTalkPrompts.planTriggerInterChatInitiator(language),
@@ -130,6 +136,12 @@ public final class MaidInterChatService {
                     @Override
                     public void reportPersona(MaidPersonaConfig config, List<PersonaFragment> fragments) {
                         chain.completePersonaRecall(maid, config, fragments);
+                    }
+
+                    @Override
+                    public void reportOverheardRound(List<Long> ids) {
+                        // 首次派发记录本轮资料编号：同链后续轮次复用它，不再次追加有效历史
+                        chain.recordOverheardRound(maid, ids);
                     }
                 },
                 null,
@@ -156,8 +168,8 @@ public final class MaidInterChatService {
      * 否则该身份会被后续迟到结果误用。
      */
     private static boolean dispatchInterChat(EntityMaid maid, MaidAIChatManager chatManager, LLMSite site,
-                                             List<LLMMessage> messages, EntityMaid peer, UUID peerMessageId,
-                                             String peerText,
+                                             HistoryContextSession.PreparedRequest prepared, EntityMaid peer,
+                                             UUID peerMessageId, String peerText,
                                              double broadcastRange, boolean isResponder, int chainRound,
                                              boolean toolEnabled, InterChatChain chain, InterChatRequest request) {
         // 正式派发前再复核总开关：关闭时经本轮现有请求取消口收束并返回失败，不建正式回调
@@ -168,7 +180,8 @@ public final class MaidInterChatService {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         state.interChatPending = true;
         state.interChatPendingSinceTick = maid.level().getServer().getTickCount();
-        InterChatCallback callback = new InterChatCallback(chatManager, messages, peer, peerMessageId, peerText,
+        InterChatCallback callback = new InterChatCallback(chatManager, prepared.messages(), peer, peerMessageId,
+                peerText,
                 broadcastRange, isResponder, chainRound, toolEnabled, chain, request,
                 SelfTalkRequestToken.capture(maid.getId()));
         // 构造器已创建等待气泡：先登记资源，再调用可能同步失败的外部客户端。
