@@ -23,10 +23,9 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.ModifyArgs;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
-import org.spongepowered.asm.mixin.injection.invoke.arg.Args;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -136,20 +135,20 @@ public abstract class MaidAIChatDataMixin implements AutonomousChatHistoryHost {
      * 两次读取之间可能发生容量淘汰或新消息入队，下标就对不上了。
      * 只读观察，不改参数、不复制列表、不自行编码。
      */
-    @ModifyArgs(method = "writeToTag", remap = false,
+    @ModifyArg(method = "writeToTag", remap = false, index = 1,
             at = @At(value = "INVOKE",
                     target = "Lcom/mojang/serialization/Codec;encodeStart(Lcom/mojang/serialization/DynamicOps;Ljava/lang/Object;)Lcom/mojang/serialization/DataResult;"))
-    private void maid_self_talk$captureSerializedSnapshot(Args args) {
-        // 接收者不计入 Args 下标：参数 0 是 DynamicOps，参数 1 是实际 List<LLMMessage>
-        Object encoded = args.get(1);
+    private Object maid_self_talk$captureSerializedSnapshot(Object encoded) {
+        // 参数 1 是实际 List<LLMMessage>；只记录引用，原样返回待编码参数
         if (encoded instanceof List<?> list) {
             @SuppressWarnings("unchecked")
             List<LLMMessage> snapshot = (List<LLMMessage>) list;
             maid_self_talk$pendingSnapshot = snapshot;
         }
+        return encoded;
     }
 
-    /** TLM 本次写出的历史快照（由上面的重定向在编码前填入，writeToTag 返回后即被使用并清空） */
+    /** TLM 本次写出的历史快照（由上面的参数观察钩子在编码前填入，writeToTag 返回后即被使用并清空） */
     @Unique
     private List<LLMMessage> maid_self_talk$pendingSnapshot;
 

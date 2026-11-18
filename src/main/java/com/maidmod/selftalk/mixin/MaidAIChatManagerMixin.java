@@ -9,6 +9,7 @@ import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMClient;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.LLMMessage;
 import com.github.tartaricacid.touhoulittlemaid.ai.service.llm.Role;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.llamalad7.mixinextras.sugar.Local;
 import com.maidmod.selftalk.AutonomousChatHistoryMigration;
 import com.maidmod.selftalk.ContextLanguage;
 import com.maidmod.selftalk.InterChatChain;
@@ -32,10 +33,9 @@ import org.apache.commons.lang3.StringUtils;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.ModifyArgs;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
-import org.spongepowered.asm.mixin.injection.invoke.arg.Args;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -48,7 +48,7 @@ import java.util.List;
  *   <li>HEAD：把互聊窗口内容拼接进本次请求的 messages（此刻 TLM 刚构建完 [system 设定, 摘要, ...历史]，
  *       尚未 append 玩家新消息），并就地包裹段标签（历史+窗口）；
  *       使玩家 chat 上下文 = 对话历史（含自话）+ 互聊记录 + 玩家的话；</li>
- *   <li>@ModifyArgs {@code List.add}：保留其他增强已经构造好的消息，仅修饰真实玩家 USER 正文，
+ *   <li>@ModifyArg {@code List.add}：保留其他增强已经构造好的消息，仅修饰真实玩家 USER 正文，
  *       注入主人声明与段标签（前端无感：TLM 仍以原始话写历史）；</li>
  *   <li>派发前绑定实际回调，TAIL 激活本轮玩家登记；自话/互聊触发时若有登记则跳过；
  *       清空自话/互聊计数窗口（打断连续、计数重新开始。自话记录已写入 TLM 历史、
@@ -66,11 +66,12 @@ import java.util.List;
 public abstract class MaidAIChatManagerMixin {
 
     /** 正常聊天及历史压缩后的恢复都经过这一边界；每次输入获得独立来源载体。 */
-    @ModifyArgs(method = "tryToChat", remap = false,
+    // Forge 使用单参数注入，避免动态 Args 子类。
+    @ModifyArg(method = "tryToChat", remap = false, index = 1,
             at = @At(value = "INVOKE", remap = false,
                     target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/manager/entity/MaidAIChatManager;normalChat(Ljava/lang/String;Ljava/util/List;Lcom/github/tartaricacid/touhoulittlemaid/ai/service/llm/LLMClient;)V"))
-    private void maid_self_talk$markPlayerSource(Args args) {
-        args.set(1, PlayerChatContext.fromPlayer(args.<List<LLMMessage>>get(1)));
+    private List<LLMMessage> maid_self_talk$markPlayerSource(List<LLMMessage> messages) {
+        return PlayerChatContext.fromPlayer(messages);
     }
 
     /**
@@ -234,15 +235,15 @@ public abstract class MaidAIChatManagerMixin {
      * 保持双线同构；NeoForge 线的 sponge-mixin fork（0.15.2+mixin.0.8.7）校验为单向
      * （仅禁止非 static handler 注入 static 目标），static 写法不致崩，但约定统一。
      */
-    @ModifyArgs(method = "normalChat", remap = false,
+    @ModifyArg(method = "normalChat", remap = false, index = 0,
             at = @At(value = "INVOKE", remap = false,
                     target = "Ljava/util/List;add(Ljava/lang/Object;)Z"))
-    private void maid_self_talk$wrapOwnerChat(Args args, String message,
-                                             List<LLMMessage> messages, LLMClient chatClient) {
+    private Object maid_self_talk$wrapOwnerChat(Object message,
+                                               @Local(argsOnly = true) List<LLMMessage> messages) {
         PlayerChatContext.Source source = PlayerChatContext.sourceOf(messages);
-        LLMMessage original = args.get(0);
+        LLMMessage original = (LLMMessage) message;
         if (source == null || original.role() != Role.USER) {
-            return;
+            return message;
         }
         EntityMaid maid = ((MaidAIChatManager) (Object) this).getMaid();
         // 声明语言与背景模板同一判定口径：sanitizeLanguage 校验、ContextLanguage 分类（大小写不敏感）
@@ -253,25 +254,25 @@ public abstract class MaidAIChatManagerMixin {
         // 有效偷听原文是独立 USER 背景资料：不受自动聊天历史模式与总开关影响，不抽概率、不新增档案。
         // 只在本参数增强里读取一次，随后与 OWNER 段分开包裹
         source.setOverheardBlock(OverheardChatContext.effectiveBlock(maid, chinese));
-        args.set(0, PlayerChatContext.decorateOwner(original, source, declaration,
-                UserPromptContexts.CONTEXT_REG));
+        return PlayerChatContext.decorateOwner(original, source, declaration,
+                UserPromptContexts.CONTEXT_REG);
     }
 
     /** 读取实际派发回调，只准备登记；不替换回调，也不提前增加在途数量。 */
-    @ModifyArgs(method = "normalChat", remap = false,
+    @ModifyArg(method = "normalChat", remap = false, index = 0,
             at = @At(value = "INVOKE", remap = false,
                     target = "Lcom/github/tartaricacid/touhoulittlemaid/ai/service/llm/LLMClient;chat(Lcom/github/tartaricacid/touhoulittlemaid/ai/manager/entity/LLMCallback;)V"))
-    private void maid_self_talk$preparePlayerRequest(Args args, String message,
-                                                    List<LLMMessage> messages, LLMClient chatClient) {
+    private LLMCallback maid_self_talk$preparePlayerRequest(LLMCallback callback,
+                                                           @Local(argsOnly = true) List<LLMMessage> messages) {
         PlayerChatContext.Source source = PlayerChatContext.sourceOf(messages);
         if (source == null) {
-            return;
+            return callback;
         }
         EntityMaid maid = ((MaidAIChatManager) (Object) this).getMaid();
         PlayerChatRequest request = new PlayerChatRequest(SelfTalkState.get(maid.getId()).playerChats);
         source.prepare(request);
-        LLMCallback callback = args.get(0);
         ((PlayerChatRequestHost) callback).maid_self_talk$setPlayerChatRequest(request);
+        return callback;
     }
 
     @Inject(method = "normalChat", remap = false, at = @At("TAIL"))
