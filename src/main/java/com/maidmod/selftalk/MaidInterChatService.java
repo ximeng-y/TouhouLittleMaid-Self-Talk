@@ -62,7 +62,7 @@ public final class MaidInterChatService {
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         List<LLMMessage> windowCopy = new ArrayList<>(state.windowInterChatMsgs.size());
         for (SelfTalkState.InterChatWindowEntry entry : state.windowInterChatMsgs) {
-            windowCopy.add(entry.message());
+            windowCopy.add(renderWindowMessage(entry));
         }
         for (LLMMessage wm : windowCopy) { messages.add(wm); }
         windowCount += windowCopy.size();
@@ -71,11 +71,13 @@ public final class MaidInterChatService {
             // 不能按正文相等判定——双方重复说出相同文字属于不同消息
             boolean alreadyInWindow = peerMessageId != null && containsMessageId(state, peerMessageId);
             if (!alreadyInWindow) {
-                messages.add(LLMMessage.assistantChat(maid, peerText));
+                messages.add(renderWindowMessage(peerMessageId, LLMMessage.assistantChat(maid, peerText),
+                        peer, maid));
                 windowCount++;
             }
         }
-        String prompt = isResponder ? SelfTalkPrompts.INTER_CHAT_RESPONDER : SelfTalkPrompts.INTER_CHAT_INITIATOR;
+        String prompt = (isResponder ? SelfTalkPrompts.INTER_CHAT_RESPONDER : SelfTalkPrompts.INTER_CHAT_INITIATOR)
+                + SelfTalkPrompts.interChatIdentityBlock(maid, peer, peerMessageId, isResponder);
         // 拼装顺序与自话同构：硬编码提示词 + 语言指令 + Tool 策略段(互聊约束行) + 自定义 Prompt
         prompt = prompt + SelfTalkContexts.languageInstruction(language)
                 + SelfTalkContexts.toolPolicyBlock(maid, language, true)
@@ -229,8 +231,8 @@ public final class MaidInterChatService {
      *
      * @return 新建的档案记录；女仆无可写档案时返回 null（调用方据此放弃续接）
      */
-    public static AutonomousChatRecord addInterChatMessage(EntityMaid maid, String text) {
-        return archive(maid, maid.getUUID(), AutonomousChatHistoryHost.displayNameOf(maid), text);
+    public static AutonomousChatRecord addInterChatMessage(EntityMaid maid, EntityMaid receiver, String text) {
+        return archive(maid, receiver, maid.getUUID(), AutonomousChatHistoryHost.displayNameOf(maid), text);
     }
 
     /**
@@ -249,7 +251,7 @@ public final class MaidInterChatService {
         }
         AutonomousChatRecord copy = archive.appendCopy(message);
         if (copy != null) {
-            addWindowEntry(peer, copy);
+            addWindowEntry(peer, copy, peer);
         }
     }
 
@@ -260,23 +262,59 @@ public final class MaidInterChatService {
      * 按消息身份判定是否已在窗口里：同一条消息重复补齐无意义，
      * 而重复说出相同文字属于不同消息，必须各自保留。
      */
-    public static void syncPeerMessageToWindow(EntityMaid maid, UUID messageId, String peerText) {
-        if (peerText == null || peerText.isBlank() || messageId == null) return;
+    public static void syncPeerMessageToWindow(EntityMaid maid, EntityMaid peer, UUID messageId,
+                                               String peerText) {
+        if (peer == null || peerText == null || peerText.isBlank() || messageId == null) return;
         SelfTalkState.State state = SelfTalkState.get(maid.getId());
         if (containsMessageId(state, messageId)) {
             return;
         }
         state.windowInterChatMsgs.add(new SelfTalkState.InterChatWindowEntry(messageId,
-                LLMMessage.assistantChat(maid, peerText)));
+                LLMMessage.assistantChat(maid, peerText),
+                peer.getUUID(), AutonomousChatHistoryHost.displayNameOf(peer),
+                maid.getUUID(), AutonomousChatHistoryHost.displayNameOf(maid)));
         trimInterChatWindow(state);
     }
 
     /** 把一条档案记录对应的消息写进本人运行时窗口 */
-    private static void addWindowEntry(EntityMaid maid, AutonomousChatRecord record) {
-        SelfTalkState.State state = SelfTalkState.get(maid.getId());
+    private static void addWindowEntry(EntityMaid windowOwner, AutonomousChatRecord record,
+                                       EntityMaid receiver) {
+        SelfTalkState.State state = SelfTalkState.get(windowOwner.getId());
         state.windowInterChatMsgs.add(new SelfTalkState.InterChatWindowEntry(record.id(),
-                LLMMessage.assistantChat(maid, record.chatText())));
+                LLMMessage.assistantChat(windowOwner, record.chatText()),
+                record.speakerId(), record.speakerName(),
+                receiver == null ? null : receiver.getUUID(),
+                AutonomousChatHistoryHost.displayNameOf(receiver)));
         trimInterChatWindow(state);
+    }
+
+    /** 为请求副本添加历史消息身份头，不改窗口中的原消息或档案正文 */
+    static LLMMessage renderWindowMessage(SelfTalkState.InterChatWindowEntry entry) {
+        return renderWindowMessage(entry.id(), entry.message(), entry.speakerId(), entry.speakerName(),
+                entry.receiverId(), entry.receiverName());
+    }
+
+    static LLMMessage renderWindowMessage(UUID messageId, LLMMessage message,
+                                          EntityMaid speaker, EntityMaid receiver) {
+        return renderWindowMessage(messageId, message,
+                speaker == null ? null : speaker.getUUID(),
+                speaker == null ? "" : AutonomousChatHistoryHost.displayNameOf(speaker),
+                receiver == null ? null : receiver.getUUID(),
+                receiver == null ? "" : AutonomousChatHistoryHost.displayNameOf(receiver));
+    }
+
+    private static LLMMessage renderWindowMessage(UUID messageId, LLMMessage message,
+                                                  UUID speakerId, String speakerName,
+                                                  UUID receiverId, String receiverName) {
+        String rendered = "Inter-chat history\n"
+                + "Message UUID: " + messageId + "\n"
+                + "Speaker: " + SelfTalkPrompts.singleLineName(speakerName) + " (" + speakerId + ")\n"
+                + "Receiver at the time: " + SelfTalkPrompts.singleLineName(receiverName)
+                + " (" + receiverId + ")\n"
+                + "Original message:\n"
+                + message.message();
+        return new LLMMessage(message.role(), rendered, message.gameTime(),
+                message.toolCalls(), message.toolCallId());
     }
 
     /** 该消息身份是否已在本人运行时窗口中 */
@@ -293,14 +331,15 @@ public final class MaidInterChatService {
     }
 
     /** 归档一条互聊消息并返回记录（无档案时为 null） */
-    private static AutonomousChatRecord archive(EntityMaid maid, UUID speakerId, String speakerName, String text) {
+    private static AutonomousChatRecord archive(EntityMaid maid, EntityMaid receiver,
+                                                UUID speakerId, String speakerName, String text) {
         AutonomousChatHistory archive = AutonomousChatHistoryHost.of(maid);
         if (archive == null) {
             return null;
         }
         AutonomousChatRecord record = archive.append(AutonomousChatRecord.Source.INTER_CHAT, speakerId, speakerName,
                 maid.level().getGameTime(), text, text);
-        addWindowEntry(maid, record);
+        addWindowEntry(maid, record, receiver);
         return record;
     }
 
@@ -317,7 +356,7 @@ public final class MaidInterChatService {
             return;
         }
         for (SelfTalkState.InterChatWindowEntry entry : state.windowInterChatMsgs) {
-            messages.add(entry.message());
+            messages.add(renderWindowMessage(entry));
         }
     }
 

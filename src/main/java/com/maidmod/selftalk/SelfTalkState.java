@@ -125,12 +125,14 @@ public final class SelfTalkState {
     }
 
     /**
-     * 互聊窗口条目：一条互聊消息连同它的消息身份。
+     * 互聊窗口条目：一条互聊消息连同它的消息身份与发言时的真实收发双方。
      * <p>
-     * 窗口是运行时数据（重启不复活），身份来自档案记录——同一条消息在本女仆档案与
+     * 窗口是运行时数据（重启不复活），消息身份来自档案记录——同一条消息在双方档案与
      * 窗口里是同一个 UUID，因此入站补齐与去重都按身份判定。
      */
-    public record InterChatWindowEntry(UUID id, LLMMessage message) {
+    public record InterChatWindowEntry(UUID id, LLMMessage message,
+                                       UUID speakerId, String speakerName,
+                                       UUID receiverId, String receiverName) {
     }
 
     /**
