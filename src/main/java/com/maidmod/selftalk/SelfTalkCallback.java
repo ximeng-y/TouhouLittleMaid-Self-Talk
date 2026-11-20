@@ -16,6 +16,7 @@ import net.minecraftforge.common.MinecraftForge;
 
 import javax.annotation.Nullable;
 import java.net.http.HttpRequest;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -84,7 +85,7 @@ public class SelfTalkCallback extends LLMCallback {
                             boolean welcome, int keepSelfTalkCount, double broadcastRange, boolean toolEnabled,
                             SelfTalkRequestToken token, SelfTalkReuseService.ArchiveData archiveData,
                             boolean reusedSource, @Nullable PrebuiltAudioContext prebuiltAudio) {
-        super(chatManager, messages);
+        super(chatManager, new ArrayList<>(messages));
         this.welcome = welcome;
         this.keepSelfTalkCount = keepSelfTalkCount;
         this.broadcastRange = broadcastRange;

@@ -102,7 +102,7 @@ public final class MaidSelfTalkService {
         SelfTalkState.State chatState = SelfTalkState.get(maid.getId());
         List<LLMMessage> interWindow = new ArrayList<>(chatState.windowInterChatMsgs.size());
         for (SelfTalkState.InterChatWindowEntry entry : chatState.windowInterChatMsgs) {
-            interWindow.add(entry.message());
+            interWindow.add(MaidInterChatService.renderWindowMessage(entry));
         }
         for (LLMMessage wm : interWindow) {
             messages.add(wm);

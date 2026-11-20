@@ -60,7 +60,7 @@ public class InterChatCallback extends LLMCallback {
                              EntityMaid peer, UUID peerMessageId, String peerText,
                              double broadcastRange, boolean isResponder, int chainRound, boolean toolEnabled,
                              InterChatChain chain, InterChatRequest request, SelfTalkRequestToken token) {
-        super(chatManager, messages);
+        super(chatManager, new ArrayList<>(messages));
         this.peer = peer;
         this.peerMessageId = peerMessageId;
         this.peerText = peerText;
@@ -257,9 +257,9 @@ public class InterChatCallback extends LLMCallback {
             // 两者都按消息身份判定，重复说出相同文字属于不同消息，绝不做正文去重。
             if (isResponder && peerText != null && !peerText.isBlank() && peerMessageId != null) {
                 // 只补窗口，不再次归档：该发言已由对方（或其投递）写进本人档案
-                MaidInterChatService.syncPeerMessageToWindow(maid, peerMessageId, peerText);
+                MaidInterChatService.syncPeerMessageToWindow(maid, peer, peerMessageId, peerText);
             }
-            AutonomousChatRecord own = MaidInterChatService.addInterChatMessage(maid, chatText);
+            AutonomousChatRecord own = MaidInterChatService.addInterChatMessage(maid, peer, chatText);
             if (own != null && peer != null && peer.isAlive() && peer.level() instanceof ServerLevel) {
                 // 不往已被主人插话、已开启新聊天的对方档案与窗口补写它未收到的发言
                 if (chain == null || chain.canDeliver(peer)) {
